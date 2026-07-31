@@ -225,6 +225,10 @@ def test_sample_euler_beam_validates_sizes():
         sample_euler_beam(model, x_0, LinearScheduler(), n_steps=0)
     with pytest.raises(ValueError, match="n_children"):
         sample_euler_beam(model, x_0, LinearScheduler(), n_children=0)
+    with pytest.raises(ValueError, match="changed_state_bonus"):
+        sample_euler_beam(
+            model, x_0, LinearScheduler(), changed_state_bonus=-0.1,
+        )
 
 
 def test_child_seed_is_stable_distinct_and_m1_compatible():
@@ -263,6 +267,28 @@ def test_state_merge_uses_logsumexp_mass_not_path_probability():
     assert [tuple(branch.x_t[0, 1:].tolist()) for branch in ranked] == [(4,), (5,)]
     assert math.isclose(ranked[0].log_mass, math.log(0.6), abs_tol=1e-12)
     assert ranked[0].seed == 1
+
+
+def test_changed_state_bonus_favors_changed_state_without_altering_mass():
+    from edit_flows.sampling.euler_beam import _merge_state_candidates
+
+    unchanged = _BranchState(
+        torch.tensor([[BOS_TOKEN, 4]]), log_mass=math.log(0.6), seed=1,
+    )
+    changed = _BranchState(
+        torch.tensor([[BOS_TOKEN, 5]]), log_mass=math.log(0.4), seed=2,
+    )
+    no_bonus = _merge_state_candidates(
+        [(unchanged.clone(), (4,)), (changed.clone(), (5,))],
+        n_branches=2, origin_key=(4,), changed_state_bonus=0.0,
+    )
+    with_bonus = _merge_state_candidates(
+        [(unchanged.clone(), (4,)), (changed.clone(), (5,))],
+        n_branches=2, origin_key=(4,), changed_state_bonus=0.5,
+    )
+    assert no_bonus[0].seed == 1
+    assert with_bonus[0].seed == 2
+    assert math.isclose(with_bonus[0].log_mass, math.log(0.4))
 
 
 def test_m1_default_matches_explicit_and_m4_keeps_parent_forward_batch(monkeypatch):

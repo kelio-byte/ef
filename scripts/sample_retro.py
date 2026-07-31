@@ -83,6 +83,9 @@ def main():
                         default="full_probability",
                         choices=["full_probability", "legacy_triggered_reverse"],
                         help="Euler-Beam scoring mode; legacy is only for ablation")
+    parser.add_argument("--euler_beam_changed_state_bonus", type=float,
+                        default=0.0,
+                        help="Fixed search bonus for states changed from the product")
     parser.add_argument("--beam_size", type=int, default=5,
                         help="Beam size for beam_edit sampler")
     parser.add_argument("--max_edits", type=int, default=20,
@@ -264,6 +267,7 @@ def main():
                     use_origin_mask=use_origin_mask,
                     sample_seeds=sample_seeds,
                     score_mode=args.euler_beam_score_mode,
+                    changed_state_bonus=args.euler_beam_changed_state_bonus,
                 )
             elif args.sampler == "greedy_edit":
                 results = sample_greedy_single_edit(

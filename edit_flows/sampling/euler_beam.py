@@ -113,6 +113,8 @@ def _logaddexp_float(a: float, b: float) -> float:
 def _merge_state_candidates(
     candidates: List[Tuple[_BranchState, Tuple[int, ...]]],
     n_branches: int,
+    origin_key: Optional[Tuple[int, ...]] = None,
+    changed_state_bonus: float = 0.0,
 ) -> List[_BranchState]:
     """按 token 状态合并 Monte Carlo 质量并保留 Top-K。"""
     merged: Dict[Tuple[int, ...], _BranchState] = {}
@@ -131,9 +133,17 @@ def _merge_state_candidates(
         else:
             representative.log_mass = combined_mass
             representative.weight += branch.weight
-    return sorted(
-        merged.values(), key=_branch_sort_key, reverse=True,
-    )[:n_branches]
+    ranked_items = sorted(
+        merged.items(),
+        key=lambda item: (
+            item[1].log_mass
+            + changed_state_bonus * float(item[0] != origin_key),
+            item[1].log_mass,
+            -float(item[1].seed),
+        ),
+        reverse=True,
+    )
+    return [branch for _, branch in ranked_items[:n_branches]]
 
 
 def _token_key(x_t: Tensor, pad_token: int, bos_token: int) -> Tuple[int, ...]:
@@ -378,6 +388,7 @@ def sample_euler_beam(
     base_seed: int = 42,             # 基础随机种子 (分支 k 得到 base_seed + k)
     sample_seeds: Optional[List[int]] = None,
     score_mode: str = "full_probability",
+    changed_state_bonus: float = 0.0,
     record_trajectory: bool = False, # 未实现, 预留
     record_all_events: bool = False, # 未实现, 预留
     x_1: Optional[Tensor] = None,    # 未使用, 预留 (与 sample_euler 接口对齐)
@@ -392,6 +403,7 @@ def sample_euler_beam(
         n_children: 每个父分支生成的独立随机后继数。
         n_steps: Euler 步数 (与 sample_euler 一致)。
         base_seed: 基础随机种子。
+        changed_state_bonus: 给非原始 token 状态的固定搜索先验；0 表示禁用。
 
     Returns:
         x_final: (B, L_out) 每条样本的最优分支, PAD 填充到等长。
@@ -415,6 +427,10 @@ def sample_euler_beam(
         )
     if score_mode not in ("full_probability", "legacy_triggered_reverse"):
         raise ValueError(f"Unsupported score_mode: {score_mode}")
+    if changed_state_bonus < 0:
+        raise ValueError(
+            f"changed_state_bonus must be >= 0, got {changed_state_bonus}"
+        )
 
     if score_mode == "legacy_triggered_reverse":
         sort_key = _legacy_branch_sort_key
@@ -426,6 +442,10 @@ def sample_euler_beam(
     device = next(model.parameters()).device
     B = x_0.shape[0]
     default_h = 1.0 / n_steps
+    origin_keys = [
+        _token_key(x_0[b:b + 1], pad_token, bos_token)
+        for b in range(B)
+    ]
 
     # ── 初始化: 每条样本创建 n_branches 条分支 ──
     all_branches: List[List[_BranchState]] = []
@@ -592,7 +612,10 @@ def sample_euler_beam(
             if n_children > 1 and score_mode == "full_probability":
                 paired = list(zip(candidates, new_keys[b]))
                 all_branches[b] = _merge_state_candidates(
-                    paired, n_branches,
+                    paired,
+                    n_branches,
+                    origin_key=origin_keys[b],
+                    changed_state_bonus=changed_state_bonus,
                 )
                 continue
 
@@ -634,7 +657,10 @@ def sample_euler_beam(
     # ── 返回每条样本的最优分支 ──
     results: List[Tensor] = []
     for b in range(B):
-        best = max(all_branches[b], key=sort_key)
+        if n_children > 1 and score_mode == "full_probability":
+            best = all_branches[b][0]
+        else:
+            best = max(all_branches[b], key=sort_key)
         results.append(best.x_t)
 
     out_len = max(r.shape[1] for r in results)
