@@ -116,12 +116,20 @@ def test_step_log_p_is_finite_for_extreme_rates():
         assert math.isfinite(result)
 
 
-def test_branch_sort_prefers_larger_log_probability_then_weight():
-    high = _BranchState(torch.tensor([[BOS_TOKEN, 4]]), path_log_p=-2.0, weight=1.0)
-    low = _BranchState(torch.tensor([[BOS_TOKEN, 5]]), path_log_p=-10.0, weight=100.0)
+def test_branch_sort_prefers_state_mass_then_stable_seed():
+    high = _BranchState(
+        torch.tensor([[BOS_TOKEN, 4]]), path_log_p=-2.0,
+        log_mass=-1.0, seed=10,
+    )
+    low = _BranchState(
+        torch.tensor([[BOS_TOKEN, 5]]), path_log_p=-10.0, log_mass=-3.0,
+    )
     assert max([low, high], key=_branch_sort_key) is high
-    heavier = _BranchState(torch.tensor([[BOS_TOKEN, 6]]), path_log_p=-2.0, weight=2.0)
-    assert max([high, heavier], key=_branch_sort_key) is heavier
+    stable = _BranchState(
+        torch.tensor([[BOS_TOKEN, 6]]), path_log_p=-100.0,
+        log_mass=-1.0, seed=1,
+    )
+    assert max([high, stable], key=_branch_sort_key) is stable
 
 
 class _StochasticModel(torch.nn.Module):
@@ -199,6 +207,86 @@ def test_sample_euler_beam_validates_sizes():
         sample_euler_beam(model, x_0, LinearScheduler(), n_branches=0)
     with pytest.raises(ValueError, match="n_steps"):
         sample_euler_beam(model, x_0, LinearScheduler(), n_steps=0)
+    with pytest.raises(ValueError, match="n_children"):
+        sample_euler_beam(model, x_0, LinearScheduler(), n_children=0)
+
+
+def test_child_seed_is_stable_distinct_and_m1_compatible():
+    from edit_flows.sampling.euler_beam import _mix_child_seed
+
+    assert _mix_child_seed(123, step=7, child_index=0) == 123
+    values = {
+        _mix_child_seed(parent, step, child)
+        for parent in range(100, 200)
+        for step in range(4)
+        for child in range(1, 5)
+    }
+    assert len(values) == 100 * 4 * 4
+    assert _mix_child_seed(123, 7, 2) == _mix_child_seed(123, 7, 2)
+    assert _mix_child_seed(123, 7, 2) != _mix_child_seed(123, 8, 2)
+
+
+def test_state_merge_uses_logsumexp_mass_not_path_probability():
+    from edit_flows.sampling.euler_beam import _merge_state_candidates
+
+    shared_a = _BranchState(
+        torch.tensor([[BOS_TOKEN, 4]]), path_log_p=-100.0,
+        log_mass=math.log(0.3), seed=1,
+    )
+    shared_b = _BranchState(
+        torch.tensor([[BOS_TOKEN, 4]]), path_log_p=-2.0,
+        log_mass=math.log(0.3), seed=2,
+    )
+    other = _BranchState(
+        torch.tensor([[BOS_TOKEN, 5]]), path_log_p=-1.0,
+        log_mass=math.log(0.4), seed=3,
+    )
+    ranked = _merge_state_candidates([
+        (shared_a, (4,)), (shared_b, (4,)), (other, (5,)),
+    ], n_branches=2)
+    assert [tuple(branch.x_t[0, 1:].tolist()) for branch in ranked] == [(4,), (5,)]
+    assert math.isclose(ranked[0].log_mass, math.log(0.6), abs_tol=1e-12)
+    assert ranked[0].seed == 1
+
+
+def test_m1_default_matches_explicit_and_m4_keeps_parent_forward_batch(monkeypatch):
+    import edit_flows.sampling.euler_beam as beam_module
+
+    class CountingModel(_StochasticModel):
+        def __init__(self):
+            super().__init__()
+            self.batch_sizes = []
+
+        def forward(self, tokens, time_step, padding_mask, origin_mask=None):
+            self.batch_sizes.append(tokens.shape[0])
+            return super().forward(tokens, time_step, padding_mask, origin_mask)
+
+    x_0 = torch.tensor([[BOS_TOKEN, 4, 5, PAD_TOKEN]])
+    common = dict(
+        scheduler=LinearScheduler(), n_branches=3, n_steps=2,
+        max_seq_len=32, base_seed=77,
+    )
+    default = sample_euler_beam(_StochasticModel(), x_0, **common)
+    explicit = sample_euler_beam(
+        _StochasticModel(), x_0, n_children=1, **common,
+    )
+    assert torch.equal(default, explicit)
+
+    sampled_batch_sizes = []
+    original_sampler = beam_module._sample_actions_per_branch
+
+    def recording_sampler(branch_seeds, x_t, *args, **kwargs):
+        sampled_batch_sizes.append(x_t.shape[0])
+        return original_sampler(branch_seeds, x_t, *args, **kwargs)
+
+    monkeypatch.setattr(
+        beam_module, "_sample_actions_per_branch", recording_sampler,
+    )
+    model = CountingModel()
+    sample_euler_beam(model, x_0, n_children=4, **common)
+    assert model.batch_sizes[0] == 3
+    assert sampled_batch_sizes[0] == 3 * 4
+    assert all(size <= 3 for size in model.batch_sizes)
 
 
 def test_stateless_uniform_is_reproducible_distinct_and_order_independent():
@@ -300,13 +388,15 @@ def test_batch_apply_edits_matches_individual_application():
     assert torch.equal(batch_result, expected)
 
 
-def test_sample_seeds_match_individual_runs_and_validate_length():
+@pytest.mark.parametrize("n_children", [1, 4])
+def test_sample_seeds_match_individual_runs_and_validate_length(n_children):
     model = _StochasticModel()
     x_single = torch.tensor([[BOS_TOKEN, 4, 5, 6, PAD_TOKEN]])
     x_batch = x_single.repeat(3, 1)
     seeds = [42, 1042, 2042]
     common = dict(
-        scheduler=LinearScheduler(), n_branches=3, n_steps=4, max_seq_len=32,
+        scheduler=LinearScheduler(), n_branches=3, n_children=n_children,
+        n_steps=4, max_seq_len=32,
     )
     batched = sample_euler_beam(
         model, x_batch, sample_seeds=seeds, **common,

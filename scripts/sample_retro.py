@@ -75,6 +75,8 @@ def main():
                         help="Sampling algorithm (default: euler)")
     parser.add_argument("--n_branches", type=int, default=5,
                         help="并行分支数 (euler_beam)")
+    parser.add_argument("--n_children", type=int, default=1,
+                        help="每个父分支每步生成的后继数 (euler_beam)")
     parser.add_argument("--n_runs", type=int, default=1,
                         help="每个产物独立运行次数 (euler_beam, 等价于 Euler 的 --n_samples)")
     parser.add_argument("--euler_beam_score_mode", type=str,
@@ -208,7 +210,8 @@ def main():
     if args.sampler == "beam_edit":
         print(f"  beam_size={args.beam_size}")
     if args.sampler == "euler_beam":
-        print(f"  n_branches={args.n_branches}, n_runs={args.n_runs}")
+        print(f"  n_branches={args.n_branches}, "
+              f"n_children={args.n_children}, n_runs={args.n_runs}")
 
     try:
         for batch_idx in tqdm(range(n_batches), desc="Batches"):
@@ -250,6 +253,7 @@ def main():
                 results = sample_euler_beam(
                     model, x_0, kappa_scheduler,
                     n_branches=args.n_branches,
+                    n_children=args.n_children,
                     n_steps=n_sampling_steps,
                     max_seq_len=cfg["max_seq_len"],
                     use_rate_reparam=cfg.get("use_rate_reparam", False),
@@ -322,7 +326,8 @@ def main():
     if args.output_dir:
         if args.sampler == "euler_beam":
             print(f"Done. Total predictions: {n_products * args.n_runs} "
-                  f"(n_branches={args.n_branches}, n_runs={args.n_runs})")
+                  f"(n_branches={args.n_branches}, "
+                  f"n_children={args.n_children}, n_runs={args.n_runs})")
         else:
             print(f"Done. Total predictions: {n_products * args.n_samples}")
         print(f"Saved to: {pred_file}")

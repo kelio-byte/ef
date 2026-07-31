@@ -36,19 +36,21 @@ from edit_flows.utils.tokens import BOS_TOKEN, PAD_TOKEN
 class _BranchState:
     """单条分支的轻量可变状态。"""
 
-    __slots__ = ("x_t", "weight", "path_log_p", "t", "seed")
+    __slots__ = ("x_t", "weight", "path_log_p", "log_mass", "t", "seed")
 
     def __init__(
         self,
         x_t: Tensor,         # (1, L) 当前 token 序列
         weight: float = 1.0, # 共识权重（多分支汇聚 = 高权重）
         path_log_p: float = 0.0,  # 编辑路径累计 log-prob（≤0，越大越好）
+        log_mass: float = 0.0,  # Monte Carlo 估计的状态概率质量
         t: float = 0.0,      # 当前连续时间
         seed: int = 0,       # 随机种子
     ):
         self.x_t = x_t
         self.weight = weight
         self.path_log_p = path_log_p
+        self.log_mass = log_mass
         self.t = t
         self.seed = seed
 
@@ -57,6 +59,7 @@ class _BranchState:
             x_t=self.x_t.clone(),
             weight=self.weight,
             path_log_p=self.path_log_p,
+            log_mass=self.log_mass,
             t=self.t,
             seed=self.seed,
         )
@@ -68,13 +71,64 @@ class _BranchState:
 
 
 def _branch_sort_key(br: _BranchState) -> Tuple[float, float]:
-    """分支排序键：路径 log-prob 越大越好，共识权重作为次键。"""
-    return (br.path_log_p, br.weight)
+    """正式排序：只按聚合状态质量；seed 提供确定性平局顺序。"""
+    return (br.log_mass, -float(br.seed))
 
 
 def _legacy_branch_sort_key(br: _BranchState) -> Tuple[float, float]:
     """旧实验排序：累计触发分数越负，反而排名越高。仅用于消融。"""
     return (-br.path_log_p, br.weight)
+
+
+def _mix_child_seed(parent_seed: int, step: int, child_index: int) -> int:
+    """稳定混合 child seed；child 0 保留父随机流以兼容 M=1。"""
+    if child_index < 0:
+        raise ValueError(f"child_index must be >= 0, got {child_index}")
+    if child_index == 0:
+        return int(parent_seed)
+    mask = (1 << 64) - 1
+    x = (
+        (int(parent_seed) & mask)
+        ^ (((step + 1) * 0x9E3779B97F4A7C15) & mask)
+        ^ (((child_index + 1) * 0xD1B54A32D192ED03) & mask)
+    )
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9 & mask
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EB & mask
+    x ^= x >> 31
+    return x & ((1 << 63) - 1)
+
+
+def _logaddexp_float(a: float, b: float) -> float:
+    """稳定计算两个 Python log-weight 的 logsumexp。"""
+    high = max(a, b)
+    low = min(a, b)
+    return high + math.log1p(math.exp(low - high))
+
+
+def _merge_state_candidates(
+    candidates: List[Tuple[_BranchState, Tuple[int, ...]]],
+    n_branches: int,
+) -> List[_BranchState]:
+    """按 token 状态合并 Monte Carlo 质量并保留 Top-K。"""
+    merged: Dict[Tuple[int, ...], _BranchState] = {}
+    for branch, key in candidates:
+        if key not in merged:
+            merged[key] = branch
+            continue
+        representative = merged[key]
+        combined_mass = _logaddexp_float(
+            representative.log_mass, branch.log_mass,
+        )
+        if branch.seed < representative.seed:
+            branch.log_mass = combined_mass
+            branch.weight += representative.weight
+            merged[key] = branch
+        else:
+            representative.log_mass = combined_mass
+            representative.weight += branch.weight
+    return sorted(
+        merged.values(), key=_branch_sort_key, reverse=True,
+    )[:n_branches]
 
 
 def _token_key(x_t: Tensor, pad_token: int, bos_token: int) -> Tuple[int, ...]:
@@ -224,7 +278,7 @@ def _sample_tokens_from_uniform(log_probs: Tensor, uniform: Tensor) -> Tensor:
 
 
 def _sample_actions_per_branch(
-    flat: List[Tuple[int, int, _BranchState]],
+    branch_seeds: Tensor,
     x_t: Tensor,
     log_rates: Tensor,
     log_ins_probs: Tensor,
@@ -235,11 +289,7 @@ def _sample_actions_per_branch(
     step: int,
 ) -> dict:
     """按 branch seed 无状态、批量地采样所有分支动作。"""
-    seeds = torch.tensor(
-        [branch.seed for _, _, branch in flat],
-        dtype=torch.int64,
-        device=x_t.device,
-    )
+    seeds = branch_seeds.to(device=x_t.device, dtype=torch.int64)
     rates = torch.exp(log_rates)
     ins_probs = torch.exp(log_ins_probs)
     sub_probs = torch.exp(log_sub_probs)
@@ -308,6 +358,7 @@ def sample_euler_beam(
     x_0: Tensor,                     # (B, L_0) — 含 BOS, PAD 填充
     scheduler: KappaScheduler,
     n_branches: int = 5,             # 每条样本维护的并行分支数
+    n_children: int = 1,             # 每个父分支每步采样的后继数
     n_steps: int = 100,              # Euler 步数
     max_seq_len: int = 512,          # 序列最大长度
     pad_token: int = PAD_TOKEN,
@@ -333,6 +384,7 @@ def sample_euler_beam(
         model: EditFlowsTransformer 模型。
         x_0: (B, L_0) 初始序列。
         n_branches: 每条样本最多维护的并行分支数。
+        n_children: 每个父分支生成的独立随机后继数。
         n_steps: Euler 步数 (与 sample_euler 一致)。
         base_seed: 基础随机种子。
 
@@ -341,6 +393,8 @@ def sample_euler_beam(
     """
     if n_branches < 1:
         raise ValueError(f"n_branches must be >= 1, got {n_branches}")
+    if n_children < 1:
+        raise ValueError(f"n_children must be >= 1, got {n_children}")
     if n_steps < 1:
         raise ValueError(f"n_steps must be >= 1, got {n_steps}")
     if x_0.shape[0] < 1:
@@ -379,6 +433,7 @@ def sample_euler_beam(
         for k in range(n_branches):
             branches.append(_BranchState(
                 x_t=x_0[b:b + 1].to(device),
+                log_mass=(-math.log(n_branches) if n_children > 1 else 0.0),
                 t=0.0,
                 seed=sample_seed + k,
             ))
@@ -453,35 +508,72 @@ def sample_euler_beam(
             lsp_br[i, :L] = log_sub_probs[i, :L]
             branch_t_vals[i, 0] = s.t
 
-        # 批量计算自适应步长；动作按分支私有 RNG 采样
+        # 批量计算父分支步长。模型前向规模始终是 K；仅模型输出和动作
+        # 张量扩展为 K×M，避免重复 Transformer forward。
         adapt_h_br = get_adaptive_h(default_h, branch_t_vals, scheduler)
+        parent_index_values = [
+            parent_i
+            for parent_i in range(N_br)
+            for _ in range(n_children)
+        ]
+        parent_indices = torch.tensor(
+            parent_index_values, dtype=torch.long, device=device,
+        )
+        x_candidates = x_br.index_select(0, parent_indices)
+        lr_candidates = lr_br.index_select(0, parent_indices)
+        lip_candidates = lip_br.index_select(0, parent_indices)
+        lsp_candidates = lsp_br.index_select(0, parent_indices)
+        adapt_h_candidates = adapt_h_br.index_select(0, parent_indices)
+        child_seed_values = [
+            _mix_child_seed(branch.seed, step, child_index)
+            for _, _, branch in flat
+            for child_index in range(n_children)
+        ]
+        child_seeds = torch.tensor(
+            child_seed_values, dtype=torch.int64, device=device,
+        )
         actions_batch = _sample_actions_per_branch(
-            flat, x_br, lr_br, lip_br, lsp_br, adapt_h_br,
+            child_seeds,
+            x_candidates,
+            lr_candidates,
+            lip_candidates,
+            lsp_candidates,
+            adapt_h_candidates,
             pad_token=pad_token, event_prob_mode=event_prob_mode,
             step=step,
         )
 
         # 6. 批量计分、应用编辑，并各自一次性传回 CPU 元数据
         step_log_ps = _step_log_p_batch(
-            actions_batch, lr_br, lip_br, lsp_br, adapt_h_br,
+            actions_batch,
+            lr_candidates,
+            lip_candidates,
+            lsp_candidates,
+            adapt_h_candidates,
             score_mode=score_mode,
         ).cpu().tolist()
-        adapt_h_values = adapt_h_br.squeeze(-1).cpu().tolist()
+        adapt_h_values = adapt_h_candidates.squeeze(-1).cpu().tolist()
         x_next_batch = _apply_edits_batch(
-            x_br, actions_batch, max_seq_len, pad_token,
+            x_candidates, actions_batch, max_seq_len, pad_token,
         )
         x_next_cpu = x_next_batch.cpu()
 
         new_branches: Dict[int, List[_BranchState]] = {b: [] for b in range(B)}
         new_keys: Dict[int, List[Tuple[int, ...]]] = {b: [] for b in range(B)}
 
-        for i, (b, k, s) in enumerate(flat):
+        child_log_share = math.log(n_children)
+        for i, parent_i in enumerate(parent_index_values):
+            b, k, s = flat[parent_i]
             new_branches[b].append(_BranchState(
                 x_t=x_next_batch[i:i + 1],
                 weight=s.weight,
                 path_log_p=s.path_log_p + step_log_ps[i],
+                log_mass=(
+                    s.log_mass - child_log_share
+                    if n_children > 1 else s.log_mass
+                ),
                 t=s.t + adapt_h_values[i],
-                seed=s.seed,
+                seed=child_seed_values[i],
             ))
             new_keys[b].append(
                 _token_key(x_next_cpu[i:i + 1], pad_token, bos_token)
@@ -490,6 +582,13 @@ def sample_euler_beam(
         # 7. 逐样本: 去重、排序、剪枝、分裂
         for b in range(B):
             candidates = new_branches[b]
+
+            if n_children > 1 and score_mode == "full_probability":
+                paired = list(zip(candidates, new_keys[b]))
+                all_branches[b] = _merge_state_candidates(
+                    paired, n_branches,
+                )
+                continue
 
             # 7a. 合并相同 token 序列的分支
             # 仅在不同分支汇聚到相同结果时合并。如果所有分支都相同（尚未发散），
@@ -512,7 +611,9 @@ def sample_euler_beam(
                 ranked = sorted(merged.values(), key=sort_key, reverse=True)
             all_branches[b] = ranked[:n_branches]
 
-            # 7b. 不足 n_branches 条时从最高 rank 分支分裂补充
+            # M=1 兼容路径保留旧机械复制；M>1 已有真实 offspring，不复制。
+            if n_children > 1:
+                continue
             while len(all_branches[b]) < n_branches:
                 parent_idx = len(all_branches[b]) % max(len(all_branches[b]), 1)
                 parent = all_branches[b][parent_idx]
