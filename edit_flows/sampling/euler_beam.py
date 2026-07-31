@@ -306,8 +306,6 @@ def _sample_actions_per_branch(
     """按 branch seed 无状态、批量地采样所有分支动作。"""
     seeds = branch_seeds.to(device=x_t.device, dtype=torch.int64)
     rates = torch.exp(log_rates)
-    ins_probs = torch.exp(log_ins_probs)
-    sub_probs = torch.exp(log_sub_probs)
     lambda_ins = rates[:, :, 0]
     lambda_sub = rates[:, :, 1]
     lambda_del = rates[:, :, 2]
@@ -351,14 +349,11 @@ def _sample_actions_per_branch(
     ins_tokens = ins_tokens.masked_fill(~non_pad_mask, pad_token)
     sub_tokens = sub_tokens.masked_fill(~non_pad_mask, pad_token)
     return {
-        "rates": rates,
         "ins_mask": ins_mask,
         "del_mask": del_mask,
         "sub_mask": sub_mask,
         "ins_tokens": ins_tokens,
         "sub_tokens": sub_tokens,
-        "ins_probs": ins_probs,
-        "sub_probs": sub_probs,
     }
 
 
@@ -515,24 +510,14 @@ def sample_euler_beam(
             clamp_kappa=clamp_kappa, clamp_max=clamp_max,
         )
 
-        # 5. 批量采样 (一次 GPU 调用覆盖所有分支)
+        # 5. 直接复用模型父 batch。模型已经把 PAD 位置屏蔽为 -1e9，
+        # 无需再分配并逐行复制 x/rates/token-probs 的同形张量。
         N_br = len(flat)
-        max_L_br = max(s.x_t.shape[1] for _, _, s in flat)
-        V = log_ins_probs.shape[-1]
-
-        x_br = torch.full((N_br, max_L_br), pad_token, dtype=torch.long, device=device)
-        lr_br = torch.full((N_br, max_L_br, 3), -1e9, device=device, dtype=log_rates_eff.dtype)
-        lip_br = torch.full((N_br, max_L_br, V), -1e9, device=device, dtype=log_ins_probs.dtype)
-        lsp_br = torch.full((N_br, max_L_br, V), -1e9, device=device, dtype=log_sub_probs.dtype)
-        branch_t_vals = torch.zeros(N_br, 1, device=device)
-
-        for i, (_, _, s) in enumerate(flat):
-            L = s.x_t.shape[1]
-            x_br[i, :L] = s.x_t
-            lr_br[i, :L] = log_rates_eff[i, :L]
-            lip_br[i, :L] = log_ins_probs[i, :L]
-            lsp_br[i, :L] = log_sub_probs[i, :L]
-            branch_t_vals[i, 0] = s.t
+        x_br = x_batch
+        lr_br = log_rates_eff
+        lip_br = log_ins_probs
+        lsp_br = log_sub_probs
+        branch_t_vals = t_vals
 
         # 批量计算父分支步长。模型前向规模始终是 K；仅模型输出和动作
         # 张量扩展为 K×M，避免重复 Transformer forward。

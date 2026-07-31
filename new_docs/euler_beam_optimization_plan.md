@@ -560,7 +560,7 @@ Invalid rank 1/2/3：13.0% / 14.1% / 13.1%
 
 ## 10. 任务 4：K×M 候选编辑与评分向量化
 
-状态：`[ ] 未开始`
+状态：`[x] K×M 编辑/评分批量化与父 batch 复用完成`
 
 ### 提前完成的局部优化
 
@@ -571,11 +571,11 @@ Invalid rank 1/2/3：13.0% / 14.1% / 13.1%
 
 ### 当前低效点
 
-- 随机动作按分支逐个调用。
+- [x] 随机动作已使用 branch-keyed 无状态 GPU batch RNG。
 - [x] `_apply_edits_batch()` 已一次处理全部分支。
 - [x] `_step_log_p_batch()` 已一次处理全部分支并批量同步。
 - [x] 候选 token 已一次传到 CPU 后再构造 `_token_key()`。
-- `x_batch` 与 `x_br` 存在重复构造。
+- [x] `x_batch` 与 `x_br` 的重复构造已删除。
 
 ### 目标结构
 
@@ -589,19 +589,28 @@ Invalid rank 1/2/3：13.0% / 14.1% / 13.1%
 
 ### 实施要求
 
-- [ ] K×M 个 substitution 一次应用。
-- [ ] `apply_ins_del_operations()` 一次处理 K×M 个候选。
-- [ ] 一次计算所有候选 step log-prob。
-- [ ] 一次将候选 token batch 传到 CPU 去重。
-- [ ] 合并 `x_batch` 与 `x_br` 的重复构造。
-- [ ] 保留分支独立、顺序无关的随机语义。
+- [x] K×M 个 substitution 一次应用。
+- [x] `apply_ins_del_operations()` 一次处理 K×M 个候选。
+- [x] 一次计算所有候选 step log-prob。
+- [x] 一次将候选 token batch 传到 CPU 去重。
+- [x] 合并 `x_batch` 与 `x_br` 的重复构造。
+- [x] 保留分支独立、顺序无关的随机语义。
 
 ### 随机数策略
 
-第一阶段允许仅随机数生成保留小循环，其余计算全部向量化。Profiling 后再决定
-是否实现基于 `(seed, step, child, position, stream)` 的无状态 GPU RNG。
+已实现基于 `(seed, step, child, position, stream)` 的无状态 GPU RNG；模型前向保持
+父状态 K，动作、评分和编辑为 K×M batch。
 
-结果：待填写。
+结果（2026-07-31）：
+
+- 删除父级 `x_br/lr_br/lip_br/lsp_br/t_vals` 的重复分配和逐行复制，直接复用模型
+  输入及已屏蔽 PAD 的模型输出。
+- 删除采样器中从未被后续消费的 `ins_probs/sub_probs` 指数张量和返回值。
+- 对优化前 commit `efaad03`，分别在 M=1/M=2、真实 checkpoint、K=3、20 步下
+  逐字节比较 predictions，结果完全一致。
+- Euler/Euler-Beam/编辑算子针对性测试：`47 passed`。
+- 100 增广行短性能（K=3,M=2,n_runs=3,n_steps=100）：26.924 秒 → 22.775 秒，
+  加速约 15.4%；完整 predictions 逐字节一致。
 
 ---
 
