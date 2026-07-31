@@ -1,0 +1,43 @@
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Jupyter and editor state
+.ipynb_checkpoints/
+.claude/
+.vscode/
+.idea/
+
+# Local environments and secrets
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Model weights and large archives
+*.pt
+*.pth
+*.ckpt
+*.zip
+*.tar
+*.tar.gz
+
+# Local datasets, generated predictions, and visualizations
+datasets/
+results/
+visualizations/
+test_sample/
+
+# Runtime output
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,22 @@
+default:
+  vocab_size: 128
+  hidden_dim: 512
+  num_layers: 8
+  num_heads: 8
+  dim_feedforward: 2048
+  max_seq_len: 512
+  dropout: 0.1
+
+  batch_size: 128
+  learning_rate: 0.0001
+  total_steps: 3000
+
+  scheduler: cubic
+  coupling: empty
+  align_fn: opt
+  use_rate_reparam: false
+
+  min_seq_len: 32
+  max_seq_len: 128
+
+  n_sampling_steps: 100
