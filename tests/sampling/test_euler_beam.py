@@ -468,6 +468,18 @@ def test_make_batch_is_product_major():
     assert not torch.equal(batch[2], batch[3])
 
 
+def test_cli_sample_seeds_are_independent_of_batching_and_branch_count():
+    from scripts.sample_retro import _make_euler_beam_sample_seeds
+
+    whole = _make_euler_beam_sample_seeds(42, 0, 7, 3)
+    split = (
+        _make_euler_beam_sample_seeds(42, 0, 4, 3)
+        + _make_euler_beam_sample_seeds(42, 4, 3, 3)
+    )
+    assert whole == split
+    assert len(set(whole)) == len(whole)
+
+
 def test_legacy_score_mode_matches_triggered_only_reference():
     from edit_flows.sampling.euler_beam import (
         _legacy_branch_sort_key,

@@ -15,7 +15,7 @@ from tqdm import tqdm
 from edit_flows.data.dataset import load_vocab
 from edit_flows.models.transformer import EditFlowsTransformer
 from edit_flows.sampling.euler import sample_euler
-from edit_flows.sampling.euler_beam import sample_euler_beam
+from edit_flows.sampling.euler_beam import _mix_child_seed, sample_euler_beam
 from edit_flows.sampling.beam import sample_greedy_single_edit, sample_beam_single_edit
 from edit_flows.sampling.time_policy import (
     DepthTimePolicy, FixedTimePolicy, RatioTimePolicy, KappaTimePolicy,
@@ -44,6 +44,20 @@ def _make_batch(product_ids: list[list[int]], n_samples: int,
     for i, ids in enumerate(product_ids):
         x_0[i, 1:1 + len(ids)] = torch.tensor(ids, dtype=torch.long)
     return x_0.repeat_interleave(n_samples, dim=0)
+
+
+def _make_euler_beam_sample_seeds(
+    base_seed: int,
+    global_start: int,
+    n_products: int,
+    n_runs: int,
+) -> list[int]:
+    """构造不依赖 n_branches 和 batch 划分的 product/run seeds。"""
+    return [
+        _mix_child_seed(base_seed, global_start + i, r + 1)
+        for i in range(n_products)
+        for r in range(n_runs)
+    ]
 
 
 def main():
@@ -248,11 +262,9 @@ def main():
                 B_prod = end - start
                 # _make_batch uses repeat_interleave, so rows are product-major:
                 # P0R0, P0R1, ..., P1R0, P1R1, ...
-                sample_seeds = [
-                    args.seed + r * 1000 + i * args.n_branches
-                    for i in range(B_prod)
-                    for r in range(args.n_runs)
-                ]
+                sample_seeds = _make_euler_beam_sample_seeds(
+                    args.seed, start, B_prod, args.n_runs,
+                )
                 results = sample_euler_beam(
                     model, x_0, kappa_scheduler,
                     n_branches=args.n_branches,
