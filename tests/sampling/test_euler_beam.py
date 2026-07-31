@@ -132,6 +132,22 @@ def test_branch_sort_prefers_state_mass_then_stable_seed():
     assert max([high, stable], key=_branch_sort_key) is stable
 
 
+def test_m1_trajectory_sort_preserves_pre_task3_behavior():
+    from edit_flows.sampling.euler_beam import _trajectory_branch_sort_key
+
+    high = _BranchState(
+        torch.tensor([[BOS_TOKEN, 4]]), path_log_p=-2.0, weight=1.0,
+    )
+    low = _BranchState(
+        torch.tensor([[BOS_TOKEN, 5]]), path_log_p=-10.0, weight=100.0,
+    )
+    assert max([low, high], key=_trajectory_branch_sort_key) is high
+    heavier = _BranchState(
+        torch.tensor([[BOS_TOKEN, 6]]), path_log_p=-2.0, weight=2.0,
+    )
+    assert max([high, heavier], key=_trajectory_branch_sort_key) is heavier
+
+
 class _StochasticModel(torch.nn.Module):
     def __init__(self, vocab_size=16):
         super().__init__()

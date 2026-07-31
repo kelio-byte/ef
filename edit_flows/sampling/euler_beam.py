@@ -75,6 +75,11 @@ def _branch_sort_key(br: _BranchState) -> Tuple[float, float]:
     return (br.log_mass, -float(br.seed))
 
 
+def _trajectory_branch_sort_key(br: _BranchState) -> Tuple[float, float]:
+    """M=1 兼容排序：完整单轨迹 log-prob 越大越好。"""
+    return (br.path_log_p, br.weight)
+
+
 def _legacy_branch_sort_key(br: _BranchState) -> Tuple[float, float]:
     """旧实验排序：累计触发分数越负，反而排名越高。仅用于消融。"""
     return (-br.path_log_p, br.weight)
@@ -411,11 +416,12 @@ def sample_euler_beam(
     if score_mode not in ("full_probability", "legacy_triggered_reverse"):
         raise ValueError(f"Unsupported score_mode: {score_mode}")
 
-    sort_key = (
-        _legacy_branch_sort_key
-        if score_mode == "legacy_triggered_reverse"
-        else _branch_sort_key
-    )
+    if score_mode == "legacy_triggered_reverse":
+        sort_key = _legacy_branch_sort_key
+    elif n_children == 1:
+        sort_key = _trajectory_branch_sort_key
+    else:
+        sort_key = _branch_sort_key
 
     device = next(model.parameters()).device
     B = x_0.shape[0]
