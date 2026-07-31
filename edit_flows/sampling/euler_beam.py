@@ -126,13 +126,18 @@ def _merge_state_candidates(
         combined_mass = _logaddexp_float(
             representative.log_mass, branch.log_mass,
         )
+        best_path_log_p = max(
+            representative.path_log_p, branch.path_log_p,
+        )
         if branch.seed < representative.seed:
             branch.log_mass = combined_mass
             branch.weight += representative.weight
+            branch.path_log_p = best_path_log_p
             merged[key] = branch
         else:
             representative.log_mass = combined_mass
             representative.weight += branch.weight
+            representative.path_log_p = best_path_log_p
     ranked_items = sorted(
         merged.items(),
         key=lambda item: (
@@ -577,7 +582,7 @@ def sample_euler_beam(
             b, k, s = flat[parent_i]
             new_branches[b].append(_BranchState(
                 x_t=x_next_batch[i:i + 1],
-                weight=s.weight,
+                weight=(1.0 if n_children > 1 else s.weight),
                 path_log_p=s.path_log_p + step_log_ps[i],
                 log_mass=(
                     s.log_mass - child_log_share

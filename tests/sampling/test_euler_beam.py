@@ -267,6 +267,47 @@ def test_state_merge_uses_logsumexp_mass_not_path_probability():
     assert [tuple(branch.x_t[0, 1:].tolist()) for branch in ranked] == [(4,), (5,)]
     assert math.isclose(ranked[0].log_mass, math.log(0.6), abs_tol=1e-12)
     assert ranked[0].seed == 1
+    assert ranked[0].path_log_p == -2.0
+    assert ranked[0].weight == 2.0
+
+
+def test_state_merge_is_order_independent():
+    from edit_flows.sampling.euler_beam import _merge_state_candidates
+
+    specs = [
+        ((4,), math.log(0.2), -4.0, 8),
+        ((5,), math.log(0.3), -3.0, 4),
+        ((4,), math.log(0.1), -2.0, 2),
+        ((6,), math.log(0.4), -5.0, 6),
+    ]
+
+    def build(order):
+        return [
+            (
+                _BranchState(
+                    torch.tensor([[BOS_TOKEN, key[0]]]),
+                    log_mass=mass, path_log_p=path, seed=seed,
+                ),
+                key,
+            )
+            for key, mass, path, seed in (specs[i] for i in order)
+        ]
+
+    forward = _merge_state_candidates(build(range(4)), n_branches=3)
+    reverse = _merge_state_candidates(build(reversed(range(4))), n_branches=3)
+    forward_summary = [
+        (branch.x_t[0, 1].item(), branch.log_mass, branch.path_log_p, branch.seed)
+        for branch in forward
+    ]
+    reverse_summary = [
+        (branch.x_t[0, 1].item(), branch.log_mass, branch.path_log_p, branch.seed)
+        for branch in reverse
+    ]
+    assert [row[0] for row in forward_summary] == [row[0] for row in reverse_summary]
+    for left, right in zip(forward_summary, reverse_summary):
+        assert left[0] == right[0]
+        assert math.isclose(left[1], right[1], abs_tol=1e-12)
+        assert left[2:] == right[2:]
 
 
 def test_changed_state_bonus_favors_changed_state_without_altering_mass():

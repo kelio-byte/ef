@@ -616,57 +616,53 @@ Invalid rank 1/2/3：13.0% / 14.1% / 13.1%
 
 ## 11. 任务 5：重构合并与候选评分语义
 
-状态：`[ ] 未开始`
+状态：`[x] 状态质量、最佳路径与本轮共识计数语义已分离并验证`
 
 ### 合并 key
 
-当前 checkpoint 不使用 origin mask。第一版合并状态至少包含：
+当前 checkpoint 不使用 origin mask。候选只在同一离散 Euler step 内合并，因此 key 为：
 
 ```text
-token sequence
-discrete step
+token sequence（外层循环已经固定 discrete step）
 ```
 
 避免直接使用浮点 `t` 作为哈希 key。
 
 ### 状态分数
 
-计划区分：
+当前已区分：
 
 ```text
-best_path_log_p：到达该状态的最佳单路径概率
-log_mass：不同有效路径的 logsumexp 概率质量
-consensus_count：本轮到达该状态的候选数量
+best_path_log_p：到达该状态的最佳单路径概率，仅诊断
+log_mass：等权 Monte Carlo offspring 的聚合概率质量，正式主分数
+consensus_count：本轮到达该状态的 child 数量，仅诊断
 ```
 
-完全相同的 `(parent_state_id, action_signature)` 重复样本不能被误认为不同数学
-路径并重复累加概率。
+这里的 child 是独立 Monte Carlo 抽样，不是精确 action 枚举。完全相同 action 被多次
+抽中时，频次本身就是目标状态概率的估计证据，应分别贡献 `parent_mass/M`；若未来改成
+确定性 action 枚举，才需要按 `(parent_state_id, action_signature)` 去重避免重复计数。
 
 ### 分阶段排序
 
-第一阶段：
-
 ```text
-主键：best_path_log_p
-次键：consensus_count
-```
-
-概率质量定义验证完成后，再评估：
-
-```text
-主键：log_mass
-次键：best_path_log_p
+主键：log_mass + changed_state_bonus * I[state != product]
+平局：稳定 seed（不重复使用 action probability）
 ```
 
 ### 验收标准
 
-- [ ] 同一结果的多条不同路径正确聚合。
-- [ ] 完全重复动作不重复计算路径质量。
-- [ ] 合并结果不依赖候选输入顺序。
-- [ ] 排序具有稳定 tie-break。
-- [ ] 运行固定基准。
+- [x] 同一结果的多个独立 Monte Carlo child 用 `logsumexp` 正确聚合。
+- [x] `best_path_log_p` 保留最大值，不再取决于代表分支 seed。
+- [x] consensus count 只统计本轮 child，不复制父分支历史 count。
+- [x] 合并结果不依赖候选输入顺序。
+- [x] 排序具有稳定 tie-break。
+- [x] 运行固定基准（复用任务 3 的 58/64/66 全量结果）。
 
-结果：待填写。
+结果（2026-07-31）：
+
+- 新增正序/逆序候选合并测试，总计 `48 passed`。
+- 对任务 4 commit `d7fc40c` 使用真实 checkpoint、K=3,M=2、30 步逐字节比较输出，
+  predictions 完全一致；本任务只修复诊断语义，不改变正式搜索结果。
 
 ---
 
