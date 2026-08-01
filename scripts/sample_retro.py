@@ -100,6 +100,10 @@ def main():
     parser.add_argument("--euler_beam_changed_state_bonus", type=float,
                         default=0.0,
                         help="Fixed search bonus for states changed from the product")
+    parser.add_argument("--euler_beam_matmul_precision", type=str,
+                        default="highest", choices=["highest", "high"],
+                        help=("Float32 matmul precision for CUDA Euler-Beam; "
+                              "'high' enables TF32 on supported GPUs"))
     parser.add_argument("--beam_size", type=int, default=5,
                         help="Beam size for beam_edit sampler")
     parser.add_argument("--max_edits", type=int, default=20,
@@ -130,6 +134,10 @@ def main():
     args = parser.parse_args()
 
     device = torch.device(args.device)
+    if args.sampler == "euler_beam" and device.type == "cuda":
+        torch.set_float32_matmul_precision(
+            args.euler_beam_matmul_precision
+        )
 
     ckpt = torch.load(args.checkpoint, map_location=device)
     cfg = ckpt["config"]
@@ -228,7 +236,8 @@ def main():
         print(f"  beam_size={args.beam_size}")
     if args.sampler == "euler_beam":
         print(f"  n_branches={args.n_branches}, "
-              f"n_children={args.n_children}, n_runs={args.n_runs}")
+              f"n_children={args.n_children}, n_runs={args.n_runs}, "
+              f"matmul_precision={args.euler_beam_matmul_precision}")
 
     try:
         for batch_idx in tqdm(range(n_batches), desc="Batches"):
