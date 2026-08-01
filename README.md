@@ -293,18 +293,26 @@ python scripts/train_retro.py \
 (原始反应, augmentation, run/rank)
 ```
 
-当前评分器在参数正确时可以复现历史结果，但有几项已知限制：
+评分器现在会严格检查 prediction、target、augmentation 和 beam size 的布局；默认
+拒绝静默截断，仅在显式指定 `--length` 时允许评分完整的文件前缀。Top-N 可以报告到
+`n_best`，而 input rank 不存在时不再把它解释成 RDKit invalid。
 
-1. 预测行数不能整除 `augmentation * beam_size` 时会静默截断；
-2. 没有严格检查预测、target、augmentation 和 beam size 是否一致；
-3. 聚合排序用一个很大的常数优先保证“任意 augmentation 中的最好局部排名”，跨增强
-   出现频率只在最好局部排名相同时起主要作用；
-4. `Unique Rates` 统计的是截断后的排名列表，不是真正的原始候选唯一率，甚至可能
-   超过 100%；
-5. 输出的 Top-N 行数受 `beam_size` 限制，即使跨增强聚合后存在更多候选。
+可用以下参数增加不改变排名语义的采样诊断：
 
-因此下一阶段首先增加严格输入校验和 oracle/覆盖率诊断，默认保持原聚合规则不变，
-避免因更换评分规则破坏历史可比性。规划见
+```bash
+python 'scripts/score_#global#.py' \
+    ... \
+    --diagnostics \
+    --diagnostics_json results/bench_beam/diagnostics.json
+```
+
+诊断包括 Oracle-any、已覆盖但未进入 Top-3 的数量、每个 run 的命中/invalid/重复率、
+真实唯一候选数和 run 两两 Jaccard overlap。旧 `Unique Rates` 为保持历史日志兼容继续
+输出，但它基于 `rank[:n_best]`，不是真正的原始采样多样性，可能超过 100%。
+
+当前仍保留一项重要的历史评分假设：聚合排序用一个很大的常数优先保证“任意
+augmentation 中的最好局部排名”，跨增强出现频率只在最好局部排名相同时起主要作用。
+在完成覆盖—排序归因前不改变该默认规则，避免破坏历史可比性。规划见
 [`new_docs/euler_beam_next_stage_plan.md`](new_docs/euler_beam_next_stage_plan.md)。
 
 ## 8. 项目结构

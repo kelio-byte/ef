@@ -143,7 +143,7 @@ beam_size = n_runs（Euler-Beam）或 n_samples（Euler）
 
 ## 5. 任务 9：评分校验与“覆盖—排序”归因
 
-状态：`[ ] 未开始`
+状态：`[x] 已完成；确认覆盖不足为主、聚合仍有次级损失`
 
 ### 9.1 严格输入校验
 
@@ -193,28 +193,66 @@ beam_size = n_runs（Euler-Beam）或 n_samples（Euler）
 
 | 指标 | 当前最佳 | stochastic | Euler | 58% 恢复版本 |
 |---|---:|---:|---:|---:|
-| Oracle-any | 待测 | 待测 | 待测 | 待测 |
-| 最终 Top-1 | 60 | 58 | 56 | 58 |
-| 最终 Top-2 | 64 | 64 | 68 | 68 |
+| Oracle-any | 80 | 78 | 90 | 92 |
+| 最终 Top-1 | 60 | 58 | 54 | 58 |
+| 最终 Top-2 | 64 | 64 | 66 | 68 |
 | 最终 Top-3 | 70 | 66 | 74 | 76 |
-| 已覆盖但未进 Top-3 | 待测 | 待测 | 待测 | 待测 |
-| run overlap | 待测 | 待测 | 待测 | 待测 |
+| 已覆盖但未进 Top-3 | 10 | 12 | 16 | 16 |
+| 平均真实唯一候选数 | 13.18 | 12.94 | 15.18 | 12.72 |
+| run micro-Jaccard 范围 | 29.0–32.5 | 29.7–33.2 | 23.9–26.1 | 34.4–42.6 |
 
 注意：不同 seed/语义的恢复版本只用于定性解释，不写成严格消融结论。
 
 ### 9.4 本任务完成记录
 
-实际修改：待填写。
+实际修改：
 
-测试与实验：待填写。
+- 默认严格检查 prediction/target 行数和 `augmentation × beam_size` 布局；不再静默
+  截断。`--length` 只允许读取具备完整行数的前缀。
+- `canonicalize_smiles_clear_map()` 和 `compute_rank()` 不再依赖全局 `opt`，且
+  `compute_rank()` 不再原地修改输入候选。
+- 保留原 best-local-rank 聚合公式和旧 `Unique Rates` 数值。
+- Top-N 报告解除 `beam_size` 限制；超过输入 rank 的位置将 invalid 显示为 N/A。
+- 新增 `--diagnostics` 和 `--diagnostics_json`，记录 Oracle-any、target augmentation
+  support、最好局部排名、最终排名、每 run 命中/invalid/重复率、真实唯一候选数、
+  aggregated rank availability 和 run 两两 Jaccard overlap。
+- 新增 `tests/test_score_global.py`，覆盖严格布局、显式 prefix、错误参数、旧聚合语义、
+  非原地修改和诊断统计。
 
-结论：待填写。
+测试与实验：
 
-Commit：待填写。
+- 新增评分测试：`9 passed`。
+- 排除既有 `tests/sampling/test_beam.py` 后：`123 passed`。
+- 全套测试：`141 passed, 17 failed`；17 项均位于本次未修改的 `test_beam.py`，主要是
+  `EditCandidate(log_u_real=...)` 与当前 `beam.py` 接口不匹配，未越界修复。
+- 2999 行预测配合 `augmentation=20, beam_size=3` 会在 canonicalization 前明确报错。
+- 当前最佳预测在改动前后 Top-1/2/3、invalid 和旧 Unique 数值逐字一致：
+  `60/64/70`、`12.5/14.5/13.4%`、`165.333%`。
+- 当前最佳聚合候选 rank 1–3 可用率均为 100%，rank 4–5 为 98%。
+- 四组诊断均复用已有 3000 行预测，没有重新采样或修改历史结果文件。
+
+实验文件说明：当前最佳使用 `results/task8_noop_full/predictions.txt`，stochastic 使用
+`results/task7_precision_full_tf32/predictions.txt`，Euler 使用
+`results/bench_euler/predictions.txt`，恢复版本使用
+`results/bench_beam_pre_full_score/predictions.txt`。当前 `bench_euler` 文件实测为
+54/66/74，而早期文档曾记录 56/68/74；旧评分脚本对该文件同样得到 54/66/74，说明
+这是实验文件来源差异，不是本次评分重构造成的变化，后续由任务 12 的元数据解决。
+
+结论：
+
+1. 当前最佳 Oracle-any 只有 80%，比 Euler 低 10pp、比恢复版本低 12pp；Top-2/3
+   增长慢首先是高价值探索覆盖不足。
+2. 当前仍有 5/50 个反应已经采到 target 但最终落在 Top-3 外，聚合排序存在次级空间。
+3. 当前 Top-3/Oracle 转化率为 87.5%，高于 Euler 的 82.2% 和恢复版本的 82.6%；不能
+   先修改默认聚合规则来追求表面 Top-3，优先进入任务 10 的离线异质 run。
+4. 恢复版本的 run overlap 反而更高、真实唯一候选数更低但 Oracle 更高，说明“候选越
+   多或 overlap 越低”并不自动带来目标覆盖；探索需要提高化学相关候选质量。
+
+Commit：`b0c1695 Add strict global scoring diagnostics`
 
 ## 6. 任务 10：异质 run 与受控探索
 
-状态：`[ ] 等待任务 9 归因`
+状态：`[-] 任务 9 已确认优先做离线异质 run`
 
 目标是在尽量保持 Top-1 和有效率的同时，让三个最终输出承担不同角色，而不是仅依靠
 不同 seed 运行同一种 policy。
