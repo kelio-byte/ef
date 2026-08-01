@@ -757,7 +757,7 @@ bonus，保留 M=2、bonus=0.5 为当前最佳配置。
 
 ## 13. 任务 7：Profiling 与性能优化
 
-状态：`[~] 已完成首轮 CPU profiling 与批量 key 构造优化`
+状态：`[x] 已完成 profiling、批量 key、inference mode 与 3090 TF32 优化`
 
 ### 分项计时
 
@@ -768,7 +768,7 @@ bonus，保留 M=2、bonus=0.5 为当前最佳配置。
 - [x] GPU→CPU 候选传输与 key 构造（首轮 cProfile，并完成优化）。
 - [x] Python 去重和排序（首轮 cProfile）。
 - [x] 总采样耗时（100 条短集）。
-- [ ] 峰值 GPU 显存。
+- [x] 峰值 GPU 显存。
 
 ### 参数组合
 
@@ -855,6 +855,11 @@ Top-1/2/3 和 Unique 完全相同，invalid 差异最多 0.3 个百分点。因�
 将 `high` 确认为日常实验和参数搜索的推荐模式；最终论文数字或严格复现历史 FP32
 时使用 `highest` 复核。为避免旧命令静默改变数值行为，CLI 默认仍保留 `highest`，
 推荐实验命令必须显式写 `--euler_beam_matmul_precision high`。
+
+峰值显存短测（20 条输入、K=3,M=2,n_runs=3,n_steps=30）中，FP32 和 TF32 均为
+429.9 MiB allocated、1766 MiB reserved。TF32 提升来自 Tensor Core 矩阵吞吐，不会
+降低 FP32 参数/激活的存储占用。任务 7 至此收口：保留批量 key、inference mode 和
+可选 TF32；淘汰 BF16 与当前单次 CLI 下的 `torch.compile`。
 
 BF16 autocast 短筛（2026-08-01）：仅以运行时 wrapper 包裹 Euler-Beam，不修改仓库。
 第一个 batch 在模型 `_log_softplus` 内立即失败：autocast 使索引赋值的 destination 为
