@@ -878,12 +878,12 @@ TF32 配置运行 73.3 秒仍未完成第一个 batch，而未编译 TF32 整次
 
 ## 14. 任务 8：后续搜索创新
 
-状态：`[~] stochastic + 单次 greedy-MAP child 已完成完整验证`
+状态：`[~] stochastic + 单次 no-op anchor 已完成完整验证`
 
 只有在标准 M 后继基线稳定后才开展：
 
-- [ ] 显式 no-op child。
-- [x] greedy child + stochastic children（单次 t≈0.9 启发式干预）。
+- [x] 显式 no-op child（单次 t≈0.9 启发式干预）。
+- [ ] greedy child + stochastic children。
 - [ ] 条件至少发生一次编辑的 exploration child。
 - [ ] proposal correction。
 - [ ] stratified / antithetic sampling。
@@ -904,22 +904,31 @@ TF32 配置运行 73.3 秒仍未完成第一个 batch，而未编译 TF32 整次
 
 ### 启发式 child 第一阶段（2026-08-01）
 
-新增默认关闭的 `--euler_beam_child_policy stochastic_greedy`，仅允许 M=2。child 0
-始终为标准 Euler 随机后继；child 1 在指定干预步使用模型动作概率，在“全 no-op”和
-“恰好一次 INS/SUB/DEL”中选择 MAP 动作。单编辑评分使用该动作相对全 no-op 的完整
-log-prob 增益，包含事件概率、SUB/DEL 类型概率及 token 概率。
+初始实验尝试 child 0 使用标准 Euler 随机后继、child 1 使用 greedy-MAP。连续每步
+greedy 会造成严重过度编辑；限制为仅在 `t≈0.9` 干预一次后取得完整集提升。但后续
+动作诊断发现，5 反应短集中该步 899 个 parent 的 greedy-MAP 全部选择 no-op；将其
+替换为显式 no-op 后，20 反应的 1200 条 predictions 逐字节一致。因此准确率提升的
+真实来源是“一次性 no-op anchor”，而不是反应中心 greedy 编辑。
 
-这是启发式搜索而非无偏 Euler proposal：greedy child 并非从目标转移分布 p 随机采样，
-当前也没有 proposal q 校正，其 child mass 仅作为搜索权重，不能解释为严格状态概率。
-默认 `stochastic` 路径不变，真实 checkpoint 回归逐字节一致。
+正式显式 no-op 完整复跑又与旧 greedy 完整输出 3000/3000 行逐字节一致，指标仍为
+60/64/70；采样约 122.6 秒，略快于包含无效 greedy 计算的 124.6 秒。由此完成完整
+方法归因，而非仅根据小样本推断。
+
+正式实现据此简化为默认关闭的 `--euler_beam_child_policy stochastic_noop`，仅允许
+M=2：child 0 始终是标准随机 Euler 后继；仅在 `t≈0.9` 将 child 1 的编辑 mask 清零，
+保护一个父状态免受该步随机编辑破坏。删除未发挥作用的 greedy 动作构造器。
+
+该 no-op child 不是从目标转移分布 p 随机采样，当前没有 proposal q 校正，其 mass
+仅作为启发式搜索权重，不能解释为无偏状态概率。默认 `stochastic` 路径不变，真实
+checkpoint 回归逐字节一致。
 
 受控消融说明了干预预算的重要性：
 
-| greedy 策略 | 5 反应 Top-1/2/3 | Invalid rank 1/2/3 | 结论 |
+| 干预策略 | 5 反应 Top-1/2/3 | Invalid rank 1/2/3 | 结论 |
 |---|---:|---:|---|
 | 每步强制一个编辑 | 0/0/0 | 58/55/57% | 严重过度编辑，淘汰 |
 | 每步在 no-op/单编辑中 MAP | 0/20/40 | 42/39/26% | 后期仍连续编辑，淘汰 |
-| 仅在 t≈0.9 干预一次 | 60/60/80 | 12/22/19% | 通过短筛 |
+| 仅在 t≈0.9 保留 no-op | 60/60/80 | 12/22/19% | 通过短筛 |
 
 扩大到 20 个反应后，单次干预由标准 TF32 的 45/55/60 提升至 50/55/65，耗时
 48.09→49.49 秒。完整 50 反应配对结果：
@@ -927,7 +936,7 @@ log-prob 增益，包含事件概率、SUB/DEL 类型概率及 token 概率。
 | child policy | 时间 | Top-1/2/3 | Invalid rank 1/2/3 | Unique |
 |---|---:|---:|---:|---:|
 | stochastic | 123.8 秒 | 58/64/66 | 12.9/14.4/13.1% | 164.667% |
-| stochastic_greedy | 124.6 秒 | 60/64/70 | 12.5/14.5/13.4% | 165.333% |
+| stochastic_noop | 124.6 秒 | 60/64/70 | 12.5/14.5/13.4% | 165.333% |
 
 完整结果 Top-1 提升 2、Top-3 提升 4 个百分点，额外时间约 0.6%，2786/3000
 （92.87%）原始预测行保持一致。因此保留为显式启发式选项，但暂不改变默认 policy。
@@ -937,7 +946,7 @@ log-prob 增益，包含事件概率、SUB/DEL 类型概率及 token 概率。
 60/60/80，但 rank-1 invalid 为 18%，劣于 `t≈0.9` 的 12%。因此保留已有完整验证的
 固定 `t≈0.9`，不向 CLI 暴露新的 fraction 参数，也不继续做密集时刻扫描。
 
-分支数短筛：保持 M=2、bonus=0.5 和单次 greedy 不变，K=5 在 5 个反应上得到
+分支数短筛：保持 M=2、bonus=0.5 和单次 no-op 不变，K=5 在 5 个反应上得到
 40/60/60，耗时 18.84 秒；K=3 为 60/60/80、13.38 秒。K=5 同时降低 Top-1/3
 并增加约 41% 时间，因此停止完整实验，推荐配置保持 K=3。
 

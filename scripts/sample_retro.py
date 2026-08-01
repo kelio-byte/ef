@@ -106,7 +106,7 @@ def main():
                               "'high' enables TF32 on supported GPUs"))
     parser.add_argument("--euler_beam_child_policy", type=str,
                         default="stochastic",
-                        choices=["stochastic", "stochastic_greedy"],
+                        choices=["stochastic", "stochastic_noop"],
                         help="Euler-Beam child proposal policy")
     parser.add_argument("--beam_size", type=int, default=5,
                         help="Beam size for beam_edit sampler")

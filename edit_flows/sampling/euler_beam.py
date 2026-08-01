@@ -368,76 +368,15 @@ def _sample_actions_per_branch(
     }
 
 
-def _greedy_single_edit_actions(
-    x_t: Tensor,
-    log_rates: Tensor,
-    log_ins_probs: Tensor,
-    log_sub_probs: Tensor,
-    adapt_h: Tensor,
-    pad_token: int,
-) -> dict:
-    """在全 no-op 和相对增益最大的单编辑之间做启发式 MAP。"""
-    rates = torch.exp(log_rates)
-    eps = 1e-12
-    ins_mu = adapt_h * rates[:, :, 0]
-    ds_rates = rates[:, :, 1] + rates[:, :, 2]
-    ds_mu = adapt_h * ds_rates
-
-    ins_tokens = log_ins_probs.argmax(dim=-1)
-    sub_tokens = log_sub_probs.argmax(dim=-1)
-    ins_token_log_p = log_ins_probs.gather(
-        2, ins_tokens.unsqueeze(-1),
-    ).squeeze(-1)
-    sub_token_log_p = log_sub_probs.gather(
-        2, sub_tokens.unsqueeze(-1),
-    ).squeeze(-1)
-
-    # 单编辑动作相对于全 no-op 动作的 log-prob 增益。
-    ins_gain = (
-        torch.log((-torch.expm1(-ins_mu)).clamp_min(eps))
-        + ins_token_log_p + ins_mu
+def _set_second_child_noop(actions: dict, n_children: int) -> None:
+    """原地将每个 parent 的 child 1 设为 no-op；child 0 保持随机动作。"""
+    noop_rows = torch.arange(
+        1, actions["ins_mask"].shape[0], n_children,
+        device=actions["ins_mask"].device,
     )
-    ds_event_gain = (
-        torch.log((-torch.expm1(-ds_mu)).clamp_min(eps)) + ds_mu
-    )
-    sub_gain = (
-        ds_event_gain
-        + torch.log((rates[:, :, 1] / ds_rates.clamp_min(eps)).clamp_min(eps))
-        + sub_token_log_p
-    )
-    del_gain = (
-        ds_event_gain
-        + torch.log((rates[:, :, 2] / ds_rates.clamp_min(eps)).clamp_min(eps))
-    )
-
-    valid = x_t != pad_token
-    gains = torch.stack((ins_gain, sub_gain, del_gain), dim=-1)
-    gains = gains.masked_fill(~valid.unsqueeze(-1), -torch.inf)
-    flat_gains = gains.flatten(1)
-    best_gain, flat_choice = flat_gains.max(dim=1)
-    apply_edit = best_gain > 0
-    edit_type = flat_choice.remainder(3)
-    position = torch.div(flat_choice, 3, rounding_mode="floor")
-    rows = torch.arange(x_t.shape[0], device=x_t.device)
-
-    ins_mask = torch.zeros_like(valid)
-    sub_mask = torch.zeros_like(valid)
-    del_mask = torch.zeros_like(valid)
-    choose_ins = apply_edit & (edit_type == 0)
-    choose_sub = apply_edit & (edit_type == 1)
-    choose_del = apply_edit & (edit_type == 2)
-    ins_mask[rows[choose_ins], position[choose_ins]] = True
-    sub_mask[rows[choose_sub], position[choose_sub]] = True
-    del_mask[rows[choose_del], position[choose_del]] = True
-    ins_tokens = ins_tokens.masked_fill(~valid, pad_token)
-    sub_tokens = sub_tokens.masked_fill(~valid, pad_token)
-    return {
-        "ins_mask": ins_mask,
-        "del_mask": del_mask,
-        "sub_mask": sub_mask,
-        "ins_tokens": ins_tokens,
-        "sub_tokens": sub_tokens,
-    }
+    actions["ins_mask"][noop_rows] = False
+    actions["sub_mask"][noop_rows] = False
+    actions["del_mask"][noop_rows] = False
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +422,7 @@ def sample_euler_beam(
         n_steps: Euler 步数 (与 sample_euler 一致)。
         base_seed: 基础随机种子。
         changed_state_bonus: 给非原始 token 状态的固定搜索先验；0 表示禁用。
-        child_policy: `stochastic` 或 M=2 的启发式 `stochastic_greedy`。
+        child_policy: `stochastic` 或 M=2 的启发式 `stochastic_noop`。
 
     Returns:
         x_final: (B, L_out) 每条样本的最优分支, PAD 填充到等长。
@@ -511,11 +450,11 @@ def sample_euler_beam(
         raise ValueError(
             f"changed_state_bonus must be >= 0, got {changed_state_bonus}"
         )
-    if child_policy not in ("stochastic", "stochastic_greedy"):
+    if child_policy not in ("stochastic", "stochastic_noop"):
         raise ValueError(f"Unsupported child_policy: {child_policy}")
-    if child_policy == "stochastic_greedy" and n_children != 2:
+    if child_policy == "stochastic_noop" and n_children != 2:
         raise ValueError(
-            "stochastic_greedy requires n_children=2"
+            "stochastic_noop requires n_children=2"
         )
 
     if score_mode == "legacy_triggered_reverse":
@@ -529,7 +468,7 @@ def sample_euler_beam(
     B = x_0.shape[0]
     default_h = 1.0 / n_steps
     origin_keys = _token_keys_batch(x_0, pad_token, bos_token)
-    greedy_step = min(n_steps - 1, int(0.9 * n_steps))
+    noop_step = min(n_steps - 1, int(0.9 * n_steps))
 
     # ── 初始化: 每条样本创建 n_branches 条分支 ──
     all_branches: List[List[_BranchState]] = []
@@ -642,15 +581,8 @@ def sample_euler_beam(
             pad_token=pad_token, event_prob_mode=event_prob_mode,
             step=step,
         )
-        if child_policy == "stochastic_greedy" and step == greedy_step:
-            greedy_actions = _greedy_single_edit_actions(
-                x_br, lr_br, lip_br, lsp_br, adapt_h_br, pad_token,
-            )
-            greedy_rows = torch.arange(
-                1, len(parent_index_values), n_children, device=device,
-            )
-            for name in actions_batch:
-                actions_batch[name][greedy_rows] = greedy_actions[name]
+        if child_policy == "stochastic_noop" and step == noop_step:
+            _set_second_child_noop(actions_batch, n_children)
 
         # 6. 批量计分、应用编辑，并各自一次性传回 CPU 元数据
         step_log_ps = _step_log_p_batch(
