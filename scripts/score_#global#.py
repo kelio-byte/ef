@@ -1,6 +1,8 @@
 from rdkit import Chem
 import os
 import argparse
+from functools import partial
+import json
 from tqdm import tqdm
 import multiprocessing
 import pandas as pd
@@ -14,16 +16,95 @@ lg.setLevel(RDLogger.CRITICAL)
 
 
 def smi_tokenizer(smi):
-    pattern = "(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
+    pattern = r"(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
     regex = re.compile(pattern)
     tokens = [token for token in regex.findall(smi)]
     assert smi == ''.join(tokens)
     return ' '.join(tokens)
 
 
-def canonicalize_smiles_clear_map(smiles,return_max_frag=True):
+def validate_scoring_options(opt):
+    """Validate shape-related CLI options before reading large files."""
+    if opt.augmentation <= 0:
+        raise ValueError(
+            f"augmentation must be > 0, got {opt.augmentation}"
+        )
+    if opt.beam_size <= 0:
+        raise ValueError(f"beam_size must be > 0, got {opt.beam_size}")
+    if opt.n_best <= 0:
+        raise ValueError(f"n_best must be > 0, got {opt.n_best}")
+    if opt.process_number <= 0:
+        raise ValueError(
+            f"process_number must be > 0, got {opt.process_number}"
+        )
+    if opt.length == 0 or opt.length < -1:
+        raise ValueError(f"length must be -1 or > 0, got {opt.length}")
+    if opt.raw and opt.augmentation != 1:
+        raise ValueError(
+            "raw scoring requires augmentation=1, got "
+            f"{opt.augmentation}"
+        )
+
+
+def resolve_input_layout(
+    prediction_count,
+    target_count,
+    augmentation,
+    beam_size,
+    length=-1,
+):
+    """Return the reaction count and consumed line counts.
+
+    Without ``--length``, prediction and target files must describe exactly the
+    same number of reactions.  With ``--length``, a prefix is intentional, but
+    both files must contain enough complete rows for that prefix.
+    """
+    prediction_block = augmentation * beam_size
+    if prediction_count <= 0:
+        raise ValueError("prediction file is empty")
+
+    if length == -1:
+        if prediction_count % prediction_block != 0:
+            remainder = prediction_count % prediction_block
+            raise ValueError(
+                "prediction line count is not divisible by "
+                "augmentation * beam_size: "
+                f"{prediction_count} % ({augmentation} * {beam_size}) "
+                f"= {remainder}. Check the prediction file and beam_size."
+            )
+        data_size = prediction_count // prediction_block
+        expected_targets = data_size * augmentation
+        if target_count != expected_targets:
+            raise ValueError(
+                "target line count does not match predictions: expected "
+                f"{expected_targets} lines for {data_size} reactions, got "
+                f"{target_count}."
+            )
+        return data_size, prediction_count, expected_targets
+
+    data_size = length
+    required_predictions = data_size * prediction_block
+    required_targets = data_size * augmentation
+    if prediction_count < required_predictions:
+        raise ValueError(
+            f"--length {length} requires {required_predictions} prediction "
+            f"lines, got {prediction_count}."
+        )
+    if target_count < required_targets:
+        raise ValueError(
+            f"--length {length} requires {required_targets} target lines, "
+            f"got {target_count}."
+        )
+    return data_size, required_predictions, required_targets
+
+
+def canonicalize_smiles_clear_map(
+    smiles,
+    return_max_frag=True,
+    synthon=False,
+):
     smiles = inverse_global_align(smiles)
-    mol = Chem.MolFromSmiles(smiles,sanitize=not opt.synthon)
+    mol = Chem.MolFromSmiles(smiles,sanitize=not synthon)
     if mol is not None:
         [atom.ClearProp('molAtomMapNumber') for atom in mol.GetAtoms() if atom.HasProp('molAtomMapNumber')]
         try:
@@ -35,10 +116,14 @@ def canonicalize_smiles_clear_map(smiles,return_max_frag=True):
                 return ''
         if return_max_frag:
             sub_smi = smi.split(".")
-            sub_mol = [Chem.MolFromSmiles(smiles,sanitize=not opt.synthon) for smiles in sub_smi]
+            sub_mol = [Chem.MolFromSmiles(smiles,sanitize=not synthon) for smiles in sub_smi]
             sub_mol_size = [(sub_smi[i], len(m.GetAtoms())) for i, m in enumerate(sub_mol) if m is not None]
             if len(sub_mol_size) > 0:
-                return smi, canonicalize_smiles_clear_map(sorted(sub_mol_size,key=lambda x:x[1],reverse=True)[0][0],return_max_frag=False)
+                return smi, canonicalize_smiles_clear_map(
+                    sorted(sub_mol_size,key=lambda x:x[1],reverse=True)[0][0],
+                    return_max_frag=False,
+                    synthon=synthon,
+                )
             else:
                 return smi, ''
         else:
@@ -50,11 +135,26 @@ def canonicalize_smiles_clear_map(smiles,return_max_frag=True):
             return ''
 
 
-def compute_rank(prediction,raw=False,alpha=1.0):
+def _deduplicate_valid(candidates):
+    """Remove invalid and repeated canonical candidates, preserving order."""
+    deduplicated = []
+    seen = set()
+    for candidate in candidates:
+        if candidate[0] == "" or candidate in seen:
+            continue
+        seen.add(candidate)
+        deduplicated.append(candidate)
+    return deduplicated
+
+
+def compute_rank(prediction,raw=False,alpha=1.0,beam_size=None):
+    if not prediction or not prediction[0]:
+        raise ValueError("prediction must contain at least one candidate")
+    if beam_size is None:
+        beam_size = len(prediction[0])
     valid_score = [[k for k in range(len(prediction[j]))] for j in range(len(prediction))]
     invalid_rates = [0 for k in range(len(prediction[0]))]
     rank = {}
-    max_frag_rank = {}
     highest = {}
     if raw:
         # no test augmentation
@@ -64,8 +164,8 @@ def compute_rank(prediction,raw=False,alpha=1.0):
                 if prediction[j][k][0] == "":
                     invalid_rates[k] += 1
             # error detection
-            prediction[j] = [i for i in prediction[j] if i[0] != ""]
-            for k, data in enumerate(prediction[j]):
+            valid_prediction = [i for i in prediction[j] if i[0] != ""]
+            for k, data in enumerate(valid_prediction):
                 rank[data] = 1 / (alpha * k + 1)
     else:
 
@@ -73,13 +173,12 @@ def compute_rank(prediction,raw=False,alpha=1.0):
             for k in range(len(prediction[j])):
                 # predictions[i][j][k] = canonicalize_smiles_clear_map(predictions[i][j][k])
                 if prediction[j][k][0] == "":
-                    valid_score[j][k] = opt.beam_size + 1
+                    valid_score[j][k] = beam_size + 1
                     invalid_rates[k] += 1
             # error detection and deduplication
             de_error = [i[0] for i in sorted(list(zip(prediction[j], valid_score[j])), key=lambda x: x[1]) if i[0][0] != ""]
-            prediction[j] = list(set(de_error))
-            prediction[j].sort(key=de_error.index)
-            for k, data in enumerate(prediction[j]):
+            unique_prediction = _deduplicate_valid(de_error)
+            for k, data in enumerate(unique_prediction):
                 if data in rank:
                     rank[data] += 1 / (alpha * k + 1)
                 else:
@@ -93,37 +192,358 @@ def compute_rank(prediction,raw=False,alpha=1.0):
     return rank,invalid_rates
 
 
+def compute_sampling_diagnostics(
+    predictions,
+    ground_truth,
+    beam_size,
+    alpha=1.0,
+    top_k=3,
+    report_n_best=None,
+    raw=False,
+):
+    """Measure sampling coverage separately from aggregation quality."""
+    if len(predictions) != len(ground_truth):
+        raise ValueError(
+            "predictions and ground_truth must contain the same number of "
+            f"reactions, got {len(predictions)} and {len(ground_truth)}"
+        )
+
+    data_size = len(predictions)
+    invalid_by_run = [0] * beam_size
+    valid_by_run = [0] * beam_size
+    duplicate_by_run = [0] * beam_size
+    target_hit_by_run = [0] * beam_size
+    overlap_intersections = {}
+    overlap_unions = {}
+    overlap_macro_sum = {}
+    overlap_macro_count = {}
+    for left in range(beam_size):
+        for right in range(left + 1, beam_size):
+            key = f"run_{left + 1}_vs_{right + 1}"
+            overlap_intersections[key] = 0
+            overlap_unions[key] = 0
+            overlap_macro_sum[key] = 0.0
+            overlap_macro_count[key] = 0
+
+    oracle_hits = 0
+    covered_outside_top_k = 0
+    target_aug_counts = []
+    covered_final_ranks = []
+    best_local_rank_counts = [0] * beam_size
+    true_unique_counts = []
+    valid_candidate_counts = []
+    per_reaction = []
+
+    for reaction_index, (prediction, target) in enumerate(
+        zip(predictions, ground_truth)
+    ):
+        target_smiles = target[0]
+        run_sets = []
+        for run_index in range(beam_size):
+            run_candidates = [
+                prediction[aug_index][run_index][0]
+                for aug_index in range(len(prediction))
+            ]
+            valid_candidates = [smi for smi in run_candidates if smi != ""]
+            invalid_by_run[run_index] += (
+                len(run_candidates) - len(valid_candidates)
+            )
+            valid_by_run[run_index] += len(valid_candidates)
+            unique_candidates = set(valid_candidates)
+            duplicate_by_run[run_index] += (
+                len(valid_candidates) - len(unique_candidates)
+            )
+            target_hit = target_smiles != "" and target_smiles in unique_candidates
+            target_hit_by_run[run_index] += int(target_hit)
+            run_sets.append(unique_candidates)
+
+        for left in range(beam_size):
+            for right in range(left + 1, beam_size):
+                key = f"run_{left + 1}_vs_{right + 1}"
+                intersection = run_sets[left] & run_sets[right]
+                union = run_sets[left] | run_sets[right]
+                overlap_intersections[key] += len(intersection)
+                overlap_unions[key] += len(union)
+                if union:
+                    overlap_macro_sum[key] += len(intersection) / len(union)
+                    overlap_macro_count[key] += 1
+
+        all_valid = set().union(*run_sets)
+        valid_count = sum(
+            1
+            for augmentation in prediction
+            for candidate in augmentation
+            if candidate[0] != ""
+        )
+        true_unique_counts.append(len(all_valid))
+        valid_candidate_counts.append(valid_count)
+
+        target_aug_count = 0
+        best_local_rank = None
+        for augmentation in prediction:
+            local_candidates = _deduplicate_valid(augmentation)
+            local_full_smiles = [candidate[0] for candidate in local_candidates]
+            if target_smiles != "" and target_smiles in local_full_smiles:
+                target_aug_count += 1
+                local_rank = local_full_smiles.index(target_smiles)
+                if best_local_rank is None or local_rank < best_local_rank:
+                    best_local_rank = local_rank
+
+        rank_scores, _ = compute_rank(
+            prediction,
+            raw=raw,
+            alpha=alpha,
+            beam_size=beam_size,
+        )
+        ranked_candidates = sorted(
+            rank_scores.items(), key=lambda item: item[1], reverse=True
+        )
+        final_rank = None
+        consensus_score = None
+        for rank_index, (candidate, score) in enumerate(ranked_candidates):
+            if candidate[0] == target_smiles:
+                final_rank = rank_index
+                consensus_score = score
+                break
+
+        oracle_any = target_smiles != "" and target_smiles in all_valid
+        oracle_hits += int(oracle_any)
+        target_aug_counts.append(target_aug_count)
+        if best_local_rank is not None and best_local_rank < beam_size:
+            best_local_rank_counts[best_local_rank] += 1
+        if final_rank is not None:
+            covered_final_ranks.append(final_rank)
+        if oracle_any and (final_rank is None or final_rank >= top_k):
+            covered_outside_top_k += 1
+
+        per_reaction.append({
+            "reaction_index": reaction_index,
+            "oracle_any": oracle_any,
+            "target_augmentation_count": target_aug_count,
+            "target_best_local_rank": (
+                None if best_local_rank is None else best_local_rank + 1
+            ),
+            "target_consensus_score": consensus_score,
+            "target_final_rank": None if final_rank is None else final_rank + 1,
+            "true_unique_candidates": len(all_valid),
+            "valid_candidate_count": valid_count,
+        })
+
+    candidate_slots_per_run = (
+        data_size * len(predictions[0]) if data_size else 0
+    )
+    run_metrics = []
+    for run_index in range(beam_size):
+        valid_count = valid_by_run[run_index]
+        run_metrics.append({
+            "run": run_index + 1,
+            "target_hit_count": target_hit_by_run[run_index],
+            "target_hit_rate_percent": (
+                100.0 * target_hit_by_run[run_index] / data_size
+                if data_size else 0.0
+            ),
+            "invalid_count": invalid_by_run[run_index],
+            "invalid_rate_percent": (
+                100.0 * invalid_by_run[run_index] / candidate_slots_per_run
+                if candidate_slots_per_run else 0.0
+            ),
+            "duplicate_count": duplicate_by_run[run_index],
+            "duplicate_rate_among_valid_percent": (
+                100.0 * duplicate_by_run[run_index] / valid_count
+                if valid_count else 0.0
+            ),
+        })
+
+    pairwise_overlap = []
+    for key in overlap_intersections:
+        union_count = overlap_unions[key]
+        macro_count = overlap_macro_count[key]
+        pairwise_overlap.append({
+            "pair": key,
+            "micro_jaccard_percent": (
+                100.0 * overlap_intersections[key] / union_count
+                if union_count else 0.0
+            ),
+            "mean_reaction_jaccard_percent": (
+                100.0 * overlap_macro_sum[key] / macro_count
+                if macro_count else 0.0
+            ),
+        })
+
+    if report_n_best is None:
+        report_n_best = top_k
+    aggregated_rank_availability = {
+        str(rank): (
+            100.0 * sum(count >= rank for count in true_unique_counts)
+            / data_size
+            if data_size else 0.0
+        )
+        for rank in range(1, report_n_best + 1)
+    }
+
+    summary = {
+        "reaction_count": data_size,
+        "oracle_any_count": oracle_hits,
+        "oracle_any_percent": (
+            100.0 * oracle_hits / data_size if data_size else 0.0
+        ),
+        "covered_outside_top_k": covered_outside_top_k,
+        "covered_outside_top_k_percent": (
+            100.0 * covered_outside_top_k / data_size
+            if data_size else 0.0
+        ),
+        "top_k_for_coverage_loss": top_k,
+        "mean_target_augmentation_count": (
+            sum(target_aug_counts) / data_size if data_size else 0.0
+        ),
+        "mean_target_final_rank_when_covered": (
+            sum(rank + 1 for rank in covered_final_ranks)
+            / len(covered_final_ranks)
+            if covered_final_ranks else None
+        ),
+        "best_local_rank_counts": {
+            str(rank + 1): count
+            for rank, count in enumerate(best_local_rank_counts)
+        },
+        "mean_valid_candidates_per_reaction": (
+            sum(valid_candidate_counts) / data_size if data_size else 0.0
+        ),
+        "mean_true_unique_candidates_per_reaction": (
+            sum(true_unique_counts) / data_size if data_size else 0.0
+        ),
+        "aggregated_rank_availability_percent": (
+            aggregated_rank_availability
+        ),
+        "run_metrics": run_metrics,
+        "pairwise_overlap": pairwise_overlap,
+    }
+    return {"summary": summary, "per_reaction": per_reaction}
+
+
+def print_sampling_diagnostics(diagnostics):
+    summary = diagnostics["summary"]
+    top_k = summary["top_k_for_coverage_loss"]
+    print("\nSampling coverage diagnostics:")
+    print(
+        "Oracle-any: "
+        f"{summary['oracle_any_percent']:.3f}% "
+        f"({summary['oracle_any_count']}/{summary['reaction_count']})"
+    )
+    print(
+        f"Covered but outside Top-{top_k}: "
+        f"{summary['covered_outside_top_k_percent']:.3f}% "
+        f"({summary['covered_outside_top_k']}/"
+        f"{summary['reaction_count']})"
+    )
+    print(
+        "Mean target augmentation support: "
+        f"{summary['mean_target_augmentation_count']:.3f}"
+    )
+    mean_final_rank = summary["mean_target_final_rank_when_covered"]
+    if mean_final_rank is not None:
+        print(f"Mean target final rank when covered: {mean_final_rank:.3f}")
+    local_rank_text = ", ".join(
+        f"rank {rank}: {count}"
+        for rank, count in summary["best_local_rank_counts"].items()
+    )
+    print(f"Best local target rank counts: {local_rank_text}")
+    print(
+        "Mean valid / true unique candidates per reaction: "
+        f"{summary['mean_valid_candidates_per_reaction']:.3f} / "
+        f"{summary['mean_true_unique_candidates_per_reaction']:.3f}"
+    )
+    rank_availability_text = ", ".join(
+        f"rank {rank}: {percent:.3f}%"
+        for rank, percent in
+        summary["aggregated_rank_availability_percent"].items()
+    )
+    print(f"Aggregated candidate availability: {rank_availability_text}")
+    for metric in summary["run_metrics"]:
+        print(
+            f"Run {metric['run']}: target-hit "
+            f"{metric['target_hit_rate_percent']:.3f}%, invalid "
+            f"{metric['invalid_rate_percent']:.3f}%, duplicate-among-valid "
+            f"{metric['duplicate_rate_among_valid_percent']:.3f}%"
+        )
+    for overlap in summary["pairwise_overlap"]:
+        print(
+            f"Overlap {overlap['pair']}: micro/macro Jaccard "
+            f"{overlap['micro_jaccard_percent']:.3f}% / "
+            f"{overlap['mean_reaction_jaccard_percent']:.3f}%"
+        )
+
+
 def main(opt):
+    validate_scoring_options(opt)
     print('Reading predictions from file ...')
     with open(opt.predictions, 'r') as f:
-        lines = [''.join(line.strip().split(' ')) for line in f.readlines()]
-        print(len(lines))
-        data_size = len(lines) // (opt.augmentation * opt.beam_size) if opt.length == -1 else opt.length
-        lines = lines[:data_size * (opt.augmentation * opt.beam_size)]
-        print("Canonicalizing predictions using Process Number ",opt.process_number)
-        pool = multiprocessing.Pool(processes=opt.process_number)
-        raw_predictions = pool.imap(func=canonicalize_smiles_clear_map,iterable=tqdm(lines))
-        pool.close()
-        pool.join()
+        prediction_lines = f.readlines()
+    with open(opt.targets, 'r') as f:
+        target_lines = f.readlines()
 
-        predictions = [[[] for j in range(opt.augmentation)] for i in range(data_size)]  # data_len x augmentation x beam_size
-        for i, line in enumerate(raw_predictions):
-            predictions[i // (opt.beam_size * opt.augmentation)][i % (opt.beam_size * opt.augmentation) // opt.beam_size].append(line)
+    print("Prediction File Length", len(prediction_lines))
+    print("Origin Target File Length", len(target_lines))
+    data_size, used_prediction_count, used_target_count = resolve_input_layout(
+        prediction_count=len(prediction_lines),
+        target_count=len(target_lines),
+        augmentation=opt.augmentation,
+        beam_size=opt.beam_size,
+        length=opt.length,
+    )
+    print(
+        "Validated layout: "
+        f"{data_size} reactions x {opt.augmentation} augmentations x "
+        f"{opt.beam_size} candidates = {used_prediction_count} "
+        "prediction lines"
+    )
+    if opt.length != -1 and (
+        len(prediction_lines) > used_prediction_count
+        or len(target_lines) > used_target_count
+    ):
+        print(
+            f"Scoring the first {data_size} reactions because "
+            f"--length={opt.length}."
+        )
+
+    prediction_lines = [
+        ''.join(line.strip().split(' '))
+        for line in prediction_lines[:used_prediction_count]
+    ]
+    canonicalizer = partial(
+        canonicalize_smiles_clear_map,
+        synthon=opt.synthon,
+    )
+    print("Canonicalizing predictions using Process Number ",opt.process_number)
+    with multiprocessing.Pool(processes=opt.process_number) as pool:
+        raw_predictions = list(tqdm(
+            pool.imap(func=canonicalizer, iterable=prediction_lines),
+            total=len(prediction_lines),
+        ))
+
+    predictions = [
+        [[] for _ in range(opt.augmentation)]
+        for _ in range(data_size)
+    ]  # data_len x augmentation x beam_size
+    prediction_block = opt.beam_size * opt.augmentation
+    for i, line in enumerate(raw_predictions):
+        reaction_index = i // prediction_block
+        augmentation_index = (i % prediction_block) // opt.beam_size
+        predictions[reaction_index][augmentation_index].append(line)
 
     print("data size ",data_size)
     print('Reading targets from file ...')
-    with open(opt.targets, 'r') as f:
-        lines = f.readlines()
-        # lines = [''.join(line.strip().split(' ')) for line in f.readlines()]
-        print("Origin File Length", len(lines))
-        targets = [''.join(lines[i].strip().split(' ')) for i in tqdm(range(0,data_size * opt.augmentation,opt.augmentation))]
-        pool = multiprocessing.Pool(processes=opt.process_number)
-        targets = list(pool.imap(func=canonicalize_smiles_clear_map, iterable=tqdm(targets)))
-        pool.close()
-        pool.join()
+    target_lines = target_lines[:used_target_count]
+    targets = [
+        ''.join(target_lines[i].strip().split(' '))
+        for i in range(0, used_target_count, opt.augmentation)
+    ]
+    with multiprocessing.Pool(processes=opt.process_number) as pool:
+        targets = list(tqdm(
+            pool.imap(func=canonicalizer, iterable=targets),
+            total=len(targets),
+        ))
     ground_truth = targets
-    print("Origin Target Lentgh, ", len(ground_truth))
-    print("Cutted Length, ",data_size)
+    print("Canonical Target Length", len(ground_truth))
     accuracy = [0 for j in range(opt.n_best)]
     topn_accuracy_chirality = [0 for _ in range(opt.n_best)]
     topn_accuracy_wochirality = [0 for _ in range(opt.n_best)]
@@ -172,7 +592,12 @@ def main(opt):
                 total_ringformation += 1
                 ringformation_flag = True
 
-        rank, invalid_rate = compute_rank(predictions[i],raw=opt.raw,alpha=opt.score_alpha)
+        rank, invalid_rate = compute_rank(
+            predictions[i],
+            raw=opt.raw,
+            alpha=opt.score_alpha,
+            beam_size=opt.beam_size,
+        )
         for j in range(opt.beam_size):
             invalid_rates[j] += invalid_rate[j]
         rank = list(zip(rank.keys(),rank.values()))
@@ -216,13 +641,48 @@ def main(opt):
             sorted_invalid_rates[j] += 1
         unique_rates += len(rank)
 
+    reported_ranks = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 19, 49]
     for i in range(opt.n_best):
-        if i in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 19, 49] and i < opt.beam_size:
-        # if i in range(10):
+        if i in reported_ranks and i < opt.beam_size:
             print("Top-{} Acc:{:.3f}%, MaxFrag {:.3f}%,".format(i+1,accuracy[i] / data_size * 100,max_frag_accuracy[i] / data_size * 100),
                   " Invalid SMILES:{:.3f}% Sorted Invalid SMILES:{:.3f}%".format(invalid_rates[i] / data_size / opt.augmentation * 100,sorted_invalid_rates[i] / data_size / opt.augmentation * 100))
+        elif i in reported_ranks:
+            print(
+                "Top-{} Acc:{:.3f}%, MaxFrag {:.3f}%, "
+                "Invalid SMILES:N/A (no corresponding input rank)".format(
+                    i + 1,
+                    accuracy[i] / data_size * 100,
+                    max_frag_accuracy[i] / data_size * 100,
+                )
+            )
 
-    print("Unique Rates:{:.3f}%".format(unique_rates / data_size / opt.beam_size * 100))
+    legacy_unique_rate = unique_rates / data_size / opt.beam_size * 100
+    print("Unique Rates:{:.3f}%".format(legacy_unique_rate))
+    print(
+        "  Note: Unique Rates is a legacy metric based on rank[:n_best], "
+        "not raw sampling diversity."
+    )
+
+    if opt.diagnostics or opt.diagnostics_json:
+        diagnostics = compute_sampling_diagnostics(
+            predictions,
+            ground_truth,
+            beam_size=opt.beam_size,
+            alpha=opt.score_alpha,
+            top_k=min(3, opt.n_best),
+            report_n_best=opt.n_best,
+            raw=opt.raw,
+        )
+        if opt.diagnostics:
+            print_sampling_diagnostics(diagnostics)
+        if opt.diagnostics_json:
+            output_parent = os.path.dirname(opt.diagnostics_json)
+            if output_parent:
+                os.makedirs(output_parent, exist_ok=True)
+            with open(opt.diagnostics_json, "w") as f:
+                json.dump(diagnostics, f, indent=2, sort_keys=True)
+                f.write("\n")
+            print(f"Diagnostics saved to: {opt.diagnostics_json}")
 
     if opt.detailed:
         print_topk = [1,3,5,10]
@@ -317,6 +777,21 @@ if __name__ == "__main__":
     parser.add_argument('--raw', action="store_true", default=False)
     parser.add_argument('--save_file', type=str,default="")
     parser.add_argument('--save_accurate_indices', type=str,default="")
+    parser.add_argument(
+        '--diagnostics',
+        action="store_true",
+        default=False,
+        help=(
+            "Report oracle coverage, per-run validity/diversity, and "
+            "cross-run overlap without changing aggregation"
+        ),
+    )
+    parser.add_argument(
+        '--diagnostics_json',
+        type=str,
+        default="",
+        help="Optional path for machine-readable per-reaction diagnostics",
+    )
 
     opt = parser.parse_args()
     print(opt)
