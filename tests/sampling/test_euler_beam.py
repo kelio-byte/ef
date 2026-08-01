@@ -209,6 +209,37 @@ def test_sample_euler_beam_one_branch_runs():
     assert result.shape[0] == 2
 
 
+def test_optional_profile_records_stages_without_changing_output():
+    model = _StochasticModel()
+    x_0 = torch.tensor([[BOS_TOKEN, 4, 5, 6, PAD_TOKEN]])
+    kwargs = dict(
+        scheduler=LinearScheduler(),
+        n_branches=2,
+        n_children=2,
+        n_steps=3,
+        max_seq_len=32,
+        base_seed=42,
+    )
+    expected = sample_euler_beam(model, x_0, **kwargs)
+    profile = {}
+    actual = sample_euler_beam(model, x_0, profile=profile, **kwargs)
+
+    assert torch.equal(actual, expected)
+    assert profile["steps"] == 3
+    assert profile["parent_branch_evaluations"] > 0
+    assert profile["child_candidate_evaluations"] >= 2
+    for key in (
+        "prepare_branches_seconds",
+        "model_forward_and_rates_seconds",
+        "child_proposal_seconds",
+        "step_scoring_seconds",
+        "apply_edits_seconds",
+        "merge_and_prune_seconds",
+        "finalize_output_seconds",
+    ):
+        assert profile[key] >= 0.0
+
+
 def test_sample_euler_beam_rejects_unsupported_origin_mask():
     model = _StochasticModel()
     x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])

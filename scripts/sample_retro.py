@@ -183,6 +183,7 @@ def _build_sampling_metadata(
     elapsed_seconds: float,
     peak_cuda_allocated_bytes: int | None = None,
     peak_cuda_reserved_bytes: int | None = None,
+    euler_beam_profile: dict | None = None,
 ) -> dict:
     # Augmentation describes the actual input layout, so it must not be
     # inferred from the checkpoint's training data directory.  A single
@@ -237,6 +238,8 @@ def _build_sampling_metadata(
     if peak_cuda_allocated_bytes is not None:
         runtime["peak_cuda_allocated_bytes"] = peak_cuda_allocated_bytes
         runtime["peak_cuda_reserved_bytes"] = peak_cuda_reserved_bytes
+    if euler_beam_profile is not None:
+        runtime["euler_beam_profile"] = euler_beam_profile
 
     return {
         "schema_version": 1,
@@ -313,6 +316,15 @@ def main():
                         default="stochastic",
                         choices=["stochastic", "stochastic_noop"],
                         help="Euler-Beam child proposal policy")
+    parser.add_argument(
+        "--euler_beam_profile",
+        action="store_true",
+        default=False,
+        help=(
+            "Synchronize CUDA between Euler-Beam stages and record a "
+            "timing breakdown; use only for short profiling runs"
+        ),
+    )
     parser.add_argument("--beam_size", type=int, default=5,
                         help="Beam size for beam_edit sampler")
     parser.add_argument("--max_edits", type=int, default=20,
@@ -341,6 +353,9 @@ def main():
     parser.add_argument("--fh_warmup_steps", type=int, default=0,
                         help="Warmup steps using depth kappa before frozen-hazard kappa kicks in")
     args = parser.parse_args()
+
+    if args.euler_beam_profile and args.sampler != "euler_beam":
+        raise ValueError("euler_beam_profile requires --sampler euler_beam")
 
     device = torch.device(args.device)
     if args.sampler == "euler_beam" and device.type == "cuda":
@@ -450,6 +465,7 @@ def main():
 
     use_greedy_beam = args.sampler in ("greedy_edit", "beam_edit")
     print(f"Sampler: {args.sampler}")
+    euler_beam_profile = {} if args.euler_beam_profile else None
     if use_greedy_beam:
         # Build time policy.
         if args.time_policy == "depth":
@@ -529,6 +545,7 @@ def main():
                     score_mode=args.euler_beam_score_mode,
                     changed_state_bonus=args.euler_beam_changed_state_bonus,
                     child_policy=args.euler_beam_child_policy,
+                    profile=euler_beam_profile,
                 )
             elif args.sampler == "greedy_edit":
                 results = sample_greedy_single_edit(
@@ -622,6 +639,7 @@ def main():
             elapsed_seconds=elapsed_seconds,
             peak_cuda_allocated_bytes=peak_cuda_allocated_bytes,
             peak_cuda_reserved_bytes=peak_cuda_reserved_bytes,
+            euler_beam_profile=euler_beam_profile,
         )
         metadata_path = os.path.join(
             args.output_dir, "sampling_metadata.json",

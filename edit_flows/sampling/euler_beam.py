@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+import time
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -379,6 +380,27 @@ def _set_second_child_noop(actions: dict, n_children: int) -> None:
     actions["del_mask"][noop_rows] = False
 
 
+def _profile_start(profile: Optional[Dict[str, float]], device) -> float:
+    if profile is None:
+        return 0.0
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    return time.perf_counter()
+
+
+def _profile_finish(
+    profile: Optional[Dict[str, float]],
+    key: str,
+    started_at: float,
+    device,
+) -> None:
+    if profile is None:
+        return
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    profile[key] = profile.get(key, 0.0) + time.perf_counter() - started_at
+
+
 # ---------------------------------------------------------------------------
 # 公开 API
 # ---------------------------------------------------------------------------
@@ -411,6 +433,7 @@ def sample_euler_beam(
     record_all_events: bool = False, # 未实现, 预留
     x_1: Optional[Tensor] = None,    # 未使用, 预留 (与 sample_euler 接口对齐)
     vocab_size: Optional[int] = None, # 未使用, 预留
+    profile: Optional[Dict[str, float]] = None,
 ) -> Tensor:
     """Euler 采样 + 分支维护。
 
@@ -490,6 +513,7 @@ def sample_euler_beam(
 
     # ── 主循环: n_steps 步 Euler 推进 ──
     for step in range(n_steps):
+        section_started = _profile_start(profile, device)
         # 1. 收集所有未完成的分支 (t < 1.0)
         flat: List[Tuple[int, int, _BranchState]] = []
         for b in range(B):
@@ -510,8 +534,12 @@ def sample_euler_beam(
             L = s.x_t.shape[1]
             x_batch[i, :L] = s.x_t
             t_vals[i, 0] = s.t
+        _profile_finish(
+            profile, "prepare_branches_seconds", section_started, device,
+        )
 
         # 3. 单次模型前向 (所有分支共享)
+        section_started = _profile_start(profile, device)
         x_pad_mask = x_batch == pad_token
         t_model = _compute_model_time(t_vals, scheduler, time_input, train_scheduler)
         log_rates, log_ins_probs, log_sub_probs = model(
@@ -537,6 +565,10 @@ def sample_euler_beam(
             use_rate_reparam=use_rate_reparam,
             clamp_kappa=clamp_kappa, clamp_max=clamp_max,
         )
+        _profile_finish(
+            profile, "model_forward_and_rates_seconds",
+            section_started, device,
+        )
 
         # 5. 直接复用模型父 batch。模型已经把 PAD 位置屏蔽为 -1e9，
         # 无需再分配并逐行复制 x/rates/token-probs 的同形张量。
@@ -549,6 +581,7 @@ def sample_euler_beam(
 
         # 批量计算父分支步长。模型前向规模始终是 K；仅模型输出和动作
         # 张量扩展为 K×M，避免重复 Transformer forward。
+        section_started = _profile_start(profile, device)
         adapt_h_br = get_adaptive_h(default_h, branch_t_vals, scheduler)
         parent_index_values = [
             parent_i
@@ -583,8 +616,12 @@ def sample_euler_beam(
         )
         if child_policy == "stochastic_noop" and step == noop_step:
             _set_second_child_noop(actions_batch, n_children)
+        _profile_finish(
+            profile, "child_proposal_seconds", section_started, device,
+        )
 
         # 6. 批量计分、应用编辑，并各自一次性传回 CPU 元数据
+        section_started = _profile_start(profile, device)
         step_log_ps = _step_log_p_batch(
             actions_batch,
             lr_candidates,
@@ -594,11 +631,20 @@ def sample_euler_beam(
             score_mode=score_mode,
         ).cpu().tolist()
         adapt_h_values = adapt_h_candidates.squeeze(-1).cpu().tolist()
+        _profile_finish(
+            profile, "step_scoring_seconds", section_started, device,
+        )
+
+        section_started = _profile_start(profile, device)
         x_next_batch = _apply_edits_batch(
             x_candidates, actions_batch, max_seq_len, pad_token,
         )
         next_keys = _token_keys_batch(x_next_batch, pad_token, bos_token)
+        _profile_finish(
+            profile, "apply_edits_seconds", section_started, device,
+        )
 
+        section_started = _profile_start(profile, device)
         new_branches: Dict[int, List[_BranchState]] = {b: [] for b in range(B)}
         new_keys: Dict[int, List[Tuple[int, ...]]] = {b: [] for b in range(B)}
 
@@ -666,8 +712,21 @@ def sample_euler_beam(
                     t=parent.t,
                     seed=parent.seed + 10000 + len(all_branches[b]),
                 ))
+        _profile_finish(
+            profile, "merge_and_prune_seconds", section_started, device,
+        )
+        if profile is not None:
+            profile["steps"] = profile.get("steps", 0) + 1
+            profile["parent_branch_evaluations"] = (
+                profile.get("parent_branch_evaluations", 0) + N_br
+            )
+            profile["child_candidate_evaluations"] = (
+                profile.get("child_candidate_evaluations", 0)
+                + len(parent_index_values)
+            )
 
     # ── 返回每条样本的最优分支 ──
+    section_started = _profile_start(profile, device)
     results: List[Tensor] = []
     for b in range(B):
         if n_children > 1 and score_mode == "full_probability":
@@ -680,5 +739,9 @@ def sample_euler_beam(
     out = torch.full((B, out_len), pad_token, dtype=torch.long, device=device)
     for b, r in enumerate(results):
         out[b, :r.shape[1]] = r
+
+    _profile_finish(
+        profile, "finalize_output_seconds", section_started, device,
+    )
 
     return out
