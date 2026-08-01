@@ -549,6 +549,21 @@ Commit：`f03bb61 Add auditable sampling metadata`
 新增只读区间参数选择原文件行，不复制、不改写数据集；区间起点和长度必须按 augmentation
 完整对齐并写入 metadata，评分 target offset 必须与之交叉校验。
 
+接口准备已完成：
+
+- `sample_retro.py` 新增 `--start_product/--max_products`，默认仍读取全部输入；显式区间
+  越界或不满足 augN 完整块时拒绝运行，seed product index 加上源文件 offset。
+- sampling metadata 记录源文件总行数和 selection 的起止 product 行。
+- `score_#global#.py` 新增 `--target_offset`，targets 和 detailed sources 使用同一反应
+  偏移；若 sampling metadata 的 selection 与 offset 不符则在 RDKit 前拒绝。
+- `mix_retro_runs.py` 新增重复参数 `--source_beam_size LABEL:SIZE`，可严格组合 R=3 与
+  R=2 等不同来源，不再错误要求原始 prediction 行数完全相同。
+- CPU 接口测试 `30 passed`；排除已知旧 beam 测试后项目回归
+  `144 passed, 7 warnings`。20 条 aug20 输入的 GPU 选择/评分冒烟通过，R3+R2 混合为
+  beam=5 的真实 CLI 冒烟也通过。
+
+Commit：`475be15 Add aligned holdout sampling support`
+
 ### 13.1 正确性
 
 - 全部现有测试通过；

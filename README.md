@@ -240,6 +240,11 @@ python 'scripts/score_#global#.py' \
 `sampling_metadata.json`，记录 checkpoint、输入文件及哈希、采样器配置、有效步数、
 seed 语义、输出行数与哈希、运行时间和 Git 状态。`predictions.txt` 的文本格式不变。
 
+对原文件做可复现的区间验证时，可使用 `--start_product` 和 `--max_products`。如果输入
+路径含有 `augN`，区间起点和长度必须是 N 的整数倍；Euler-Beam seed 仍使用源文件中的
+全局 product index。评分对应区间时用 `--target_offset` 指定原始反应偏移，评分器会与
+sampling metadata 自动交叉校验。
+
 ### 6.2 Euler 对照实验
 
 ```bash
@@ -329,6 +334,10 @@ augmentation 中的最好局部排名，跨增强出现频率只在最好局部�
 benchmark 上将 Oracle-any 提高到 98%，但采样成本约为当前单一配置的两倍以上；其中
 `legacy_triggered_reverse` 是偏向激进编辑的搜索启发式，不是校准概率。详细归因见
 [`new_docs/euler_beam_next_stage_plan.md`](new_docs/euler_beam_next_stage_plan.md)。
+
+`scripts/mix_retro_runs.py` 可在不重新采样的情况下按 run 组合候选。不同来源具有不同
+输出数时，用可重复的 `--source_beam_size LABEL:SIZE` 声明覆盖值；工具会分别检查每个
+来源的布局、run 边界与 SHA-256，并生成 `mixing_metadata.json`。
 
 ## 8. 项目结构
 
