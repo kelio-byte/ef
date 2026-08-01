@@ -104,6 +104,10 @@ def main():
                         default="highest", choices=["highest", "high"],
                         help=("Float32 matmul precision for CUDA Euler-Beam; "
                               "'high' enables TF32 on supported GPUs"))
+    parser.add_argument("--euler_beam_child_policy", type=str,
+                        default="stochastic",
+                        choices=["stochastic", "stochastic_greedy"],
+                        help="Euler-Beam child proposal policy")
     parser.add_argument("--beam_size", type=int, default=5,
                         help="Beam size for beam_edit sampler")
     parser.add_argument("--max_edits", type=int, default=20,
@@ -237,7 +241,8 @@ def main():
     if args.sampler == "euler_beam":
         print(f"  n_branches={args.n_branches}, "
               f"n_children={args.n_children}, n_runs={args.n_runs}, "
-              f"matmul_precision={args.euler_beam_matmul_precision}")
+              f"matmul_precision={args.euler_beam_matmul_precision}, "
+              f"child_policy={args.euler_beam_child_policy}")
 
     try:
         for batch_idx in tqdm(range(n_batches), desc="Batches"):
@@ -289,6 +294,7 @@ def main():
                     sample_seeds=sample_seeds,
                     score_mode=args.euler_beam_score_mode,
                     changed_state_bonus=args.euler_beam_changed_state_bonus,
+                    child_policy=args.euler_beam_child_policy,
                 )
             elif args.sampler == "greedy_edit":
                 results = sample_greedy_single_edit(

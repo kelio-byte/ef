@@ -229,6 +229,71 @@ def test_sample_euler_beam_validates_sizes():
         sample_euler_beam(
             model, x_0, LinearScheduler(), changed_state_bonus=-0.1,
         )
+    with pytest.raises(ValueError, match="child_policy"):
+        sample_euler_beam(
+            model, x_0, LinearScheduler(), child_policy="unknown",
+        )
+    with pytest.raises(ValueError, match="n_children=2"):
+        sample_euler_beam(
+            model, x_0, LinearScheduler(), n_children=3,
+            child_policy="stochastic_greedy",
+        )
+
+
+def test_greedy_single_edit_selects_one_best_valid_action_per_parent():
+    from edit_flows.sampling.euler_beam import _greedy_single_edit_actions
+
+    x_t = torch.tensor([
+        [BOS_TOKEN, 4, PAD_TOKEN],
+        [BOS_TOKEN, 5, PAD_TOKEN],
+    ])
+    rates = torch.full((2, 3, 3), 0.01)
+    rates[0, 1, 0] = 100.0  # parent 0: insert at position 1
+    rates[1, 1, 1] = 100.0  # parent 1: substitute at position 1
+    log_rates = rates.log()
+    log_ins = torch.log_softmax(torch.zeros(2, 3, 8), dim=-1)
+    log_sub = torch.log_softmax(torch.zeros(2, 3, 8), dim=-1)
+    log_ins[0, 1] = torch.log_softmax(
+        torch.tensor([0., 0., 0., 9., 0., 0., 0., 0.]), dim=-1,
+    )
+    log_sub[1, 1] = torch.log_softmax(
+        torch.tensor([0., 0., 8., 0., 0., 0., 0., 0.]), dim=-1,
+    )
+    actions = _greedy_single_edit_actions(
+        x_t, log_rates, log_ins, log_sub,
+        torch.full((2, 1), 0.1), PAD_TOKEN,
+    )
+
+    total_edits = (
+        actions["ins_mask"].sum(dim=1)
+        + actions["sub_mask"].sum(dim=1)
+        + actions["del_mask"].sum(dim=1)
+    )
+    assert total_edits.tolist() == [1, 1]
+    assert actions["ins_mask"][0, 1]
+    assert actions["ins_tokens"][0, 1].item() == 3
+    assert actions["sub_mask"][1, 1]
+    assert actions["sub_tokens"][1, 1].item() == 2
+    assert not (
+        actions["ins_mask"][:, 2]
+        | actions["sub_mask"][:, 2]
+        | actions["del_mask"][:, 2]
+    ).any()
+
+
+def test_greedy_single_edit_keeps_noop_when_every_edit_is_worse():
+    from edit_flows.sampling.euler_beam import _greedy_single_edit_actions
+
+    x_t = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+    log_rates = torch.full((1, 3, 3), -20.0)
+    log_probs = torch.log_softmax(torch.zeros(1, 3, 8), dim=-1)
+    actions = _greedy_single_edit_actions(
+        x_t, log_rates, log_probs, log_probs,
+        torch.full((1, 1), 0.01), PAD_TOKEN,
+    )
+    assert not actions["ins_mask"].any()
+    assert not actions["sub_mask"].any()
+    assert not actions["del_mask"].any()
 
 
 def test_child_seed_is_stable_distinct_and_m1_compatible():
