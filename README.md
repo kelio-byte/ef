@@ -329,6 +329,7 @@ edit_flows/
 scripts/
 ├── train_retro.py              # 逆合成训练
 ├── sample_retro.py             # 统一采样入口
+├── mix_retro_runs.py           # 离线组合已对齐的独立 run
 ├── score_#global#.py           # #global# 数据评分
 ├── score.py                    # standard 数据评分
 ├── precompute_alignments.py    # 预计算 Levenshtein 对齐

@@ -252,7 +252,7 @@ Commit：`b0c1695 Add strict global scoring diagnostics`
 
 ## 6. 任务 10：异质 run 与受控探索
 
-状态：`[-] 任务 9 已确认优先做离线异质 run`
+状态：`[-] 10.1 已完成且简单混合无收益；10.2 不实施，进入 10.3`
 
 目标是在尽量保持 Top-1 和有效率的同时，让三个最终输出承担不同角色，而不是仅依靠
 不同 seed 运行同一种 policy。
@@ -275,6 +275,30 @@ Commit：`b0c1695 Add strict global scoring diagnostics`
 - Top-1 不出现无法解释的明显下降；
 - 改善来自候选互补，而不是错误的行排列或评分截断。
 
+执行结果（2026-08-01）：
+
+- 新增 `scripts/mix_retro_runs.py`。每个输入用 `LABEL PATH` 注册，每个输出位置用
+  `LABEL:RUN` 选择；严格检查两份文件的行数、augmentation、input beam 和 run 下标。
+- 工具默认拒绝覆盖已有输出，同时写出 source 路径、SHA-256、行数、run 来源、布局和
+  output SHA-256 到 `mixing_metadata.json`。
+- no-op 与 stochastic 在 run 1/2/3 上分别有 59/79/76 行不同，即 5.9%/7.9%/7.6%。
+- N 表示 `stochastic_noop`，S 表示 `stochastic`。固定相同 run 位置后，8 种完整组合：
+
+| 组合 | Top-1/2/3 | Oracle-any | 已覆盖未进 Top-3 | 平均真实唯一候选 |
+|---|---:|---:|---:|---:|
+| NNN | 60/64/70 | 80 | 10 | 13.18 |
+| NNS | 60/64/70 | 80 | 10 | 13.08 |
+| NSN | 60/64/70 | 80 | 10 | 13.08 |
+| NSS | 60/64/70 | 80 | 10 | 12.98 |
+| SNN | 58/64/66 | 78 | 12 | 13.14 |
+| SNS | 58/64/66 | 78 | 12 | 13.04 |
+| SSN | 58/64/66 | 78 | 12 | 13.04 |
+| SSS | 58/64/66 | 78 | 12 | 12.94 |
+
+Oracle 集合进一步确认：NNN 命中 40 个、SSS 命中 39 个，39 个 SSS 命中全部包含在
+NNN 中；SSS 没有提供任何独有 target，NNN 独有反应为 index 13。因此当前两种 policy
+没有覆盖互补性，简单异质组合不能达到 10.2 的进入条件。
+
 ### 10.2 实现 per-run policy
 
 只有离线混合有效时，才在 `sample_retro.py` 增加每个 run 独立的 policy 配置。设计要求：
@@ -284,6 +308,9 @@ Commit：`b0c1695 Add strict global scoring diagnostics`
 - product/run seed 保持稳定，不因 policy 列表或 batch size 改变；
 - 不把异质 run 错误合并成一个内部 beam；
 - 输出顺序仍为 product-major、run-minor。
+
+决策：`[!] 不实施`。离线混合没有提高 Oracle-any 或任一 Top-k；现在增加 per-run
+policy 只会扩大接口而没有方法收益。
 
 ### 10.3 若简单混合不足，再研究探索 proposal
 
@@ -297,17 +324,22 @@ Commit：`b0c1695 Add strict global scoring diagnostics`
 
 ### 10.4 本任务完成记录
 
-实际修改：待填写。
+当前阶段实际修改：新增经过布局校验、默认防覆盖并记录来源哈希的离线 run 混合工具；
+没有修改 `sample_retro.py`、Euler-Beam、checkpoint 或历史结果。
 
-测试与实验：待填写。
+测试与实验：混合工具与评分器相关测试共 `17 passed`；六份新混合输出均为 3000 行，
+评分器严格识别为 `50 × 20 × 3`。NNN/SSS 直接复用原文件，其余六种输出写入新的
+`results/task10_mix_*` 目录，不覆盖历史结果。
 
-结论：待填写。
+阶段结论：现有 no-op 与 stochastic 的差别只改善已有模式，没有产生新的正确 target。
+下一步不实现简单 per-run policy，而是设计真正不同、受控且有化学相关性的 exploration
+proposal。若新 proposal 在 Oracle 上产生独有命中，再回到 10.2 实现异质 run 接口。
 
-Commit：待填写。
+Commit：`874825c Add auditable retrosynthesis run mixer`
 
 ## 7. 任务 11：评分聚合方法消融
 
-状态：`[ ] 等待任务 9 归因`
+状态：`[ ] 已确认存在次级排序损失；排在任务 10.3 之后`
 
 仅当 Oracle 诊断证明存在明显“已覆盖但排名靠后”时开展。
 
