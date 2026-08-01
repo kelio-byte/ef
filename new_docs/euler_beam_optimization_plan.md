@@ -987,6 +987,13 @@ CLI policy，继续推荐独立 stochastic child + 单次 no-op anchor。
 invalid 完全相同。该条件没有收益信号，却引入阈值和额外语义，因此停止扩大实验，
 不增加分支状态或 CLI 参数，保持固定 t=0.9 全 parent 单次 anchor。
 
+最终内部 branch 输出消融：实验接口允许每个 run 返回多个最终内部 branch，并按
+branch rank 优先排列，保证三个独立 run 的 best 仍占 rank 1–3。5 反应结果中，
+`n_runs=1,internal=3` 仅为 20/60/60；`n_runs=3,internal=2` 的 Top-1/2/3 保持
+60/60/80，但 Top-4/5/6 没有新增命中，新增候选 invalid 高达 42–48%。说明当前内部
+剪枝分数只足以可靠选择第一分支，低排名状态不适合直接作为最终候选。撤回多分支
+返回 API，不扩大实验；继续使用三个独立 run 各输出一个 best。
+
 ---
 
 ## 15. 实验记录
