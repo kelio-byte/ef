@@ -373,7 +373,7 @@ def _sample_actions_per_branch(
 # ---------------------------------------------------------------------------
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def sample_euler_beam(
     model,
     x_0: Tensor,                     # (B, L_0) — 含 BOS, PAD 填充

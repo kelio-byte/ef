@@ -813,6 +813,13 @@ layer norm 5.2%，attention 的 bmm/baddbmm 合计约 9.6%，`nonzero` 约 1.7%�
 瓶颈。后续性能研究应优先评估推理精度/编译/模型 forward batch 利用率；任何改变
 数值精度的方案都必须先做 predictions 与准确率回归。
 
+低风险推理上下文优化（2026-08-01）：确认 `sample_retro.py` 已调用 `model.eval()`，
+将 Euler-Beam 的 `@torch.no_grad()` 改为 `@torch.inference_mode()`。在 100 条输入、
+K=3,M=2,n_runs=1,n_steps=100 下，修改前 3 次为 6.54/6.52/6.50 秒（中位 6.52），
+修改后为 6.40/6.28/6.30 秒（中位 6.30），短测中位数约改善 3.4%。24 项单元测试
+通过；30 步真实 checkpoint 回归以及三次 100 步短测 predictions 均与基线逐字节
+一致。因此保留该修改。该优化不改变模型精度、随机数或搜索排序。
+
 ---
 
 ## 14. 任务 8：后续搜索创新
