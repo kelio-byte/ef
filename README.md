@@ -238,7 +238,8 @@ python 'scripts/score_#global#.py' \
 
 只要指定 `--output_dir`，采样器还会在同目录写入
 `sampling_metadata.json`，记录 checkpoint、输入文件及哈希、采样器配置、有效步数、
-seed 语义、输出行数与哈希、运行时间和 Git 状态。`predictions.txt` 的文本格式不变。
+seed 语义、输出行数与哈希、运行时间、CUDA 峰值显存和 Git 状态。`predictions.txt`
+的文本格式不变。
 
 对原文件做可复现的区间验证时，可使用 `--start_product` 和 `--max_products`。如果输入
 路径含有 `augN`，区间起点和长度必须是 N 的整数倍；Euler-Beam seed 仍使用源文件中的

@@ -564,6 +564,10 @@ Commit：`f03bb61 Add auditable sampling metadata`
 
 Commit：`475be15 Add aligned holdout sampling support`
 
+正式 holdout 运行前补充 CUDA `max_memory_allocated/max_memory_reserved` 到 sampling
+metadata；只在一次完整采样的开始/结束同步，不在 Euler 步内插入同步点，因此不会污染
+组件耗时或明显拖慢正式运行。Commit：`ca3d90f Record peak CUDA sampling memory`。
+
 ### 13.1 正确性
 
 - 全部现有测试通过；
