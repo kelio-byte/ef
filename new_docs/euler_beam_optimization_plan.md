@@ -966,6 +966,19 @@ no-op 搜索质量短筛：默认干预步 stochastic/no-op 各分配 0.5 mass�
 40%。没有准确率证据支持新增参数，且过度偏重 no-op 会伤害 Top-1，因此撤回实验
 接口并固定保持等权 0.5。
 
+antithetic child 消融：实验策略令 M=2 的 child 1 在五个随机 stream 上使用 child 0
+的互补随机数 `1-u`，并保留 `t≈0.9` no-op anchor。5 与 20 反应上准确率不降且
+invalid 明显下降，但完整集结果为：
+
+| policy | 时间 | Top-1/2/3 | Invalid rank 1/2/3 | Unique |
+|---|---:|---:|---:|---:|
+| stochastic_noop | 122.6 秒 | 60/64/70 | 12.5/14.5/13.4% | 165.333% |
+| antithetic_noop | 129.1 秒 | 56/60/66 | 10.5/11.7/11.7% | 164.000% |
+
+互补随机数降低 invalid，却使所有 Top-k 各下降 4 个百分点，Unique 也下降，且增加约
+5.3% 时间。说明合法率改善不等同于目标反应覆盖改善。撤回 antithetic 实现，不保留
+CLI policy，继续推荐独立 stochastic child + 单次 no-op anchor。
+
 ---
 
 ## 15. 实验记录
