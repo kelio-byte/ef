@@ -252,7 +252,7 @@ Commit：`b0c1695 Add strict global scoring diagnostics`
 
 ## 6. 任务 10：异质 run 与受控探索
 
-状态：`[-] 10.1 已完成且简单混合无收益；10.2 不实施，进入 10.3`
+状态：`[x] 简单 policy 混合淘汰；激进 exploration 候选池完成 5/20/50 验证`
 
 目标是在尽量保持 Top-1 和有效率的同时，让三个最终输出承担不同角色，而不是仅依靠
 不同 seed 运行同一种 policy。
@@ -322,24 +322,81 @@ policy 只会扩大接口而没有方法收益。
 4. 先做 5/20 个反应短筛，再决定是否运行 50 个反应；
 5. 不重复已经失败的 antithetic、多次 no-op、强制低概率编辑和内部低排名 branch 输出。
 
+执行结果：
+
+#### 普通 Euler 作为 exploration
+
+用 E 表示普通 Euler，在相同 run 位置离线替换 N：
+
+| 组合 | Top-1/2/3 | Oracle-any |
+|---|---:|---:|
+| NNN | 60/64/70 | 80 |
+| NNE | 60/64/70 | 86 |
+| NEN | 58/66/70 | 86 |
+| NEE | 56/62/66 | 88 |
+| ENN | 54/64/66 | 86 |
+| ENE | 56/64/66 | 90 |
+| EEN | 58/68/72 | 90 |
+| EEE | 54/66/74 | 90 |
+
+NNE 新增 3 个 target，但分别只出现在 1–2 个 augmentation，最终排名为 11/20/17；
+即使去除 legacy best-rank 巨大惩罚，也没有足够共识进入 Top-3。保留全部 NNN 后追加
+1/2/3 个 Euler run，Oracle 分别为 86/90/92，Top-2 最多由 64 提高到 66，Top-3 不变。
+
+#### `legacy_triggered_reverse` 作为激进 exploration
+
+旧 score mode 只累计触发事件并反向偏好低概率、多编辑路径。它不是目标 CTMC 的校准
+概率，但已有候选表明它与当前 NNN 高度互补。历史 K=5,M=1 legacy 文件与 NNN 的
+Oracle 并集为 96%，但历史采样约 479 秒，不具备当前效率。
+
+因此用当前 K=3,M=2、TF32 批量实现重新采样：
+
+```text
+score_mode=legacy_triggered_reverse
+child_policy=stochastic
+K=3, M=2, R=3, n_steps=100, seed=42
+```
+
+- 5 反应：standalone 80/100/100，Oracle 100%；信号过小，仅用于进入 20 反应。
+- 20 反应：standalone 55/60/60，Oracle 85%；与 NNN 六 run 并集 Oracle 95%。
+- 50 反应：standalone 56/60/70，Oracle 88%，invalid rank 1/2/3 为
+  19.6/19.2/21.5%；采样约 168 秒。
+- 当前 NNN 与该 exploration 的完整并集覆盖 49/50，Oracle-any 为 98%，平均真实唯一
+  候选为 25.2。
+
+在 frequency-first 聚合下，追加当前 legacy prefix budget 的完整结果：
+
+| 候选池 | 输出数 | Top-1/2/3 | Top-4/5 | Oracle-any | 采样成本说明 |
+|---|---:|---:|---:|---:|---|
+| NNN | 3 | 56/64/68 | 70/72 | 80 | 约 122.6 秒 |
+| NNN + L1 | 4 | 56/64/72 | 74/76 | 96 | L1 单独耗时未测 |
+| NNN + L1–2 | 5 | 62/66/78 | 80/82 | 98 | 预计低于完整 L1–3，待实测 |
+| NNN + L1–3 | 6 | 62/68/76 | 80/84 | 98 | 约 122.6 + 168 秒 |
+
+注意：上表使用同一个 frequency-first evaluator。历史默认聚合下，NNN 为 60/64/70，
+NNN+L1–3 为 60/66/70，说明采样候选池本身在旧协议下只直接改善 Top-2；62/68/76
+是“异质候选池 + 新聚合”的完整流程结果，不能全部归因于采样器。
+
 ### 10.4 本任务完成记录
 
 当前阶段实际修改：新增经过布局校验、默认防覆盖并记录来源哈希的离线 run 混合工具；
-没有修改 `sample_retro.py`、Euler-Beam、checkpoint 或历史结果。
+复用 Euler-Beam 已有 opt-in legacy score mode，没有修改 `sample_retro.py`、
+Euler-Beam、checkpoint 或历史结果。
 
 测试与实验：混合工具与评分器相关测试共 `17 passed`；六份新混合输出均为 3000 行，
 评分器严格识别为 `50 × 20 × 3`。NNN/SSS 直接复用原文件，其余六种输出写入新的
 `results/task10_mix_*` 目录，不覆盖历史结果。
 
-阶段结论：现有 no-op 与 stochastic 的差别只改善已有模式，没有产生新的正确 target。
-下一步不实现简单 per-run policy，而是设计真正不同、受控且有化学相关性的 exploration
-proposal。若新 proposal 在 Oracle 上产生独有命中，再回到 10.2 实现异质 run 接口。
+阶段结论：现有 no-op 与 stochastic 没有 target 互补性；普通 Euler 有互补 target，但
+单 run 支持太弱；当前 K3M2 legacy-triggered exploration 与 NNN 形成强互补，Oracle
+达到 98%。它以更高 invalid 和约 2.4× 顺序采样成本换取覆盖，需要在任务 12/13 中把
+候选来源、运行配置和实际两-run预算耗时固定下来，再决定是否形成正式一体化接口。
 
 Commit：`874825c Add auditable retrosynthesis run mixer`
 
 ## 7. 任务 11：评分聚合方法消融
 
-状态：`[ ] 已确认存在次级排序损失；排在任务 10.3 之后`
+状态：`[x] 四种无权重聚合已实现并完成离线消融；默认历史模式不变`
 
 仅当 Oracle 诊断证明存在明显“已覆盖但排名靠后”时开展。
 
@@ -355,7 +412,7 @@ rank 累积分数。它必须保留为 `legacy_best_rank` 或等价模式，确�
 - `legacy_best_rank`：当前规则；
 - `rrf`：只使用跨 augmentation reciprocal-rank 累积；
 - `frequency_first`：出现的 augmentation 数优先，局部排名作次级排序；
-- `hybrid`：标准化的频次、reciprocal rank 和最佳局部排名组合。
+- `hybrid`：RRF 加有界的最佳局部排名 bonus。
 
 任何聚合方法都只使用预测本身能够提供的信息，不能利用 target 选参数或排序。
 
@@ -369,13 +426,36 @@ rank 累积分数。它必须保留为 `legacy_best_rank` 或等价模式，确�
 
 ### 11.4 本任务完成记录
 
-实际修改：待填写。
+实际修改：`score_#global#.py` 新增显式 `--aggregation_mode`：
+`legacy_best_rank`、`rrf`、`frequency_first`、`hybrid`。默认仍为历史模式；没有暴露
+连续权重，也没有修改 `score_alpha` 默认值。frequency-first 以出现 augmentation 数
+为第一排序级、RRF 为 tie-break；hybrid 使用 `RRF + 1/(best_rank+1)`。
 
-测试与实验：待填写。
+测试与实验：新增模式优先级测试后，评分器与混合工具共 `18 passed`；排除仓库既有
+`test_beam.py` 失败后 `132 passed`。默认模式对当前 NNN 的 60/64/70、invalid 和
+165.333% legacy Unique 逐字回归一致。
 
-结论：待填写。
+代表性消融：
 
-Commit：待填写。
+| 候选池 | legacy | RRF | frequency-first | hybrid | Oracle |
+|---|---:|---:|---:|---:|---:|
+| NNN | 60/64/70 | 60/64/70 | 56/64/68 | 60/64/70 | 80 |
+| NNE | 60/64/70 | 60/64/70 | 60/64/70 | 60/64/70 | 86 |
+| EEE | 54/66/74 | 54/66/76 | 56/66/76 | 54/66/74 | 90 |
+| NNN + current L1–2 | 60/64/70 | 60/64/72 | 62/66/78 | 60/64/72 | 98 |
+| NNN + current L1–3 | 60/66/70 | 60/66/70 | 62/68/76 | 60/66/70 | 98 |
+
+结论：
+
+1. 单个 Euler exploration 新 target 支持过低，RRF/hybrid 不能把 NNE 的新增覆盖转化为
+   Top-3，证明早先的排序损失不只来自 `-1e8`。
+2. frequency-first 会让同质 NNN 的 Top-1/3 下降 4/2pp，不能无条件替换历史默认评分。
+3. 在高度互补的 aggressive exploration 候选池上，frequency-first 才产生完整 Top-k
+   收益；必须与 legacy 默认同时报告，并在独立更大评估集复核，不能称作纯采样提升。
+4. tiny benchmark 每个反应为 2pp。L1–2 与 L1–3 的 Top-2/3 取舍不足以证明两-run预算
+   普遍更好，任务 13 需要预先固定候选方案再扩大验证。
+
+Commit：`344ae59 Add opt-in augmentation aggregation modes`
 
 ## 8. 任务 12：采样输出元数据和接口健壮性
 

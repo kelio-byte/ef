@@ -310,9 +310,15 @@ python 'scripts/score_#global#.py' \
 真实唯一候选数和 run 两两 Jaccard overlap。旧 `Unique Rates` 为保持历史日志兼容继续
 输出，但它基于 `rank[:n_best]`，不是真正的原始采样多样性，可能超过 100%。
 
-当前仍保留一项重要的历史评分假设：聚合排序用一个很大的常数优先保证“任意
-augmentation 中的最好局部排名”，跨增强出现频率只在最好局部排名相同时起主要作用。
-在完成覆盖—排序归因前不改变该默认规则，避免破坏历史可比性。规划见
+默认 `--aggregation_mode legacy_best_rank` 保留历史聚合假设：优先保证候选在任意
+augmentation 中的最好局部排名，跨增强出现频率只在最好局部排名相同时起主要作用。
+另提供 `rrf`、`frequency_first` 和 `hybrid` 三个显式实验模式；它们不会改变默认值，
+比较新旧方法时必须使用同一个 aggregation mode，并同时报告历史默认结果。
+
+当前进一步验证的实验性异质候选池由 3 个 `stochastic_noop/full_probability` run 和
+2–3 个 `stochastic/legacy_triggered_reverse` exploration run 组成。它在 50 反应 tiny
+benchmark 上将 Oracle-any 提高到 98%，但采样成本约为当前单一配置的两倍以上；其中
+`legacy_triggered_reverse` 是偏向激进编辑的搜索启发式，不是校准概率。详细归因见
 [`new_docs/euler_beam_next_stage_plan.md`](new_docs/euler_beam_next_stage_plan.md)。
 
 ## 8. 项目结构
