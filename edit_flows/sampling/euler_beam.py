@@ -151,10 +151,16 @@ def _merge_state_candidates(
     return [branch for _, branch in ranked_items[:n_branches]]
 
 
-def _token_key(x_t: Tensor, pad_token: int, bos_token: int) -> Tuple[int, ...]:
-    """可哈希的 token 序列标识（排除 PAD 和 BOS）。"""
-    return tuple(int(t) for t in x_t[0].tolist()
-                 if int(t) not in (pad_token, bos_token))
+def _token_keys_batch(
+    x_t: Tensor, pad_token: int, bos_token: int,
+) -> List[Tuple[int, ...]]:
+    """整批传回 CPU 后构造状态 key，避免逐行 Tensor 标量转换。"""
+    rows = x_t.detach().cpu().tolist()
+    excluded = (pad_token, bos_token)
+    return [
+        tuple(token for token in row if token not in excluded)
+        for row in rows
+    ]
 
 
 def _step_log_p_batch(
@@ -442,10 +448,7 @@ def sample_euler_beam(
     device = next(model.parameters()).device
     B = x_0.shape[0]
     default_h = 1.0 / n_steps
-    origin_keys = [
-        _token_key(x_0[b:b + 1], pad_token, bos_token)
-        for b in range(B)
-    ]
+    origin_keys = _token_keys_batch(x_0, pad_token, bos_token)
 
     # ── 初始化: 每条样本创建 n_branches 条分支 ──
     all_branches: List[List[_BranchState]] = []
@@ -572,7 +575,7 @@ def sample_euler_beam(
         x_next_batch = _apply_edits_batch(
             x_candidates, actions_batch, max_seq_len, pad_token,
         )
-        x_next_cpu = x_next_batch.cpu()
+        next_keys = _token_keys_batch(x_next_batch, pad_token, bos_token)
 
         new_branches: Dict[int, List[_BranchState]] = {b: [] for b in range(B)}
         new_keys: Dict[int, List[Tuple[int, ...]]] = {b: [] for b in range(B)}
@@ -591,9 +594,7 @@ def sample_euler_beam(
                 t=s.t + adapt_h_values[i],
                 seed=child_seed_values[i],
             ))
-            new_keys[b].append(
-                _token_key(x_next_cpu[i:i + 1], pad_token, bos_token)
-            )
+            new_keys[b].append(next_keys[i])
 
         # 7. 逐样本: 去重、排序、剪枝、分裂
         for b in range(B):

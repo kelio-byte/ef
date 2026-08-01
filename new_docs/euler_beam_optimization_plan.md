@@ -757,17 +757,17 @@ bonus，保留 M=2、bonus=0.5 为当前最佳配置。
 
 ## 13. 任务 7：Profiling 与性能优化
 
-状态：`[ ] 未开始`
+状态：`[~] 已完成首轮 CPU profiling 与批量 key 构造优化`
 
 ### 分项计时
 
-- [ ] Transformer forward。
-- [ ] 私有 RNG 动作采样。
-- [ ] K×M 编辑应用。
-- [ ] 路径评分。
-- [ ] GPU→CPU 候选传输。
-- [ ] Python 去重和排序。
-- [ ] 总采样耗时。
+- [x] Transformer forward（首轮 cProfile）。
+- [x] 私有 RNG 动作采样（首轮 cProfile）。
+- [x] K×M 编辑应用（首轮 cProfile）。
+- [x] 路径评分（首轮 cProfile）。
+- [x] GPU→CPU 候选传输与 key 构造（首轮 cProfile，并完成优化）。
+- [x] Python 去重和排序（首轮 cProfile）。
+- [x] 总采样耗时（100 条短集）。
 - [ ] 峰值 GPU 显存。
 
 ### 参数组合
@@ -788,7 +788,30 @@ K=10, M=8
 - 更紧凑的状态表示；
 - mixed precision 后处理。
 
-结果：待填写。
+首轮结果（2026-08-01，20 条输入、K=3,M=2,n_runs=1,n_steps=30）：
+
+- 采样阶段 1.772 秒，其中 Transformer forward 累计 1.266 秒，约占 72%。
+- Python 后处理热点依次为私有 RNG 0.125 秒、token key 0.078 秒、批量编辑
+  0.071 秒、路径评分 0.026 秒；`_step_log_p_batch` 已不是主要瓶颈。
+- M=1/2/3 在 100 条输入、100 步上的采样时间分别为 8.80/7.44/8.04 秒。
+  成本没有随 M 线性增长，因为 Transformer 只对 parent forward，child 后处理较轻，
+  且不同 M 会改变每步合并后的活跃唯一状态数。不能用 M 直接推算耗时。
+
+完成的优化：把初始状态和每步所有候选一次性 `.cpu().tolist()`，再以纯 Python 整批
+构造 token key，取代逐样本/逐 token Tensor 标量转换。相同 cProfile 中 key 构造从
+0.078 秒降至 0.029 秒（约 63%）；100 条 M=2 短集从 7.44 秒降至 6.84 秒（单次约
+8.1%，仍需把它视作短测信号而非稳定全量加速比）。24 项单元测试通过，30 步和
+100 步真实 checkpoint predictions 均逐字节一致。
+
+下一轮 profiling 应使用 CUDA event 或同步分段计时进一步区分 forward、GPU RNG、
+编辑 kernel 和 CPU merge；当前不依据一次 cProfile 大范围重写 forward 路径。
+
+同日以 PyTorch CPU+CUDA profiler 对相同 20 条短集复核（profiler 本身有较大开销，
+不用于吞吐计时）：`addmm/GEMM` 占 self CUDA 约 58.6%，copy 6.8%，clamp 5.6%，
+layer norm 5.2%，attention 的 bmm/baddbmm 合计约 9.6%，`nonzero` 约 1.7%。这再次
+表明主要 GPU 成本在 Transformer 矩阵运算，编辑 kernel 和候选后处理并非当前首要
+瓶颈。后续性能研究应优先评估推理精度/编译/模型 forward batch 利用率；任何改变
+数值精度的方案都必须先做 predictions 与准确率回归。
 
 ---
 
