@@ -517,9 +517,37 @@ Commit：`f03bb61 Add auditable sampling metadata`
 
 ## 9. 任务 13：胜出方案完整验证与性能收口
 
-状态：`[ ] 未开始`
+状态：`[-] 进行中；已预注册独立 200 反应验证方案`
 
 只有任务 10 或 11 出现明确正向结果后执行。
+
+### 13.0 预注册验证方案（运行前固定）
+
+为避免在已经用于开发和筛选的 tiny 前 50 个反应上继续选择方案，本阶段使用
+`src/tgt-test-mini.txt` 中紧随其后的 reaction 50–249：输入 product 行区间为
+`[1000, 5000)`，共 200 个原始反应、4000 条 aug20 输入。mini 文件已核对为完整 test
+文件前 20028 行的逐字节前缀；本实验区间与 tiny 不重叠。
+
+运行前固定以下配置，不根据 holdout target 再调 K/M/bonus 或聚合权重：
+
+| 名称 | K/M/R | score mode | child policy | bonus | 用途 |
+|---|---:|---|---|---:|---|
+| NNN | 3/2/3 | full_probability | stochastic_noop | 0.5 | 当前主方法 |
+| LL | 3/2/2 | legacy_triggered_reverse | stochastic | 0.5 | 激进探索 |
+| NNN+LL | 5 个输出 | 两来源拼接 | 两来源拼接 | — | 完整实验流程 |
+
+固定评分：
+
+- NNN 单独使用历史默认 `legacy_best_rank` 报告主方法 Top-k 和 Oracle；
+- LL 单独报告历史默认指标，用于解释探索质量和 invalid 成本；
+- NNN+LL 同时报告 `legacy_best_rank` 与预先选定的 `frequency_first`；不得只报告较好者；
+- `n_best=5`，同时记录 Oracle、覆盖未进 Top-3、每 run invalid/duplicate/overlap；
+- tiny 的结果仅保留为开发集记录，holdout 200 的结果作为是否保留组合方案的依据。
+
+成本控制：按 tiny 实测线性外推，NNN 与 LL 顺序完整采样约 20 分钟；不直接运行约
+1001 个反应的整个 mini（预计约 1.5 小时），除非 200 反应先给出稳定正向证据。通过
+新增只读区间参数选择原文件行，不复制、不改写数据集；区间起点和长度必须按 augmentation
+完整对齐并写入 metadata，评分 target offset 必须与之交叉校验。
 
 ### 13.1 正确性
 
