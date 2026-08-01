@@ -340,6 +340,10 @@ benchmark 上将 Oracle-any 提高到 98%，但采样成本约为当前单一配
 输出数时，用可重复的 `--source_beam_size LABEL:SIZE` 声明覆盖值；工具会分别检查每个
 来源的布局、run 边界与 SHA-256，并生成 `mixing_metadata.json`。
 
+性能诊断可在短任务上显式添加 `--euler_beam_profile`。该选项会在各阶段之间同步 CUDA，
+并把 forward、proposal、step score、编辑和 merge/prune 分项时间写入 metadata；它会
+扰动 wall time，不应在正式准确率/吞吐实验中启用。
+
 ## 8. 项目结构
 
 ```text

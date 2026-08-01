@@ -517,7 +517,7 @@ Commit：`f03bb61 Add auditable sampling metadata`
 
 ## 9. 任务 13：胜出方案完整验证与性能收口
 
-状态：`[-] 进行中；已预注册独立 200 反应验证方案`
+状态：`[x] 已完成；保留效率默认与高覆盖实验模式两档配置`
 
 只有任务 10 或 11 出现明确正向结果后执行。
 
@@ -632,20 +632,59 @@ holdout 200 正式采样实测：
 | NNN（R=3） | 12000 | 474.916s | 1,951,848,448 B | 24,750,587,904 B |
 | LL（R=2） | 8000 | 462.018s | 1,478,682,112 B | 24,893,194,240 B |
 
-完整 NNN+LL 顺序采样成本为 936.934 秒，约为 NNN 单独的 1.973×。R 从 3 降到 2 只
-减少 2.7% wall time，明显不是按输出数线性缩放；下一步用启用同步点的短 profiling run
-区分模型 forward、proposal/edit、step score 和 merge/sort，不能用正式无同步 wall time
-臆测瓶颈。
+完整 NNN+LL 顺序采样成本为 936.934 秒，约为 NNN 单独的 1.973×。NNN R3 与 LL R2
+的正式 wall time 接近，但二者同时改变了方法语义，不能错误归因为“R 不缩放”。
+
+新增 opt-in `--euler_beam_profile`：仅用于短任务，在阶段边界同步 CUDA 并累计分项耗时；
+默认关闭，正式采样不增加逐步同步。5 个反应、batch=64 的完整 100 步结果：
+
+| 方法 | R | wall | forward+rate | 父分支评估 | 子候选评估 |
+|---|---:|---:|---:|---:|---:|
+| NNN | 2 | 8.971s | 6.319s | 37,534 | 75,068 |
+| NNN | 3 | 12.690s | 8.960s | 56,687 | 113,374 |
+| LL | 2 | 13.181s | 9.238s | 56,091 | 112,182 |
+| LL | 3 | 18.272s | 12.931s | 84,024 | 168,048 |
+
+同一方法内 R2→R3 的父/子评估接近 1.5×，run 数确实缩放。LL R2 之所以与 NNN R3
+同样慢，是因为激进状态保留更多活跃分支、产生更长序列；其父分支评估数已经接近 NNN
+R3。NNN R3 分项占比为 forward+rate 70.8%、分支准备 10.9%、编辑 7.0%、proposal
+5.3%、merge/prune 5.1%、step score 0.9%。因此 `_step_log_p` 已不是值得优先优化的瓶颈，
+下一轮性能研究应针对模型 forward/动态长度 padding，而不是继续微调 CPU step score。
+
+batch size 32/64/128 的 5 反应输出逐字节一致。NNN wall 为 12.80/12.69/13.54s，LL
+为 13.43/13.18/13.87s；64 略优，增大 batch 的统一 padding 抵消批次数减少，故保留 64，
+不继续扫描。
 
 ### 13.4 本任务完成记录
 
-实际修改：待填写。
+实际修改：
 
-测试与实验：待填写。
+- 增加 augmentation 对齐且保持全局 seed index 的只读 holdout 区间接口；评分 target
+  offset 与 metadata selection 交叉校验。
+- run 混合工具支持不同来源 beam size，严格生成 NNN R3 + LL R2 五输出候选池。
+- sampling metadata 增加 CUDA peak allocated/reserved。
+- Euler-Beam 增加默认关闭的阶段 profiling；只在显式短 profile 中同步，不改变正常路径。
 
-结论：待填写。
+测试与实验：
 
-Commit：待填写。
+- 排除仓库既有 `tests/sampling/test_beam.py` 后：`145 passed, 7 warnings`；该旧文件单独
+  仍为完全相同的 `17 failed, 18 passed`，失败来自非 Euler-Beam 的旧
+  `EditCandidate.log_u_real` 接口和 controlled-model 长度假设，本任务未修改对应代码。
+- profile 开/关输出完全一致；batch 32/64/128 的相同 product/run 输出逐字节一致。
+- 正式 holdout 两份输出分别为 12000/8000 行，metadata、selection、SHA-256 和评分布局
+  均通过自动校验；混合文件为 20000 行、beam=5。
+- NNN SHA-256：`18b2fa7ace6b33dc81649f757852706e5efccd131959fe1f606920c254a0e8b3`；
+  LL SHA-256：`502e1406d764373afe14113af05375b89a1c25c7939cd0e481ad44aaa35a8ef4`。
+
+结论：当前推荐分为两档。K3/M2/R3 full-probability/no-op、bonus 0.5、TF32 high 继续作为
+效率默认；它在独立 holdout 为 52/69/74，证明 Top-2/3 增长慢不是稳定问题。需要更高
+Top-3/coverage 且接受约 1.97× 采样成本时，使用 NNN+LL 五输出和 frequency-first；其
+holdout 为 54/71.5/79.5、Oracle 91，Top-3 配对净增 11/200 且 p=0.0074。由于 LL 是
+未校准的激进启发式且 Top-1/2 证据仍弱，不将组合流程静默设为默认，也不宣称模型本身
+准确率提高。
+
+Commits：`475be15`（holdout 接口）、`ca3d90f`（CUDA memory）、`e91e5ea`（stage
+profiling）、`ce2bad8`（holdout 结果；本文档收口见后续 Git log）。
 
 ## 10. 决策门槛
 
