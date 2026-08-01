@@ -1,13 +1,19 @@
 #!/usr/bin/env python
 """Sampling script for Edit Flows retrosynthesis.
 
-Products are processed in GPU batches.  Each product is independently sampled
-n_samples times, producing n_samples consecutive lines in the output.
+Products are processed in GPU batches.  Each product produces consecutive
+outputs: ``n_samples`` for Euler or ``n_runs`` for Euler-Beam.
 """
 
 import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
 import math
 import os
+import re
+import subprocess
+import time
 import torch
 from torch import Tensor
 from tqdm import tqdm
@@ -58,6 +64,151 @@ def _make_euler_beam_sample_seeds(
         for i in range(n_products)
         for r in range(n_runs)
     ]
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _path_metadata(path: str, include_sha256: bool = False) -> dict:
+    absolute_path = os.path.abspath(path)
+    stat = os.stat(absolute_path)
+    metadata = {
+        "path": absolute_path,
+        "size_bytes": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+    if include_sha256:
+        metadata["sha256"] = _sha256_file(absolute_path)
+    return metadata
+
+
+def _infer_augmentation(*values: str | None) -> tuple[int | None, str | None]:
+    """Infer augmentation only from an explicit ``augN`` path component."""
+    matches = []
+    for value in values:
+        if not value:
+            continue
+        match = re.search(r"(?:^|[/_\-])aug(?:mentation)?[_\-]?(\d+)", value,
+                          flags=re.IGNORECASE)
+        if match:
+            matches.append((int(match.group(1)), value))
+    unique = {number for number, _ in matches}
+    if len(unique) == 1:
+        number = next(iter(unique))
+        source = next(value for candidate, value in matches
+                      if candidate == number)
+        return number, source
+    return None, None
+
+
+def _git_state() -> dict:
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        dirty = bool(subprocess.run(
+            ["git", "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout)
+    except (OSError, subprocess.CalledProcessError):
+        return {"commit": None, "dirty": None}
+    return {"commit": commit, "dirty": dirty}
+
+
+def _outputs_per_product(args) -> int:
+    if args.sampler == "euler_beam":
+        return args.n_runs
+    return args.n_samples
+
+
+def _build_sampling_metadata(
+    args,
+    cfg: dict,
+    *,
+    prediction_path: str,
+    product_count: int,
+    output_line_count: int,
+    n_sampling_steps: int,
+    sample_scheduler_name: str,
+    train_scheduler_name: str,
+    use_origin_mask: bool,
+    elapsed_seconds: float,
+) -> dict:
+    # Augmentation describes the actual input layout, so it must not be
+    # inferred from the checkpoint's training data directory.  A single
+    # --product has no augmentation layout to infer.
+    augmentation, augmentation_source = _infer_augmentation(
+        args.products_file,
+    )
+    input_metadata = {
+        "kind": "products_file" if args.products_file else "single_product",
+        "product_count": product_count,
+    }
+    if args.products_file:
+        input_metadata.update(_path_metadata(
+            args.products_file, include_sha256=True,
+        ))
+
+    sampling = {
+        "n_steps": n_sampling_steps,
+        "sample_scheduler": sample_scheduler_name,
+        "train_scheduler": train_scheduler_name,
+        "seed": args.seed,
+        "seed_applied_to_sampler": args.sampler == "euler_beam",
+    }
+    if args.sampler == "euler_beam":
+        sampling.update({
+            "n_branches": args.n_branches,
+            "n_children": args.n_children,
+            "n_runs": args.n_runs,
+            "score_mode": args.euler_beam_score_mode,
+            "changed_state_bonus": args.euler_beam_changed_state_bonus,
+            "matmul_precision": args.euler_beam_matmul_precision,
+            "child_policy": args.euler_beam_child_policy,
+            "seed_scope": "stable product/run streams",
+        })
+    else:
+        sampling["n_samples"] = args.n_samples
+        sampling["seed_scope"] = (
+            "not applied by sample_retro.py"
+            if args.sampler == "euler" else "sampler-specific"
+        )
+
+    return {
+        "schema_version": 1,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "layout": "input-product-major, output-minor",
+        "sampler": args.sampler,
+        "augmentation": augmentation,
+        "augmentation_inferred_from": augmentation_source,
+        "checkpoint": _path_metadata(args.checkpoint),
+        "input": input_metadata,
+        "product_count": product_count,
+        "output_beam_size": _outputs_per_product(args),
+        "output_line_count": output_line_count,
+        "output_sha256": _sha256_file(prediction_path),
+        "sampling": sampling,
+        "runtime": {
+            "elapsed_seconds": elapsed_seconds,
+            "batch_size": args.batch_size,
+            "device": args.device,
+        },
+        "model": {
+            "configured_use_origin_mask": cfg.get("use_origin_mask", False),
+            "effective_use_origin_mask": use_origin_mask,
+        },
+        "git": _git_state(),
+    }
 
 
 def main():
@@ -205,12 +356,16 @@ def main():
 
     n_products = len(products)
     product_ids = [tokenize_smiles(s, token2id) for s in products]
+    outputs_per_product = _outputs_per_product(args)
 
     if args.output_dir:
         os.makedirs(args.output_dir, exist_ok=True)
         pred_file = os.path.join(args.output_dir, "predictions.txt")
         f_out = open(pred_file, "w")
-        print(f"Sampling {n_products} products x {args.n_samples} samples")
+        print(
+            f"Sampling {n_products} products x {outputs_per_product} "
+            "outputs"
+        )
         print(f"Batch size: {args.batch_size}")
         print(f"Predictions will be saved to: {pred_file}")
     else:
@@ -244,6 +399,8 @@ def main():
               f"matmul_precision={args.euler_beam_matmul_precision}, "
               f"child_policy={args.euler_beam_child_policy}")
 
+    sampling_started_at = time.perf_counter()
+    written_predictions = 0
     try:
         for batch_idx in tqdm(range(n_batches), desc="Batches"):
             start = batch_idx * batch_size
@@ -348,6 +505,7 @@ def main():
                     line = _ids_to_str(row.tolist(), id2token)
                     if f_out:
                         f_out.write(line + "\n")
+                        written_predictions += 1
                     else:
                         print(line)
     finally:
@@ -355,6 +513,31 @@ def main():
             f_out.close()
 
     if args.output_dir:
+        elapsed_seconds = time.perf_counter() - sampling_started_at
+        expected_predictions = n_products * outputs_per_product
+        if written_predictions != expected_predictions:
+            raise RuntimeError(
+                "sampler output count mismatch: expected "
+                f"{expected_predictions}, wrote {written_predictions}"
+            )
+        metadata = _build_sampling_metadata(
+            args,
+            cfg,
+            prediction_path=pred_file,
+            product_count=n_products,
+            output_line_count=written_predictions,
+            n_sampling_steps=n_sampling_steps,
+            sample_scheduler_name=sample_scheduler_name,
+            train_scheduler_name=train_scheduler_name,
+            use_origin_mask=use_origin_mask,
+            elapsed_seconds=elapsed_seconds,
+        )
+        metadata_path = os.path.join(
+            args.output_dir, "sampling_metadata.json",
+        )
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2, sort_keys=True)
+            f.write("\n")
         if args.sampler == "euler_beam":
             print(f"Done. Total predictions: {n_products * args.n_runs} "
                   f"(n_branches={args.n_branches}, "
@@ -362,6 +545,7 @@ def main():
         else:
             print(f"Done. Total predictions: {n_products * args.n_samples}")
         print(f"Saved to: {pred_file}")
+        print(f"Metadata: {metadata_path}")
 
 
 if __name__ == "__main__":

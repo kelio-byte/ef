@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -75,6 +76,83 @@ def test_resolve_input_layout_allows_only_complete_explicit_prefix():
             augmentation=20,
             beam_size=3,
             length=10,
+        )
+
+
+def test_prediction_metadata_validates_sampling_layout_and_hash(tmp_path):
+    prediction_path = tmp_path / "predictions.txt"
+    prediction_bytes = b"A\nB\nC\nD\nE\nF\n"
+    prediction_path.write_bytes(prediction_bytes)
+    metadata = {
+        "augmentation": 2,
+        "product_count": 2,
+        "output_beam_size": 3,
+        "output_line_count": 6,
+        "output_sha256": hashlib.sha256(prediction_bytes).hexdigest(),
+    }
+
+    score_global.validate_prediction_metadata(
+        metadata,
+        metadata_path=str(tmp_path / "sampling_metadata.json"),
+        prediction_path=str(prediction_path),
+        prediction_count=6,
+        augmentation=2,
+        beam_size=3,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("output_beam_size", 2, "beam_size"),
+        ("augmentation", 10, "augmentation"),
+        ("output_line_count", 5, "line count"),
+        ("output_sha256", "stale", "SHA-256"),
+    ],
+)
+def test_prediction_metadata_rejects_mismatched_score_inputs(
+    tmp_path,
+    field,
+    value,
+    message,
+):
+    prediction_path = tmp_path / "predictions.txt"
+    prediction_bytes = b"A\nB\nC\nD\nE\nF\n"
+    prediction_path.write_bytes(prediction_bytes)
+    metadata = {
+        "augmentation": 2,
+        "product_count": 2,
+        "output_beam_size": 3,
+        "output_line_count": 6,
+        "output_sha256": hashlib.sha256(prediction_bytes).hexdigest(),
+    }
+    metadata[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        score_global.validate_prediction_metadata(
+            metadata,
+            metadata_path=str(tmp_path / "sampling_metadata.json"),
+            prediction_path=str(prediction_path),
+            prediction_count=6,
+            augmentation=2,
+            beam_size=3,
+        )
+
+
+def test_metadata_discovery_supports_legacy_inputs_and_rejects_ambiguity(
+    tmp_path,
+):
+    prediction_path = tmp_path / "predictions.txt"
+    prediction_path.write_text("A\n")
+    assert score_global.load_and_validate_prediction_metadata(
+        str(prediction_path), 1, augmentation=1, beam_size=1,
+    ) is None
+
+    (tmp_path / "sampling_metadata.json").write_text("{}")
+    (tmp_path / "mixing_metadata.json").write_text("{}")
+    with pytest.raises(ValueError, match="multiple prediction metadata"):
+        score_global.load_and_validate_prediction_metadata(
+            str(prediction_path), 1, augmentation=1, beam_size=1,
         )
 
 

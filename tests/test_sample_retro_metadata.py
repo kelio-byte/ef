@@ -1,0 +1,100 @@
+import hashlib
+from types import SimpleNamespace
+
+from scripts.sample_retro import (
+    _build_sampling_metadata,
+    _infer_augmentation,
+    _outputs_per_product,
+)
+
+
+def _euler_beam_args(tmp_path):
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    dataset_dir = tmp_path / "USPTO_aug20_global"
+    dataset_dir.mkdir()
+    products = dataset_dir / "src-test.txt"
+    products.write_text("C C\nN N\n")
+    return SimpleNamespace(
+        sampler="euler_beam",
+        checkpoint=str(checkpoint),
+        products_file=str(products),
+        data_dir=None,
+        n_steps=100,
+        n_samples=99,
+        n_branches=3,
+        n_children=2,
+        n_runs=3,
+        seed=42,
+        euler_beam_score_mode="full_probability",
+        euler_beam_changed_state_bonus=0.5,
+        euler_beam_matmul_precision="high",
+        euler_beam_child_policy="stochastic_noop",
+        batch_size=64,
+        device="cuda",
+    )
+
+
+def test_euler_beam_output_count_uses_n_runs_not_n_samples(tmp_path):
+    args = _euler_beam_args(tmp_path)
+    assert _outputs_per_product(args) == 3
+    args.sampler = "euler"
+    assert _outputs_per_product(args) == 99
+
+
+def test_augmentation_inference_requires_unambiguous_aug_path():
+    assert _infer_augmentation("datasets/example_aug20_global/src.txt") == (
+        20,
+        "datasets/example_aug20_global/src.txt",
+    )
+    assert _infer_augmentation("datasets/plain/src.txt") == (None, None)
+    assert _infer_augmentation("a_aug10/x", "b_aug20/y") == (None, None)
+
+
+def test_sampling_metadata_records_effective_euler_beam_configuration(
+    tmp_path,
+):
+    args = _euler_beam_args(tmp_path)
+    prediction_path = tmp_path / "predictions.txt"
+    prediction_bytes = b"A\nB\nC\nD\nE\nF\n"
+    prediction_path.write_bytes(prediction_bytes)
+
+    metadata = _build_sampling_metadata(
+        args,
+        {"data_dir": "datasets/USPTO_aug20_global", "use_origin_mask": False},
+        prediction_path=str(prediction_path),
+        product_count=2,
+        output_line_count=6,
+        n_sampling_steps=80,
+        sample_scheduler_name="cubic",
+        train_scheduler_name="linear",
+        use_origin_mask=False,
+        elapsed_seconds=1.25,
+    )
+
+    assert metadata["sampler"] == "euler_beam"
+    assert metadata["augmentation"] == 20
+    assert metadata["output_beam_size"] == 3
+    assert metadata["output_line_count"] == 6
+    assert metadata["output_sha256"] == hashlib.sha256(
+        prediction_bytes,
+    ).hexdigest()
+    assert metadata["sampling"] == {
+        "n_steps": 80,
+        "sample_scheduler": "cubic",
+        "train_scheduler": "linear",
+        "seed": 42,
+        "seed_applied_to_sampler": True,
+        "n_branches": 3,
+        "n_children": 2,
+        "n_runs": 3,
+        "score_mode": "full_probability",
+        "changed_state_bonus": 0.5,
+        "matmul_precision": "high",
+        "child_policy": "stochastic_noop",
+        "seed_scope": "stable product/run streams",
+    }
+    assert metadata["input"]["product_count"] == 2
+    assert metadata["input"]["sha256"] == hashlib.sha256(
+        b"C C\nN N\n",
+    ).hexdigest()

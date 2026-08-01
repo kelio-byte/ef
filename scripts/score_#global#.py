@@ -2,6 +2,7 @@ from rdkit import Chem
 import os
 import argparse
 from functools import partial
+import hashlib
 import json
 from tqdm import tqdm
 import multiprocessing
@@ -44,6 +45,113 @@ def validate_scoring_options(opt):
             "raw scoring requires augmentation=1, got "
             f"{opt.augmentation}"
         )
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_prediction_metadata(
+    metadata,
+    metadata_path,
+    prediction_path,
+    prediction_count,
+    augmentation,
+    beam_size,
+):
+    """Cross-check a sampling or mixing manifest against scorer inputs."""
+    required = ("output_beam_size", "output_line_count", "output_sha256")
+    missing = [field for field in required if field not in metadata]
+    if missing:
+        raise ValueError(
+            f"prediction metadata {metadata_path} is missing required "
+            f"fields: {', '.join(missing)}"
+        )
+
+    metadata_beam_size = metadata["output_beam_size"]
+    if metadata_beam_size != beam_size:
+        raise ValueError(
+            "beam_size does not match prediction metadata: metadata has "
+            f"{metadata_beam_size}, scorer received {beam_size}."
+        )
+    metadata_augmentation = metadata.get("augmentation")
+    if (metadata_augmentation is not None
+            and metadata_augmentation != augmentation):
+        raise ValueError(
+            "augmentation does not match prediction metadata: metadata has "
+            f"{metadata_augmentation}, scorer received {augmentation}."
+        )
+    if metadata["output_line_count"] != prediction_count:
+        raise ValueError(
+            "prediction line count does not match metadata: metadata has "
+            f"{metadata['output_line_count']}, file has {prediction_count}."
+        )
+
+    actual_sha256 = _sha256_file(prediction_path)
+    if metadata["output_sha256"] != actual_sha256:
+        raise ValueError(
+            "prediction SHA-256 does not match metadata; the predictions "
+            "file or metadata was changed after generation."
+        )
+
+    if "product_count" in metadata:
+        expected_count = metadata["product_count"] * metadata_beam_size
+        if expected_count != prediction_count:
+            raise ValueError(
+                "sampling metadata product_count is inconsistent with its "
+                f"output layout: expected {expected_count} lines, got "
+                f"{prediction_count}."
+            )
+    if "reaction_count" in metadata:
+        expected_count = (
+            metadata["reaction_count"]
+            * augmentation
+            * metadata_beam_size
+        )
+        if expected_count != prediction_count:
+            raise ValueError(
+                "mixing metadata reaction_count is inconsistent with its "
+                f"output layout: expected {expected_count} lines, got "
+                f"{prediction_count}."
+            )
+
+
+def load_and_validate_prediction_metadata(
+    prediction_path,
+    prediction_count,
+    augmentation,
+    beam_size,
+):
+    parent = os.path.dirname(os.path.abspath(prediction_path))
+    candidates = [
+        os.path.join(parent, filename)
+        for filename in ("sampling_metadata.json", "mixing_metadata.json")
+        if os.path.exists(os.path.join(parent, filename))
+    ]
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        raise ValueError(
+            "multiple prediction metadata files found; remove the stale "
+            f"manifest before scoring: {candidates}"
+        )
+
+    metadata_path = candidates[0]
+    with open(metadata_path, "r") as f:
+        metadata = json.load(f)
+    validate_prediction_metadata(
+        metadata,
+        metadata_path=metadata_path,
+        prediction_path=prediction_path,
+        prediction_count=prediction_count,
+        augmentation=augmentation,
+        beam_size=beam_size,
+    )
+    return metadata_path
 
 
 def resolve_input_layout(
@@ -505,6 +613,16 @@ def main(opt):
 
     print("Prediction File Length", len(prediction_lines))
     print("Origin Target File Length", len(target_lines))
+    metadata_path = load_and_validate_prediction_metadata(
+        prediction_path=opt.predictions,
+        prediction_count=len(prediction_lines),
+        augmentation=opt.augmentation,
+        beam_size=opt.beam_size,
+    )
+    if metadata_path:
+        print(f"Validated prediction metadata: {metadata_path}")
+    else:
+        print("Prediction metadata: not found (legacy text-only input)")
     data_size, used_prediction_count, used_target_count = resolve_input_layout(
         prediction_count=len(prediction_lines),
         target_count=len(target_lines),
