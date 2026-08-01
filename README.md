@@ -1,216 +1,358 @@
-### Edit Flows 是什么
+# Edit Flows：基于离散编辑流的逆合成预测
 
-Edit Flows 把序列生成建模为序列空间上的**连续时间马尔可夫链**（CTMC）。状态是序列，跃迁是编辑操作：
+本项目研究如何把序列生成建模为连续时间马尔可夫链（Continuous-Time Markov
+Chain, CTMC）上的编辑过程，并将其用于单步逆合成预测。给定产物 SMILES，模型通过
+插入（insert）、删除（delete）和替换（substitute）逐步生成反应物 SMILES。
 
-- insert
-- delete
-- substitute
+仓库目前处于研究迭代阶段。当前工作的重点不是修改训练模型，而是在固定 checkpoint
+和测试协议下改进 `Euler-Beam` 采样：同时保证方法正确、Top-k 准确率可靠，并降低
+RTX 3090 上的推理时间。
 
-模型在每个位置预测：
+## 1. 方法概览
 
-- 三类编辑的总速率 `λ_ins / λ_sub / λ_del`
-- 插入 token 分布 `Q_ins`
-- 替换 token 分布 `Q_sub`
+### 1.1 Edit Flows
 
-从而定义所有可能编辑的瞬时速率。
-
-### Edit Flows 中的训练步骤
-
-引入增广空间 $(\mathcal{Z} = (\mathcal{T} \cup \{\varepsilon\})^N)$，其中 $\varepsilon$ 是特殊的 **gap token**（不在真实词表中，代码中为 `GAP_TOKEN = 130`）。
-
-#### 对齐 (Alignment)
-
-将 $x_0, x_1$ 对齐到等长的 $z_0, z_1$。对齐方式决定了编辑操作的解释：
-
-- $z_0[i] = \varepsilon, z_1[i] = c$ → 需要**插入**
-- $z_0[i] = c, z_1[i] = \varepsilon$ → 需要**删除**
-- $z_0[i] = c_1, z_1[i] = c_2$ → 需要**替换**
-
-在 Z 空间中，条件路径定义为逐 token 独立的混合：
+对产物序列 $x_0$ 和目标反应物序列 $x_1$ 做编辑对齐，得到等长的增广序列
+$z_0,z_1$。增广空间包含特殊 gap token：
 
 $$
-p_t(z_t^i \mid z_0^i, z_1^i) = (1 - \kappa_t) \cdot \delta_{z_0^i} + \kappa_t \cdot \delta_{z_1^i}
+\mathcal{Z}=(\mathcal{T}\cup\{\varepsilon\})^N.
 $$
 
-简单来说 $z_t$ 就是按 $\kappa_t$ 的概率选择是 $z_0$ 还是 $z_1$，而 $x_t$ 就是 $z_t$ 移除掉所有的 gap tokens。其中 $\kappa_t$ 为时间的调整函数（下文称之为scheduler），原论文中建议为 $\kappa_t = t^3$。
+每个对齐位置对应一种编辑：
 
-#### 训练loss
+- $z_0^i=\varepsilon,z_1^i=c$：插入 token $c$；
+- $z_0^i=c,z_1^i=\varepsilon$：删除 token $c$；
+- $z_0^i=c_1,z_1^i=c_2$：将 $c_1$ 替换为 $c_2$。
 
-$$
-\mathcal{L}(\theta) = \mathbb{E} \left[ \sum_{x \neq x_t} u_t^\theta(x|x_t) -
-\sum_{i=1}^N \mathbf{1}[z_1^i \neq z_t^i] \cdot \frac{\dot{\kappa}_t}{1-\kappa_t} \cdot \log u_t^\theta(x(z_t, i, z_1^i) \mid x_t) \right]
-$$
+模型接收当前序列和时间，预测每个有效位置的三类编辑速率，以及插入、替换 token
+的条件分布：
 
-简单来说，网络需要对 $x_t$ 中的每一个token预测每一种编辑的速率。假设v是真实的编辑速率，例如对于 $x_t$ 来说这个token后面需要再添加三个token `C`才能和 $x_1$ 一致，则"插入token `C`"这个操作的速率即为3；若需要删除，则"删去此token"的速率即为1。假设 $u^\theta$ 为网络预测的速率，则训练loss的不严谨的简单版本为：
-
-$$
-\mathcal{L}(\theta) = u^\theta - \frac{\dot{\kappa}_t}{1-\kappa_t} v \cdot \log u^\theta
-$$
-
-求导计算后可知最优 $u^\theta$ 为 $ \frac{\dot{\kappa}_t}{1-\kappa_t} v $。因此可以说我们希望网络预测的就是真实的编辑速率（乘一个系数）。
-
-### Edit Flows 中的采样步骤
-
-从 $t=0$ 开始，用一阶 Euler 步近似求解 CTMC，直到 $t=1$：
-
-```
-1. 初始化: x_0 ~ p(x_0), t = 0
-2. While t < 1:
-   a. 模型前向: λ_ins, λ_sub, λ_del, Q_ins, Q_sub = model(x_t, t)
-   b. 自适应步长: h_adapt = min(h, (1-κ_t)/κ̇_t)
-   c. 每种编辑独立采样:
-      P(ins)  = 1 - exp(-h_adapt · λ_ins)
-      P(del/sub) = 1 - exp(-h_adapt · (λ_sub + λ_del))
-      P(del) = P(del/sub) · λ_del/(λ_sub + λ_del)
-      P(sub) = P(del/sub) · λ_sub/(λ_sub + λ_del)
-   d. 插入/替换从 Q_ins/Q_sub 采样具体 token
-   e. 并行应用所有编辑操作
-   f. t += h_adapt
+```text
+model(x_t, t)
+  -> lambda_insert, lambda_substitute, lambda_delete
+  -> Q_insert(token), Q_substitute(token)
 ```
 
-简单来说，由于预测的速率与真实速率相似，我们就可以相应地按照速率的大小来选择进行编辑操作的概率，然后就可以进行采样了。
-
-### 初始实验
-
-在之前r-smiles处理的两种数据集上，直接进行训练与采样。结果为：standard Top-1 22.2%，#global# Top-1 40.6%。之后修复了模型的一个实现错误，#global# Top-1 提升到了 43.519%。（接下来反馈的数据都为#global# Top-1的结果）。
-
-### Oracle 分析
-
-上文已经说明了，模型预测的速率的最优解即为真实的速率，那我们直接用真实速率进行采样结果会怎么样呢？这样可以先排除模型训练的问题，来分析是否采样的相关代码有没有写错，以及采样时使用的kappa函数该如何选择。
-
-#### Standard 数据集 (USPTO_50K_PtoR_aug20)
-
-| Metric | Cubic | Linear | 变化 |
-|--------|-------|--------|------|
-| Top-1 Acc | 93.2% | **97.4%** | **+4.2pp** |
-| Top-2 Acc | 99.4% | 99.9% | +0.5pp |
-| Top-3 Acc | 99.8% | 100.0% | +0.2pp |
-| Invalid SMILES | 22.6% | **9.2%** | **-59%** |
-| Unique Rates | 14.8% | 12.2% | — |
-
-#### #global# 数据集 (USPTO_50K_PtoR_aug20_#global#)
-
-| Metric | Cubic | Linear | 变化 |
-|--------|-------|--------|------|
-| Top-1 Acc | 93.4% | **98.6%** | **+5.2pp** |
-| Top-2 Acc | 99.5% | 100.0% | +0.5pp |
-| Top-3 Acc | 100.0% | 100.0% | — |
-| Invalid SMILES | 9.0% | **2.6%** | **-71%** |
-| Unique Rates | 15.1% | 11.9% | — |
-
-发现oracle的整体表现很好，说明采样的相关逻辑没有问题。此外，发现linear scheduler（即 $\kappa_t = t$）整体结果更好，这很可能是由于相比于cubic scheduler，linear scheduler让采样步骤更加平均，而不是集中在一开始。
-
-### scheduler 无关的训练过程与模型
-
-上文有说原论文中的训练loss为（省去 $\theta$，并设 $k_t = \frac{\dot{\kappa}_t}{1-\kappa_t}$）：
+采样器再将速率转换为一个 Euler 时间步内的事件概率。例如，速率为 $\lambda$、步长
+为 $h$ 时，事件发生概率为：
 
 $$
-\mathcal{L} = u - k_t v \cdot \log u
+p(\text{event})=1-\exp(-h\lambda).
 $$
 
-设 $k_t u' = u$, 则：
+同一步可以在多个位置触发编辑，并不是每步最多编辑一次。
 
-$$
-\mathcal{L} = k_t u' - k_t v \cdot \log(k_t u') = k_t (u' - v \cdot \log u') - k_t v \cdot \log k_t
-$$
+### 1.2 对齐、训练和采样流程
 
-其中 $ k_t v \cdot \log k_t $ 为一个模型无关的常数，可以丢弃。此时经过求导推导后最优的 $u$ 为 $v$。
-
-接下来设 $l_t = u' - v \cdot \log u'$，为时间刻 $t$ 时的损失（这里省去了对于不同token位置、不同操作、不同样本的平均）：
-$$
-\mathcal{L'} = \int_0^1 k_t l_t \ dt = \int_0^1 \frac{\dot{\kappa}_t}{1-\kappa_t} l_t \ dt = \int_0^1 \frac{1}{1-\kappa_t} l_t \ d\kappa_t 
-$$
-
-因此我们发现其实$\kappa_t$只是作为一个采样密度调整的作用（例如cubic就会在接近0的部分采样的更密集），但是在数学上来说在概率期望意义上是没有区别的。
-
-因此这里有几点可以变动的地方：
-
-1. 让模型预测 $u'$ 而不是 $u$。因为 $u'$ 没有乘 $k_t = \frac{\dot{\kappa}_t}{1-\kappa_t}$ 这个系数，所以有两点好处：第一点是当t接近为0时，$k_t$ 对于cubic scheduler会接近0，从而$u$也接近0，我们就不能对模型$t=0$附近的初始预测进行分析了，换为$u'$就不会有这个问题；第二点是t接近1时，$k_t$会发散为无穷，让网络的预测输出量级有很大的变化，而使用$u'$就不会有这个问题。
-
-2. 让模型输出scheduler无关的$\kappa_t$，而不是$t$。
-
-3. 生成采样时可以使用与训练时不同的scheduler，因为已经证明了训练过程本质是scheduler无关的。
-
-于是尝试让模型预测$u'$ 而不是 $u$的实验，结果为`45.057%`。换为linear scheduler进行采样，结果为`46.814%`，这稍有符合oracle相关的猜测，但是提升并不明显。
-
-### 让模型知道哪些token是来自于$x_0$的尝试
-
-可以注意到，无论是训练时还是采样时，我们都可以明确知道哪些token是完全来自于 $x_0$ 而不是后续添加与更改的。尝试将这个信息作为模型的输入进行训练，结果为`50.689%`，说明这个信息还是比较有用的。
-
-### 去除dropout
-
-在尝试调整参数的时候，发现dropout变小会显著地提升性能。当去掉dropout的时候，正确率为`54.803%`。
-
-### 增加正则entropy loss
-
-之前在`first-step-analysis`的分支中的实验发现，目前结果在面对一些不确信的数据时，输出速率分布得有些不集中，直观来讲就是不太“干净”。这和ground truth数据是不相符得，它一般只有两三个位置有正的编辑速率。因此，此次尝试（在main分支的提交中）使用熵正则损失旨在让模型输出速率分布更加集中一些：假设输出速率为 $u_i$ 对于 $i = 1 \sim N$，其中 $N$ 为序列长度，则损失为：
-$$
-\mathcal{L} = \sum_{i=1}^N - p_i\log p_i,\ p_i = {u_i \over \sum_{i=1}^N u_i}
-$$
-
-### beam search研究
-
-目前问题：目前edit flow模型是按照概率进行直接采样，这导致目前仍然无法避免之前flow模型的一些遗留问题，例如采样效率低、生成结果没有确信度（即模型最相信的结果是哪一个）、top10准确率增长不高。
-
-因此目前的目标是：能不能参考自回归模型的beam search，将每一步编辑认为是走一步，然后按照某种score对路径进行赋值，然后最终按照score排序来选出top k的路径。
-
-目前的定下的框架如下：
-
-假设目前绝对时间为kappa，序列为seq，模型输入kappa与seq后，得出的速率预测u_e（指的是没有乘k(t)
-  的，即直接表示kappa~1中应该进行几次编辑）目前我觉得遗留的问题是：
-
-1. 如何通过(kappa, seq, u_e)计算出$p_e, p_{stop}$。然后我们就可以选出动作e了，并计算出下一步的序列seq'（若不stop）。 其中 $\sum_e p_e + p_{stop} = 1$，然后我们可以将$\sum_i \log p_e^i $ （即概率的乘积）作为最终分数。
-2. 如何通过(kappa, seq, u_e, e)来确定下一步时间kappa'，然后就可以继续进行(kappa', seq')的迭代。
-
-目前采用的一个方案如下：
-
-对当前 state：
-
-$$
-U = \sum_e u_e \\
-p_{\text{stop}} = e^{-U} \\
-p_e = (1-e^{-U}) \cdot \frac{u_e}{U} \\
-$$
-- `STOP` child：`log_prob = log(p_stop)`
-
-- edit child：`log_prob = log(p_e)`
-
-下一时间
-
-对所有 edit child，共用：
-$$
-kappa' = kappa + (1-kappa)\left(\frac{1}{U} - \frac{e^{-U}}{1-e^{-U}}\right)
-$$
-再做：
-
-- `clip(kappa', kappa + eps, 1 - eps)`
-
-### 目前正确率演进
-
+```text
+tokenized product/target
+        |
+        v
+Levenshtein alignment -> z0, z1 with <GAP>
+        |
+        v
+sample intermediate z_t -> remove gaps -> x_t
+        |
+        v
+Transformer predicts edit rates and token distributions
+        |
+        v
+Euler / Euler-Beam / single-edit greedy or beam sampler
+        |
+        v
+canonicalize and aggregate 20 test augmentations -> Top-k accuracy
 ```
-45.057%
-|
-| 采样侧scheduler: cubic -> linear
-V
-46.814%
-|
-| + 使用是否编辑的输入（use_origin_mask）
-V
-50.689%
-| |
-| | dropout 0.3 -> 0.1
-| V
-| 52.826%
-| |
-| | dropout 0.1 -> 0.0
-| V
-| 54.803% 
-|
-| + entropy正则损失：entropy_alpha = 1.0
-V
-51.548%
-|
-| entropy_alpha 1.0 -> 0.1 
-V
-52.367%
+
+训练配置位于 `configs/retro.yaml`。训练脚本优先读取预先对齐的数据；不存在时会退回
+在线动态规划对齐，但速度明显更慢。
+
+## 2. 采样器
+
+项目主要提供以下采样方式：
+
+| 采样器 | 入口 | 核心行为 | 每个产物的输出数 |
+|---|---|---|---:|
+| Euler | `sample_euler()` | 多位置随机编辑，轨迹互相独立 | `n_samples` |
+| Euler-Beam | `sample_euler_beam()` | 每个状态产生 M 个后继，合并、排序并保留 K 个状态 | `n_runs` |
+| Greedy edit | `sample_greedy_single_edit()` | 每步选择一个最高分编辑 | 1 |
+| Beam edit | `sample_beam_single_edit()` | 单编辑候选展开与 beam 剪枝 | 1 |
+
+### 2.1 Euler
+
+`n_samples=N` 表示对同一个输入运行 N 条独立随机轨迹。每条轨迹都完整执行
+`n_steps` 个 Euler 时间步，轨迹之间不合并、不排序、不剪枝。
+
+在每个时间步，插入过程和删除/替换竞争过程会在所有有效位置上采样，因此一次时间步
+可能不发生编辑，也可能同时发生多次编辑。
+
+### 2.2 Euler-Beam
+
+Euler-Beam 的三个关键规模参数是：
+
+- `n_branches=K`：每个 run 最多保留的内部状态数；
+- `n_children=M`：每个父状态在每一步产生的随机后继数；
+- `n_runs=R`：对每个产物独立执行 R 次搜索，最终输出 R 条预测。
+
+单步搜索结构为：
+
+```text
+最多 K 个父状态
+    -> 一次批量模型 forward
+    -> 每个父状态采样 M 个后继（最多 K*M 个候选）
+    -> 批量应用编辑并计算一步分数
+    -> 相同 token 状态合并概率质量
+    -> 排序、剪枝，最多保留 K 个状态
 ```
+
+当 `M=1` 时，每个父状态仍只有一个随机后继，候选竞争空间有限；当前正式研究配置使用
+`M=2`。分支和 child 的随机流由稳定 seed 派生，不依赖 batch 划分或 K 的取值。
+
+Euler-Beam 支持两种 child policy：
+
+- `stochastic`：所有 child 都按标准 Euler 转移随机采样；
+- `stochastic_noop`：仅适用于 `M=2`。child 0 保持随机采样，child 1 只在
+  `t≈0.9` 的一个时间步作为 no-op anchor，避免该步破坏已有高质量状态。
+
+`stochastic_noop` 是启发式搜索 proposal，不应解释为无偏的 CTMC 状态概率。
+
+## 3. 当前 Euler-Beam 状态
+
+固定 checkpoint 为 `checkpoint_step600000.pt`。已确认该 checkpoint：
+
+- `use_origin_mask: false`；
+- 不包含 `origin_embedding` 权重；
+- 当前采样优化不依赖 origin mask。
+
+截至 2026-08-01，在 50 个原始反应、20 倍测试增强的 tiny benchmark 上，当前推荐
+研究配置为：
+
+```text
+K=3, M=2, R=3, n_steps=100
+score_mode=full_probability
+changed_state_bonus=0.5
+child_policy=stochastic_noop
+float32_matmul_precision=high (RTX 3090 TF32)
+```
+
+其完整结果为：
+
+| 指标 | 当前推荐配置 |
+|---|---:|
+| 采样时间 | 约 122.6 秒 |
+| Top-1 | 60% |
+| Top-2 | 64% |
+| Top-3 | 70% |
+| Invalid SMILES（rank 1/2/3） | 12.5% / 14.5% / 13.4% |
+
+这些结果仅用于固定 tiny benchmark 上的版本比较，不等同于完整 USPTO-50K 测试集
+结论。历史恢复版本曾得到 58%/68%/76%，但它采用旧 seed 和旧路径评分语义，不能与
+当前结果作严格的单变量比较。详细实验历史见
+[`new_docs/euler_beam_optimization_plan.md`](new_docs/euler_beam_optimization_plan.md)。
+
+## 4. 环境与安装
+
+基础包要求 Python 3.10 或更高版本。项目元数据声明了 PyTorch、NumPy、PyYAML 和
+tqdm：
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+逆合成评分还依赖 RDKit 和 pandas，但它们目前没有写入 `pyproject.toml`。建议在
+conda 环境中安装：
+
+```bash
+conda install -c conda-forge rdkit pandas
+```
+
+在 CUDA 设备上运行前，请安装与本机 CUDA/驱动匹配的 PyTorch。TF32 的性能结论来自
+RTX 3090；其他 GPU 需要重新基准测试。
+
+## 5. 数据和 checkpoint
+
+逆合成数据目录应至少包含：
+
+```text
+datasets/USPTO_50K_PtoR_aug20_#global#/
+├── example.vocab.src
+├── train/
+│   ├── src-train.txt
+│   ├── tgt-train.txt
+│   ├── train_aligned_src.txt      # 可选但推荐
+│   └── train_aligned_tgt.txt      # 可选但推荐
+├── val/
+└── test/
+    ├── src-test.txt
+    ├── tgt-test.txt
+    ├── src-test-tiny.txt
+    └── tgt-test-tiny.txt
+```
+
+所有 SMILES 文件均为按空格分词的文本，每行一个序列。测试集若使用 20 倍增强，同一
+原始反应的 20 条增强输入必须连续排列。
+
+checkpoint 至少需要包含：
+
+```text
+model_state_dict
+config
+model_vocab（可选，可由词表推断）
+```
+
+采样脚本会优先使用 checkpoint 内的配置，并允许通过命令行覆盖数据目录、词表和采样
+scheduler。
+
+## 6. 快速开始
+
+### 6.1 当前推荐 Euler-Beam 基准
+
+```bash
+python scripts/sample_retro.py \
+    --checkpoint checkpoint_step600000.pt \
+    --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt" \
+    --sampler euler_beam \
+    --n_branches 3 \
+    --n_children 2 \
+    --n_runs 3 \
+    --n_steps 100 \
+    --batch_size 64 \
+    --device cuda \
+    --seed 42 \
+    --euler_beam_score_mode full_probability \
+    --euler_beam_changed_state_bonus 0.5 \
+    --euler_beam_matmul_precision high \
+    --euler_beam_child_policy stochastic_noop \
+    --output_dir results/bench_beam/
+
+python 'scripts/score_#global#.py' \
+    --predictions results/bench_beam/predictions.txt \
+    --targets "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test-tiny.txt" \
+    --augmentation 20 \
+    --beam_size 3 \
+    --n_best 5
+```
+
+这里评分器的 `beam_size` 必须等于采样时的 `n_runs`，而不是内部的
+`n_branches` 或 `n_children`。
+
+### 6.2 Euler 对照实验
+
+```bash
+python scripts/sample_retro.py \
+    --checkpoint checkpoint_step600000.pt \
+    --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt" \
+    --sampler euler \
+    --n_samples 3 \
+    --n_steps 100 \
+    --batch_size 16 \
+    --device cuda \
+    --seed 42 \
+    --output_dir results/bench_euler/
+
+python 'scripts/score_#global#.py' \
+    --predictions results/bench_euler/predictions.txt \
+    --targets "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test-tiny.txt" \
+    --augmentation 20 \
+    --beam_size 3 \
+    --n_best 5
+```
+
+不要把 Euler 的评分路径误写为 `results/bench_beam/predictions.txt`。
+
+### 6.3 预计算训练对齐
+
+```bash
+PYTHONPATH=. python scripts/precompute_alignments.py \
+    --data_dir "datasets/USPTO_50K_PtoR_aug20_#global#" \
+    --splits train \
+    --num_workers 16
+```
+
+### 6.4 训练或恢复训练
+
+```bash
+python scripts/train_retro.py \
+    --config configs/retro.yaml \
+    --device cuda
+
+python scripts/train_retro.py \
+    --config configs/retro.yaml \
+    --checkpoint path/to/checkpoint_stepN.pt \
+    --device cuda
+```
+
+本轮 Euler-Beam 研究固定使用已有 checkpoint，不修改训练代码、数据集或模型权重。
+
+## 7. 评分协议与已知限制
+
+`scripts/score_#global#.py` 会先执行 global alignment 逆变换和 RDKit canonicalization，
+再将候选按以下布局聚合：
+
+```text
+(原始反应, augmentation, run/rank)
+```
+
+当前评分器在参数正确时可以复现历史结果，但有几项已知限制：
+
+1. 预测行数不能整除 `augmentation * beam_size` 时会静默截断；
+2. 没有严格检查预测、target、augmentation 和 beam size 是否一致；
+3. 聚合排序用一个很大的常数优先保证“任意 augmentation 中的最好局部排名”，跨增强
+   出现频率只在最好局部排名相同时起主要作用；
+4. `Unique Rates` 统计的是截断后的排名列表，不是真正的原始候选唯一率，甚至可能
+   超过 100%；
+5. 输出的 Top-N 行数受 `beam_size` 限制，即使跨增强聚合后存在更多候选。
+
+因此下一阶段首先增加严格输入校验和 oracle/覆盖率诊断，默认保持原聚合规则不变，
+避免因更换评分规则破坏历史可比性。规划见
+[`new_docs/euler_beam_next_stage_plan.md`](new_docs/euler_beam_next_stage_plan.md)。
+
+## 8. 项目结构
+
+```text
+edit_flows/
+├── core/       # scheduler、coupling、alignment、Z-space、rate scaling
+├── data/       # 逆合成数据集和 batch 构造
+├── models/     # Transformer 编辑速率模型
+├── sampling/   # Euler、Euler-Beam、single-edit greedy/beam、编辑算子
+├── training/   # loss、训练步骤、学习率 scheduler
+└── utils/      # token 常量和通用工具
+
+scripts/
+├── train_retro.py              # 逆合成训练
+├── sample_retro.py             # 统一采样入口
+├── score_#global#.py           # #global# 数据评分
+├── score.py                    # standard 数据评分
+├── precompute_alignments.py    # 预计算 Levenshtein 对齐
+└── visualize_*.py              # 首步与轨迹分析
+
+configs/                         # 通用与逆合成配置
+tests/                           # core/model/sampling/training 测试
+docs/                            # 较早阶段的设计和实验记录
+new_docs/                        # 当前 Euler-Beam 设计、计划与实验记录
+```
+
+恢复文件 `recover_euler_beam.py` 和 `recover_sample_retro.py` 仅用于保存历史 58% 版本，
+不是当前实现入口。
+
+## 9. 测试与研究约定
+
+运行测试：
+
+```bash
+pytest -q
+```
+
+Euler-Beam 修改遵循以下约定：
+
+- 优先保证概率、seed、输出布局和评分协议正确；
+- 先做小规模短筛，再决定是否运行完整 tiny benchmark；
+- 准确率实验固定 checkpoint、数据、seed 和评分参数；
+- 性能比较固定硬件、precision、batch size 和输入规模；
+- 任何启发式 proposal 都区分目标转移概率 $p$ 与实际 proposal $q$；
+- 不用未经验证的新评分规则替代历史默认规则；
+- 阶段性结果写入规划文档，并用范围明确的 Git commit 保存。
+
+当前的首要问题是：Top-1 已达到 60%，但 Top-2/Top-3 增长慢。接下来将先判断正确
+答案是没有被采到，还是已经存在于候选中但被聚合排序压低，再选择采样多样性或评分
+聚合方向。
