@@ -181,6 +181,8 @@ def _build_sampling_metadata(
     train_scheduler_name: str,
     use_origin_mask: bool,
     elapsed_seconds: float,
+    peak_cuda_allocated_bytes: int | None = None,
+    peak_cuda_reserved_bytes: int | None = None,
 ) -> dict:
     # Augmentation describes the actual input layout, so it must not be
     # inferred from the checkpoint's training data directory.  A single
@@ -227,6 +229,15 @@ def _build_sampling_metadata(
             if args.sampler == "euler" else "sampler-specific"
         )
 
+    runtime = {
+        "elapsed_seconds": elapsed_seconds,
+        "batch_size": args.batch_size,
+        "device": args.device,
+    }
+    if peak_cuda_allocated_bytes is not None:
+        runtime["peak_cuda_allocated_bytes"] = peak_cuda_allocated_bytes
+        runtime["peak_cuda_reserved_bytes"] = peak_cuda_reserved_bytes
+
     return {
         "schema_version": 1,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -241,11 +252,7 @@ def _build_sampling_metadata(
         "output_line_count": output_line_count,
         "output_sha256": _sha256_file(prediction_path),
         "sampling": sampling,
-        "runtime": {
-            "elapsed_seconds": elapsed_seconds,
-            "batch_size": args.batch_size,
-            "device": args.device,
-        },
+        "runtime": runtime,
         "model": {
             "configured_use_origin_mask": cfg.get("use_origin_mask", False),
             "effective_use_origin_mask": use_origin_mask,
@@ -466,6 +473,8 @@ def main():
               f"matmul_precision={args.euler_beam_matmul_precision}, "
               f"child_policy={args.euler_beam_child_policy}")
 
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
     sampling_started_at = time.perf_counter()
     written_predictions = 0
     try:
@@ -581,7 +590,17 @@ def main():
             f_out.close()
 
     if args.output_dir:
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
         elapsed_seconds = time.perf_counter() - sampling_started_at
+        peak_cuda_allocated_bytes = (
+            torch.cuda.max_memory_allocated(device)
+            if device.type == "cuda" else None
+        )
+        peak_cuda_reserved_bytes = (
+            torch.cuda.max_memory_reserved(device)
+            if device.type == "cuda" else None
+        )
         expected_predictions = n_products * outputs_per_product
         if written_predictions != expected_predictions:
             raise RuntimeError(
@@ -601,6 +620,8 @@ def main():
             train_scheduler_name=train_scheduler_name,
             use_origin_mask=use_origin_mask,
             elapsed_seconds=elapsed_seconds,
+            peak_cuda_allocated_bytes=peak_cuda_allocated_bytes,
+            peak_cuda_reserved_bytes=peak_cuda_reserved_bytes,
         )
         metadata_path = os.path.join(
             args.output_dir, "sampling_metadata.json",

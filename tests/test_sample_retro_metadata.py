@@ -93,6 +93,8 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
         train_scheduler_name="linear",
         use_origin_mask=False,
         elapsed_seconds=1.25,
+        peak_cuda_allocated_bytes=1024,
+        peak_cuda_reserved_bytes=2048,
     )
 
     assert metadata["sampler"] == "euler_beam"
@@ -124,3 +126,5 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
     assert metadata["input"]["sha256"] == hashlib.sha256(
         b"C C\nN N\n",
     ).hexdigest()
+    assert metadata["runtime"]["peak_cuda_allocated_bytes"] == 1024
+    assert metadata["runtime"]["peak_cuda_reserved_bytes"] == 2048
