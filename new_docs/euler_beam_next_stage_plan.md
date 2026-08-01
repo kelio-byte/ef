@@ -459,7 +459,7 @@ Commit：`344ae59 Add opt-in augmentation aggregation modes`
 
 ## 8. 任务 12：采样输出元数据和接口健壮性
 
-状态：`[ ] 未开始`
+状态：`[x] 已完成；采样轨迹与 predictions.txt 格式不变`
 
 目标是避免再发生预测文件、beam size 或实验配置混淆。
 
@@ -478,13 +478,42 @@ Commit：`344ae59 Add opt-in augmentation aggregation modes`
 
 ### 12.1 本任务完成记录
 
-实际修改：待填写。
+实际修改：
 
-测试与实验：待填写。
+- 修正 Euler-Beam 启动提示：每产物输出数使用 `n_runs`，不再错误显示 `n_samples`。
+- `sample_retro.py` 在成功完成采样后写入 `sampling_metadata.json`；记录 checkpoint
+  路径/大小/mtime，输入文件路径/行数/SHA-256，sampler、K/M/R、有效 n_steps、scheduler、
+  seed 及其作用范围、precision、score mode、bonus、child policy、origin mask、输出行数/
+  SHA-256、wall time 和 Git commit/dirty 状态。
+- augmentation 只从实际 `--products_file` 的明确 `augN` 路径推断；单条 `--product`
+  记录为 `null`，不借用 checkpoint 训练目录进行不可靠推断。
+- 输出完成时验证实际写入行数等于 `product_count × n_runs/n_samples`；原
+  `predictions.txt` 内容和排列不变。
+- `score_#global#.py` 自动发现并校验同目录的 `sampling_metadata.json` 或
+  `mixing_metadata.json`，在 canonicalization 前核对 beam size、已知 augmentation、
+  行数、SHA-256 及 product/reaction 布局；两份 manifest 同时存在时拒绝猜测。
+- 没有 manifest 的历史纯文本结果继续兼容，并明确打印 legacy 输入提示。
+- 新增 `tests/test_sample_retro_metadata.py`，扩展 `tests/test_score_global.py`，覆盖实际
+  输出数、augmentation 推断、元数据字段、哈希、错误参数和歧义 manifest。
 
-结论：待填写。
+测试与实验：
 
-Commit：待填写。
+- 元数据、评分和 run 混合的 CPU 快速测试：`27 passed in 0.63s`。
+- 项目回归（排除已知且未修改的 `tests/sampling/test_beam.py`）：
+  `141 passed, 7 warnings in 4.92s`。
+- RTX 3090 冒烟测试：1 个 product，K=1、M=2、R=2、n_steps=1，采样主体约
+  `0.738s`；启动提示显示 2 outputs，写出 2 行并由评分器成功验证 metadata。
+- 相同配置/seed 重复运行的两份 `predictions.txt` SHA-256 均为
+  `6f46744013a260dbe98238e05b7c45d6d3455967d6039405a365c74eee0adf6b`。
+- 已有 `task10_mix_nns/mixing_metadata.json` 真实文件校验通过；无 metadata 的
+  `task8_noop_full` 仍能按 legacy 路径评分。
+- 首次冒烟测试暴露单条 product 被训练目录误推断为 aug20；收紧推断来源后重测通过。
+
+结论：本任务只增加输出审计和评分前校验，没有改动模型 forward、候选生成、分支筛选、
+seed 构造或聚合排名。相同 seed 的实际输出逐字节一致。今后的完整采样会自动留下可追溯
+配置，能直接阻止 `n_runs/beam_size`、augmentation、旧文件或预测内容混用。
+
+Commit：`f03bb61 Add auditable sampling metadata`
 
 ## 9. 任务 13：胜出方案完整验证与性能收口
 

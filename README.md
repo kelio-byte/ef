@@ -236,6 +236,10 @@ python 'scripts/score_#global#.py' \
 这里评分器的 `beam_size` 必须等于采样时的 `n_runs`，而不是内部的
 `n_branches` 或 `n_children`。
 
+只要指定 `--output_dir`，采样器还会在同目录写入
+`sampling_metadata.json`，记录 checkpoint、输入文件及哈希、采样器配置、有效步数、
+seed 语义、输出行数与哈希、运行时间和 Git 状态。`predictions.txt` 的文本格式不变。
+
 ### 6.2 Euler 对照实验
 
 ```bash
@@ -296,6 +300,11 @@ python scripts/train_retro.py \
 评分器现在会严格检查 prediction、target、augmentation 和 beam size 的布局；默认
 拒绝静默截断，仅在显式指定 `--length` 时允许评分完整的文件前缀。Top-N 可以报告到
 `n_best`，而 input rank 不存在时不再把它解释成 RDKit invalid。
+
+如果预测文件所在目录存在 `sampling_metadata.json` 或异质 run 工具生成的
+`mixing_metadata.json`，评分器会在 RDKit 处理前自动核对 `beam_size`、augmentation、
+预测行数和 SHA-256。历史纯文本结果没有元数据时仍可评分，并明确显示 legacy 输入提示；
+同目录同时存在两份 manifest 时会拒绝猜测，以防读取过期配置。
 
 可用以下参数增加不改变排名语义的采样诊断：
 
