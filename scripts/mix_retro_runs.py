@@ -29,6 +29,7 @@ def validate_and_load_sources(
     prediction_specs,
     augmentation,
     input_beam_size,
+    source_beam_sizes=None,
 ):
     if augmentation <= 0:
         raise ValueError(f"augmentation must be > 0, got {augmentation}")
@@ -40,11 +41,18 @@ def validate_and_load_sources(
         raise ValueError("at least one prediction source is required")
 
     sources = {}
-    expected_count = None
-    input_block = augmentation * input_beam_size
+    source_beam_sizes = source_beam_sizes or {}
+    expected_group_count = None
     for label, path in prediction_specs:
         if label in sources:
             raise ValueError(f"duplicate prediction source label: {label}")
+        source_beam_size = source_beam_sizes.get(label, input_beam_size)
+        if source_beam_size <= 0:
+            raise ValueError(
+                f"beam size for source {label!r} must be > 0, got "
+                f"{source_beam_size}"
+            )
+        input_block = augmentation * source_beam_size
         lines, sha256 = read_prediction_file(path)
         line_count = len(lines)
         if line_count == 0:
@@ -53,25 +61,59 @@ def validate_and_load_sources(
             raise ValueError(
                 f"prediction source {label!r} has {line_count} lines, which "
                 f"is not divisible by augmentation * input_beam_size "
-                f"({augmentation} * {input_beam_size} = {input_block})"
+                f"({augmentation} * {source_beam_size} = {input_block})"
             )
-        if expected_count is None:
-            expected_count = line_count
-        elif line_count != expected_count:
+        group_count = line_count // source_beam_size
+        if expected_group_count is None:
+            expected_group_count = group_count
+        elif group_count != expected_group_count:
             raise ValueError(
-                "prediction sources have different line counts: expected "
-                f"{expected_count}, got {line_count} for {label!r}"
+                "prediction sources describe different numbers of aligned "
+                f"product groups: expected {expected_group_count}, got "
+                f"{group_count} for {label!r}"
             )
         sources[label] = {
             "path": os.path.abspath(path),
             "lines": lines,
             "line_count": line_count,
             "sha256": sha256,
+            "beam_size": source_beam_size,
         }
-    return sources, expected_count
+    return sources, expected_group_count
 
 
-def parse_run_sources(run_source_specs, source_labels, input_beam_size):
+def parse_source_beam_sizes(specs, source_labels, default_beam_size):
+    parsed = {label: default_beam_size for label in source_labels}
+    for spec in specs or []:
+        if ":" not in spec:
+            raise ValueError(
+                f"invalid source beam size {spec!r}; expected LABEL:SIZE"
+            )
+        label, size_text = spec.rsplit(":", 1)
+        if label not in source_labels:
+            raise ValueError(
+                f"unknown prediction source label {label!r} in {spec!r}"
+            )
+        try:
+            size = int(size_text)
+        except ValueError as exc:
+            raise ValueError(
+                f"invalid beam size {size_text!r} in {spec!r}"
+            ) from exc
+        if size <= 0:
+            raise ValueError(
+                f"source beam size must be > 0, got {size}"
+            )
+        parsed[label] = size
+    return parsed
+
+
+def parse_run_sources(
+    run_source_specs,
+    source_labels,
+    input_beam_size,
+    source_beam_sizes=None,
+):
     if not run_source_specs:
         raise ValueError("at least one --run_source is required")
 
@@ -92,32 +134,40 @@ def parse_run_sources(run_source_specs, source_labels, input_beam_size):
             raise ValueError(
                 f"invalid run index {run_text!r} in {spec!r}"
             ) from exc
-        if not 1 <= run <= input_beam_size:
+        source_beam_size = (source_beam_sizes or {}).get(
+            label, input_beam_size,
+        )
+        if not 1 <= run <= source_beam_size:
             raise ValueError(
-                f"run index must be in [1, {input_beam_size}], got {run}"
+                f"run index must be in [1, {source_beam_size}] for "
+                f"source {label!r}, got {run}"
             )
         parsed.append({"label": label, "run": run})
     return parsed
 
 
 def mix_prediction_lines(sources, run_sources, input_beam_size):
-    line_counts = {source["line_count"] for source in sources.values()}
-    if len(line_counts) != 1:
-        raise ValueError("all prediction sources must have the same line count")
-    line_count = next(iter(line_counts))
-    if line_count % input_beam_size != 0:
+    group_counts = {
+        source["line_count"] // source.get("beam_size", input_beam_size)
+        for source in sources.values()
+    }
+    if len(group_counts) != 1:
         raise ValueError(
-            f"line count {line_count} is not divisible by input_beam_size "
-            f"{input_beam_size}"
+            "all prediction sources must describe the same number of groups"
         )
 
     output = []
-    group_count = line_count // input_beam_size
+    group_count = next(iter(group_counts))
     for group_index in range(group_count):
-        group_start = group_index * input_beam_size
         for source in run_sources:
-            line_index = group_start + source["run"] - 1
-            output.append(sources[source["label"]]["lines"][line_index])
+            source_data = sources[source["label"]]
+            source_beam_size = source_data.get(
+                "beam_size", input_beam_size,
+            )
+            line_index = (
+                group_index * source_beam_size + source["run"] - 1
+            )
+            output.append(source_data["lines"][line_index])
     return output
 
 
@@ -145,6 +195,16 @@ def build_parser():
     )
     parser.add_argument("--augmentation", type=int, default=20)
     parser.add_argument("--input_beam_size", type=int, default=3)
+    parser.add_argument(
+        "--source_beam_size",
+        action="append",
+        default=[],
+        metavar="LABEL:SIZE",
+        help=(
+            "Per-source input beam override; repeat when sources have "
+            "different run counts"
+        ),
+    )
     parser.add_argument("--output_dir", required=True)
     parser.add_argument(
         "--overwrite",
@@ -156,15 +216,23 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
-    sources, input_line_count = validate_and_load_sources(
+    source_labels = {label for label, _ in args.prediction_file}
+    source_beam_sizes = parse_source_beam_sizes(
+        args.source_beam_size,
+        source_labels=source_labels,
+        default_beam_size=args.input_beam_size,
+    )
+    sources, group_count = validate_and_load_sources(
         args.prediction_file,
         augmentation=args.augmentation,
         input_beam_size=args.input_beam_size,
+        source_beam_sizes=source_beam_sizes,
     )
     run_sources = parse_run_sources(
         args.run_source,
         source_labels=set(sources),
         input_beam_size=args.input_beam_size,
+        source_beam_sizes=source_beam_sizes,
     )
     output_lines = mix_prediction_lines(
         sources,
@@ -189,17 +257,18 @@ def main():
         f.write(output_bytes)
 
     output_beam_size = len(run_sources)
-    reaction_count = input_line_count // (
-        args.augmentation * args.input_beam_size
-    )
+    reaction_count = group_count // args.augmentation
     metadata = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "layout": "reaction-major, augmentation-major, run-minor",
         "augmentation": args.augmentation,
         "input_beam_size": args.input_beam_size,
+        "source_beam_sizes": source_beam_sizes,
         "output_beam_size": output_beam_size,
         "reaction_count": reaction_count,
-        "input_line_count_per_source": input_line_count,
+        "input_line_count_per_source": {
+            label: source["line_count"] for label, source in sources.items()
+        },
         "output_line_count": len(output_lines),
         "run_sources": run_sources,
         "sources": {
@@ -207,6 +276,7 @@ def main():
                 "path": source["path"],
                 "line_count": source["line_count"],
                 "sha256": source["sha256"],
+                "beam_size": source["beam_size"],
             }
             for label, source in sources.items()
         },

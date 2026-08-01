@@ -131,11 +131,49 @@ def _outputs_per_product(args) -> int:
     return args.n_samples
 
 
+def _select_products(
+    products: list[str],
+    start_product: int,
+    max_products: int | None,
+    augmentation: int | None,
+) -> tuple[list[str], int]:
+    """Select a reproducible, augmentation-aligned input interval."""
+    if start_product < 0:
+        raise ValueError(
+            f"start_product must be >= 0, got {start_product}"
+        )
+    if max_products is not None and max_products <= 0:
+        raise ValueError(
+            f"max_products must be > 0, got {max_products}"
+        )
+    end_product = (
+        len(products)
+        if max_products is None else start_product + max_products
+    )
+    if start_product >= len(products) or end_product > len(products):
+        raise ValueError(
+            "requested product interval is outside the input file: "
+            f"[{start_product}, {end_product}) for {len(products)} lines"
+        )
+    if augmentation is not None and (
+        start_product % augmentation != 0
+        or (end_product - start_product) % augmentation != 0
+    ):
+        raise ValueError(
+            "product interval must preserve complete augmentation blocks: "
+            f"start={start_product}, count={end_product - start_product}, "
+            f"augmentation={augmentation}"
+        )
+    return products[start_product:end_product], end_product
+
+
 def _build_sampling_metadata(
     args,
     cfg: dict,
     *,
     prediction_path: str,
+    source_product_count: int,
+    selection_start_product: int,
     product_count: int,
     output_line_count: int,
     n_sampling_steps: int,
@@ -153,6 +191,11 @@ def _build_sampling_metadata(
     input_metadata = {
         "kind": "products_file" if args.products_file else "single_product",
         "product_count": product_count,
+        "source_product_count": source_product_count,
+        "selection_start_product": selection_start_product,
+        "selection_end_product_exclusive": (
+            selection_start_product + product_count
+        ),
     }
     if args.products_file:
         input_metadata.update(_path_metadata(
@@ -218,6 +261,10 @@ def main():
                         help="Product SMILES string (tokenized, space-separated)")
     parser.add_argument("--products_file", type=str, default=None,
                         help="File with one tokenized product SMILES per line")
+    parser.add_argument("--start_product", type=int, default=0,
+                        help="0-based products_file line offset")
+    parser.add_argument("--max_products", type=int, default=None,
+                        help="Optional number of products_file lines to sample")
     parser.add_argument("--data_dir", type=str, default=None,
                         help="Override data dir (for vocab)")
     parser.add_argument("--vocab_file", type=str, default=None,
@@ -346,7 +393,13 @@ def main():
     clamp_max = cfg.get("clamp_max", 50.0)
     n_sampling_steps = args.n_steps or cfg.get("n_sampling_steps", 100)
 
+    if args.product and args.products_file:
+        raise ValueError("Provide only one of --product or --products_file")
     if args.product:
+        if args.start_product != 0 or args.max_products is not None:
+            raise ValueError(
+                "start_product/max_products require --products_file"
+            )
         products = [args.product]
     elif args.products_file:
         with open(args.products_file) as f:
@@ -354,7 +407,21 @@ def main():
     else:
         raise ValueError("Provide --product or --products_file")
 
+    source_product_count = len(products)
+    input_augmentation, _ = _infer_augmentation(args.products_file)
+    products, selection_end_product = _select_products(
+        products,
+        start_product=args.start_product,
+        max_products=args.max_products,
+        augmentation=input_augmentation,
+    )
     n_products = len(products)
+    if args.start_product or args.max_products is not None:
+        print(
+            "Selected product interval: "
+            f"[{args.start_product}, {selection_end_product}) from "
+            f"{source_product_count} input lines"
+        )
     product_ids = [tokenize_smiles(s, token2id) for s in products]
     outputs_per_product = _outputs_per_product(args)
 
@@ -434,7 +501,8 @@ def main():
                 # _make_batch uses repeat_interleave, so rows are product-major:
                 # P0R0, P0R1, ..., P1R0, P1R1, ...
                 sample_seeds = _make_euler_beam_sample_seeds(
-                    args.seed, start, B_prod, args.n_runs,
+                    args.seed, args.start_product + start,
+                    B_prod, args.n_runs,
                 )
                 results = sample_euler_beam(
                     model, x_0, kappa_scheduler,
@@ -524,6 +592,8 @@ def main():
             args,
             cfg,
             prediction_path=pred_file,
+            source_product_count=source_product_count,
+            selection_start_product=args.start_product,
             product_count=n_products,
             output_line_count=written_predictions,
             n_sampling_steps=n_sampling_steps,

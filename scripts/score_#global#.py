@@ -40,6 +40,10 @@ def validate_scoring_options(opt):
         )
     if opt.length == 0 or opt.length < -1:
         raise ValueError(f"length must be -1 or > 0, got {opt.length}")
+    if getattr(opt, "target_offset", 0) < 0:
+        raise ValueError(
+            f"target_offset must be >= 0, got {opt.target_offset}"
+        )
     if opt.raw and opt.augmentation != 1:
         raise ValueError(
             "raw scoring requires augmentation=1, got "
@@ -62,6 +66,7 @@ def validate_prediction_metadata(
     prediction_count,
     augmentation,
     beam_size,
+    target_offset=0,
 ):
     """Cross-check a sampling or mixing manifest against scorer inputs."""
     required = ("output_beam_size", "output_line_count", "output_sha256")
@@ -119,12 +124,25 @@ def validate_prediction_metadata(
                 f"{prediction_count}."
             )
 
+    input_metadata = metadata.get("input", {})
+    selection_start = input_metadata.get("selection_start_product")
+    if selection_start is not None and metadata_augmentation is not None:
+        expected_start = target_offset * augmentation
+        if selection_start != expected_start:
+            raise ValueError(
+                "target_offset does not match sampling metadata: selected "
+                f"product line starts at {selection_start}, but "
+                f"target_offset={target_offset} and augmentation="
+                f"{augmentation} imply {expected_start}."
+            )
+
 
 def load_and_validate_prediction_metadata(
     prediction_path,
     prediction_count,
     augmentation,
     beam_size,
+    target_offset=0,
 ):
     parent = os.path.dirname(os.path.abspath(prediction_path))
     candidates = [
@@ -150,6 +168,7 @@ def load_and_validate_prediction_metadata(
         prediction_count=prediction_count,
         augmentation=augmentation,
         beam_size=beam_size,
+        target_offset=target_offset,
     )
     return metadata_path
 
@@ -618,11 +637,24 @@ def main(opt):
         prediction_count=len(prediction_lines),
         augmentation=opt.augmentation,
         beam_size=opt.beam_size,
+        target_offset=opt.target_offset,
     )
     if metadata_path:
         print(f"Validated prediction metadata: {metadata_path}")
     else:
         print("Prediction metadata: not found (legacy text-only input)")
+    target_start_line = opt.target_offset * opt.augmentation
+    if target_start_line >= len(target_lines):
+        raise ValueError(
+            "target_offset starts beyond the target file: line "
+            f"{target_start_line} for {len(target_lines)} lines"
+        )
+    if target_start_line:
+        target_lines = target_lines[target_start_line:]
+        print(
+            f"Applied target offset: reaction {opt.target_offset} "
+            f"(line {target_start_line})"
+        )
     data_size, used_prediction_count, used_target_count = resolve_input_layout(
         prediction_count=len(prediction_lines),
         target_count=len(target_lines),
@@ -706,6 +738,15 @@ def main(opt):
             exit(1)
         with open(opt.sources,"r") as f:
             lines = f.readlines()
+            source_start = opt.target_offset * opt.augmentation
+            required_sources = data_size * opt.augmentation
+            if len(lines) < source_start + required_sources:
+                raise ValueError(
+                    "source file does not contain enough lines for "
+                    f"target_offset={opt.target_offset} and {data_size} "
+                    "reactions"
+                )
+            lines = lines[source_start:source_start + required_sources]
             ras_src_smiles = [''.join(lines[i].strip().split(' ')) for i in tqdm(range(0,data_size * opt.augmentation,opt.augmentation))]
 
     for i in tqdm(range(len(predictions))):
@@ -924,6 +965,12 @@ if __name__ == "__main__":
         help="Cross-augmentation candidate aggregation rule",
     )
     parser.add_argument('--length', type=int, default=-1)
+    parser.add_argument(
+        '--target_offset',
+        type=int,
+        default=0,
+        help="0-based original-reaction offset in targets/sources",
+    )
     parser.add_argument('--process_number', type=int, default=multiprocessing.cpu_count())
     parser.add_argument('--synthon', action="store_true", default=False)
     parser.add_argument('--detailed', action="store_true", default=False)

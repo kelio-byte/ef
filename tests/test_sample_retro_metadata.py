@@ -1,10 +1,13 @@
 import hashlib
 from types import SimpleNamespace
 
+import pytest
+
 from scripts.sample_retro import (
     _build_sampling_metadata,
     _infer_augmentation,
     _outputs_per_product,
+    _select_products,
 )
 
 
@@ -51,6 +54,24 @@ def test_augmentation_inference_requires_unambiguous_aug_path():
     assert _infer_augmentation("a_aug10/x", "b_aug20/y") == (None, None)
 
 
+def test_product_selection_preserves_complete_augmentation_blocks():
+    products = [str(index) for index in range(100)]
+    selected, end = _select_products(
+        products, start_product=20, max_products=40, augmentation=20,
+    )
+    assert selected == products[20:60]
+    assert end == 60
+
+    for start, count in ((1, 20), (20, 21)):
+        with pytest.raises(ValueError, match="augmentation blocks"):
+            _select_products(
+                products,
+                start_product=start,
+                max_products=count,
+                augmentation=20,
+            )
+
+
 def test_sampling_metadata_records_effective_euler_beam_configuration(
     tmp_path,
 ):
@@ -63,6 +84,8 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
         args,
         {"data_dir": "datasets/USPTO_aug20_global", "use_origin_mask": False},
         prediction_path=str(prediction_path),
+        source_product_count=100,
+        selection_start_product=20,
         product_count=2,
         output_line_count=6,
         n_sampling_steps=80,
@@ -95,6 +118,9 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
         "seed_scope": "stable product/run streams",
     }
     assert metadata["input"]["product_count"] == 2
+    assert metadata["input"]["source_product_count"] == 100
+    assert metadata["input"]["selection_start_product"] == 20
+    assert metadata["input"]["selection_end_product_exclusive"] == 22
     assert metadata["input"]["sha256"] == hashlib.sha256(
         b"C C\nN N\n",
     ).hexdigest()

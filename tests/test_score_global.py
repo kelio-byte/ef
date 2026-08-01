@@ -101,6 +101,40 @@ def test_prediction_metadata_validates_sampling_layout_and_hash(tmp_path):
     )
 
 
+def test_prediction_metadata_cross_checks_target_offset(tmp_path):
+    prediction_path = tmp_path / "predictions.txt"
+    prediction_bytes = b"A\nB\nC\nD\nE\nF\n"
+    prediction_path.write_bytes(prediction_bytes)
+    metadata = {
+        "augmentation": 20,
+        "product_count": 2,
+        "output_beam_size": 3,
+        "output_line_count": 6,
+        "output_sha256": hashlib.sha256(prediction_bytes).hexdigest(),
+        "input": {"selection_start_product": 1000},
+    }
+
+    score_global.validate_prediction_metadata(
+        metadata,
+        metadata_path=str(tmp_path / "sampling_metadata.json"),
+        prediction_path=str(prediction_path),
+        prediction_count=6,
+        augmentation=20,
+        beam_size=3,
+        target_offset=50,
+    )
+    with pytest.raises(ValueError, match="target_offset"):
+        score_global.validate_prediction_metadata(
+            metadata,
+            metadata_path=str(tmp_path / "sampling_metadata.json"),
+            prediction_path=str(prediction_path),
+            prediction_count=6,
+            augmentation=20,
+            beam_size=3,
+            target_offset=0,
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [

@@ -14,6 +14,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 from mix_retro_runs import (  # noqa: E402
     mix_prediction_lines,
     parse_run_sources,
+    parse_source_beam_sizes,
     validate_and_load_sources,
 )
 
@@ -33,7 +34,7 @@ def test_mix_prediction_lines_preserves_groups_and_requested_order(tmp_path):
     stochastic_path = tmp_path / "stochastic.txt"
     noop_lines = write_predictions(noop_path, "noop")
     stochastic_lines = write_predictions(stochastic_path, "stochastic")
-    sources, line_count = validate_and_load_sources(
+    sources, group_count = validate_and_load_sources(
         [("noop", str(noop_path)), ("stochastic", str(stochastic_path))],
         augmentation=2,
         input_beam_size=3,
@@ -46,7 +47,7 @@ def test_mix_prediction_lines_preserves_groups_and_requested_order(tmp_path):
 
     output = mix_prediction_lines(sources, run_sources, input_beam_size=3)
 
-    assert line_count == 12
+    assert group_count == 4
     assert output == [
         value
         for group in range(4)
@@ -73,11 +74,58 @@ def test_source_validation_rejects_misaligned_or_mismatched_files(tmp_path):
 
     other_path = tmp_path / "other.txt"
     write_predictions(other_path, "other", groups=2)
-    with pytest.raises(ValueError, match="different line counts"):
+    with pytest.raises(ValueError, match="different numbers"):
         validate_and_load_sources(
             [("good", str(good_path)), ("other", str(other_path))],
             augmentation=2,
             input_beam_size=3,
+        )
+
+
+def test_mix_supports_sources_with_different_input_beam_sizes(tmp_path):
+    three_path = tmp_path / "three.txt"
+    two_path = tmp_path / "two.txt"
+    three_lines = write_predictions(three_path, "three", beam_size=3)
+    two_lines = write_predictions(two_path, "two", beam_size=2)
+    source_beam_sizes = parse_source_beam_sizes(
+        ["two:2"],
+        source_labels={"three", "two"},
+        default_beam_size=3,
+    )
+    sources, group_count = validate_and_load_sources(
+        [("three", str(three_path)), ("two", str(two_path))],
+        augmentation=2,
+        input_beam_size=3,
+        source_beam_sizes=source_beam_sizes,
+    )
+    run_sources = parse_run_sources(
+        ["three:1", "three:2", "three:3", "two:1", "two:2"],
+        source_labels=set(sources),
+        input_beam_size=3,
+        source_beam_sizes=source_beam_sizes,
+    )
+
+    output = mix_prediction_lines(sources, run_sources, input_beam_size=3)
+
+    assert group_count == 4
+    assert output == [
+        value
+        for group in range(4)
+        for value in (
+            three_lines[group * 3],
+            three_lines[group * 3 + 1],
+            three_lines[group * 3 + 2],
+            two_lines[group * 2],
+            two_lines[group * 2 + 1],
+        )
+    ]
+
+    with pytest.raises(ValueError, match="source 'two'"):
+        parse_run_sources(
+            ["two:3"],
+            source_labels=set(sources),
+            input_beam_size=3,
+            source_beam_sizes=source_beam_sizes,
         )
 
 
