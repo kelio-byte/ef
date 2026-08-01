@@ -863,6 +863,12 @@ BF16、source 为 FP32，PyTorch 要求二者 dtype 一致。修复需要修改�
 BF16 实验。`torch.compile` 同样作用共享模型，且当前动态 shape 与首次编译成本未知，
 在 TF32 已有稳定 16–22% 短测收益的情况下暂不优先引入。
 
+完整 TF32 验证后对 `torch.compile(mode="reduce-overhead")` 做隔离短筛：仅在
+`sample_retro.py` 中临时编译已加载的 Euler-Beam 推理模型，不修改模型定义。100 条
+TF32 配置运行 73.3 秒仍未完成第一个 batch，而未编译 TF32 整次只需约 5.3 秒，遂
+终止进程。首次编译成本相对当前完整采样约 123.8 秒也过高，且动态 batch/序列 shape
+可能触发重编译。因此撤回临时 CLI 参数，不保留 `torch.compile` 实现。
+
 ---
 
 ## 14. 任务 8：后续搜索创新
