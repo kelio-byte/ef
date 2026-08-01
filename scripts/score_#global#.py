@@ -147,7 +147,13 @@ def _deduplicate_valid(candidates):
     return deduplicated
 
 
-def compute_rank(prediction,raw=False,alpha=1.0,beam_size=None):
+def compute_rank(
+    prediction,
+    raw=False,
+    alpha=1.0,
+    beam_size=None,
+    aggregation_mode="legacy_best_rank",
+):
     if not prediction or not prediction[0]:
         raise ValueError("prediction must contain at least one candidate")
     if beam_size is None:
@@ -156,6 +162,7 @@ def compute_rank(prediction,raw=False,alpha=1.0,beam_size=None):
     invalid_rates = [0 for k in range(len(prediction[0]))]
     rank = {}
     highest = {}
+    support = {}
     if raw:
         # no test augmentation
         assert len(prediction) == 1
@@ -187,8 +194,20 @@ def compute_rank(prediction,raw=False,alpha=1.0,beam_size=None):
                     highest[data] = min(k,highest[data])
                 else:
                     highest[data] = k
+                support[data] = support.get(data, 0) + 1
         for key in rank.keys():
-            rank[key] += highest[key] * -1e8
+            if aggregation_mode == "legacy_best_rank":
+                rank[key] += highest[key] * -1e8
+            elif aggregation_mode == "rrf":
+                pass
+            elif aggregation_mode == "frequency_first":
+                rank[key] += support[key] * 1e8
+            elif aggregation_mode == "hybrid":
+                rank[key] += 1.0 / (highest[key] + 1)
+            else:
+                raise ValueError(
+                    f"unsupported aggregation_mode: {aggregation_mode}"
+                )
     return rank,invalid_rates
 
 
@@ -200,6 +219,7 @@ def compute_sampling_diagnostics(
     top_k=3,
     report_n_best=None,
     raw=False,
+    aggregation_mode="legacy_best_rank",
 ):
     """Measure sampling coverage separately from aggregation quality."""
     if len(predictions) != len(ground_truth):
@@ -294,6 +314,7 @@ def compute_sampling_diagnostics(
             raw=raw,
             alpha=alpha,
             beam_size=beam_size,
+            aggregation_mode=aggregation_mode,
         )
         ranked_candidates = sorted(
             rank_scores.items(), key=lambda item: item[1], reverse=True
@@ -476,6 +497,7 @@ def print_sampling_diagnostics(diagnostics):
 def main(opt):
     validate_scoring_options(opt)
     print('Reading predictions from file ...')
+    print(f"Aggregation mode: {opt.aggregation_mode}")
     with open(opt.predictions, 'r') as f:
         prediction_lines = f.readlines()
     with open(opt.targets, 'r') as f:
@@ -597,6 +619,7 @@ def main(opt):
             raw=opt.raw,
             alpha=opt.score_alpha,
             beam_size=opt.beam_size,
+            aggregation_mode=opt.aggregation_mode,
         )
         for j in range(opt.beam_size):
             invalid_rates[j] += invalid_rate[j]
@@ -672,6 +695,7 @@ def main(opt):
             top_k=min(3, opt.n_best),
             report_n_best=opt.n_best,
             raw=opt.raw,
+            aggregation_mode=opt.aggregation_mode,
         )
         if opt.diagnostics:
             print_sampling_diagnostics(diagnostics)
@@ -770,6 +794,17 @@ if __name__ == "__main__":
     parser.add_argument('--sources', type=str, default="", help="Path to file containing sources")
     parser.add_argument('--augmentation', type=int, default=20)
     parser.add_argument('--score_alpha', type=float, default=1.0)
+    parser.add_argument(
+        '--aggregation_mode',
+        choices=[
+            "legacy_best_rank",
+            "rrf",
+            "frequency_first",
+            "hybrid",
+        ],
+        default="legacy_best_rank",
+        help="Cross-augmentation candidate aggregation rule",
+    )
     parser.add_argument('--length', type=int, default=-1)
     parser.add_argument('--process_number', type=int, default=multiprocessing.cpu_count())
     parser.add_argument('--synthon', action="store_true", default=False)

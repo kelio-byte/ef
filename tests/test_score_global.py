@@ -125,6 +125,41 @@ def test_compute_rank_preserves_legacy_best_local_rank_semantics_and_input():
     assert rank[candidate("B")] == pytest.approx(1.5)
 
 
+def test_aggregation_modes_are_opt_in_and_have_distinct_priorities():
+    prediction = [
+        [candidate("A"), candidate("B")],
+        [candidate("C"), candidate("B")],
+        [candidate("D"), candidate("B")],
+        [candidate("E"), candidate("B")],
+    ]
+
+    legacy, _ = score_global.compute_rank(
+        prediction,
+        beam_size=2,
+        aggregation_mode="legacy_best_rank",
+    )
+    rrf, _ = score_global.compute_rank(
+        prediction,
+        beam_size=2,
+        aggregation_mode="rrf",
+    )
+    frequency, _ = score_global.compute_rank(
+        prediction,
+        beam_size=2,
+        aggregation_mode="frequency_first",
+    )
+    hybrid, _ = score_global.compute_rank(
+        prediction,
+        beam_size=2,
+        aggregation_mode="hybrid",
+    )
+
+    assert legacy[candidate("A")] > legacy[candidate("B")]
+    assert rrf[candidate("B")] > rrf[candidate("A")]
+    assert frequency[candidate("B")] > frequency[candidate("A")]
+    assert hybrid[candidate("B")] > hybrid[candidate("A")]
+
+
 def test_sampling_diagnostics_separates_coverage_runs_and_duplicates():
     predictions = [
         [
