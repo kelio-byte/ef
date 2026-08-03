@@ -688,7 +688,7 @@ profiling）、`ce2bad8`（holdout 结果；本文档收口见后续 Git log）�
 
 ## 10. 任务 14：Validation 基准与 NNN Forward 效率
 
-状态：`[-] 进行中；先建立 validation-200 基线，不接触 test target`
+状态：`[x] 已完成；建立 validation-200 基线并完成三条 forward 优化短筛`
 
 ### 14.0 固定范围与目的
 
@@ -820,15 +820,39 @@ profile 中保留 `model_forward_calls` 计数作为诊断字段。
 该候选同时未通过逐行正确性与 10% 加速门槛，因此不运行 validation-200，代码和测试
 开关已完整回退，仅保留本实验记录。
 
+第三条候选检查 PyTorch attention forward。只读微基准使用首个 validation batch 的
+代表性 `(576, 53)` 输入：复用 Q/K/V 的同一个 LayerNorm 输出可使单次 forward 从
+约 55.4–57.7ms 降到 53.2ms，三个模型输出逐元素一致，但幅度不足以支持 10% 端到端
+目标；进一步设置 `need_weights=False` 可降到 47.2ms，但模型输出最大绝对差约
+0.006–0.010。
+
+仍将后一方案做成默认关闭、训练默认路径不变的临时推理开关，并完成相同 val5 全流程
+短筛。结果 forward 从 9.614s 降到 9.304s（3.22%），总 wall 从 14.117s 增至
+14.718s（回归 4.26%）；300 行中同样只有第 169 行发生变化。微基准收益没有转化为
+动态采样收益，且未满足逐行门槛，因此实现和测试已完整回退，不运行 validation-200。
+
 ### 14.3 本任务完成记录
 
-实际修改：待填写。
+实际修改：保留 opt-in profile 中的动态 token/attention padding 统计和
+`model_forward_calls`；默认 profile 关闭，正式采样路径不增加同步。内层逐步长度分桶、
+外层初始长度排序、efficient attention 三个候选均只做隔离短筛，失败后完整删除实现，
+没有修改训练默认路径、checkpoint、数据集、历史结果或 NNN 方法语义。
 
-测试与实验：待填写。
+测试与实验：validation reaction 0–199 的固定 NNN 基线为 Top-1/2/3
+62.5/79.0/86.0%，Oracle 93.0%，wall 487.303s；padding profile 证明 attention padding
+代理浪费 45.55%。三条候选分别为：width-8/16 内层分桶 wall 回归 16.2%/10.4%；
+外层长度排序 wall 回归 1.05% 且 1/300 行变化；efficient attention wall 回归 4.26%
+且 1/300 行变化。保留诊断后的项目回归为 `145 passed, 7 warnings`（排除仓库既有且
+未修改的 `tests/sampling/test_beam.py`）。
 
-结论：待填写。
+结论：当前没有候选同时满足逐行正确性和 validation-200 预期加速门槛，因此不制造
+“优化成功”的结论，也不重复运行没有胜出候选的 validation-200。继续保留 RTX 3090
+上的 TF32 `high`、batch=64、K3/M2/R3 NNN 作为效率默认。进一步明显提速需要单独决定
+是否允许极少量 seeded 输出变化，或扩大范围到模型 attention/训练实现；二者都超出本
+任务“默认路径不变且逐行一致”的边界。
 
-Commit：待填写。
+Commits：`1dfe8ae`（padding 诊断）、`06d8bbd`（拒绝内层分桶）、`c75b805`
+（拒绝外层长度排序；本文档收口见后续 Git log）。
 
 ## 11. 决策门槛
 
