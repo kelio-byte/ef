@@ -66,6 +66,27 @@ def _make_euler_beam_sample_seeds(
     ]
 
 
+def _make_grouped_euler_beam_branch_seeds(
+    base_seed: int,
+    global_start: int,
+    n_products: int,
+    n_seed_groups: int,
+    branches_per_group: int,
+) -> list[list[int]]:
+    """Recreate virtual run/branch streams inside one global branch pool."""
+    if n_seed_groups < 1 or branches_per_group < 1:
+        raise ValueError("seed groups and branches per group must be >= 1")
+    return [
+        [
+            _mix_child_seed(base_seed, global_start + product_index, group + 1)
+            + branch_index
+            for group in range(n_seed_groups)
+            for branch_index in range(branches_per_group)
+        ]
+        for product_index in range(n_products)
+    ]
+
+
 def _sha256_file(path: str) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as f:
@@ -127,7 +148,7 @@ def _git_state() -> dict:
 
 def _outputs_per_product(args) -> int:
     if args.sampler == "euler_beam":
-        return args.n_runs
+        return args.n_runs * args.euler_beam_n_return
     return args.n_samples
 
 
@@ -184,6 +205,7 @@ def _build_sampling_metadata(
     peak_cuda_allocated_bytes: int | None = None,
     peak_cuda_reserved_bytes: int | None = None,
     euler_beam_profile: dict | None = None,
+    euler_beam_stats: dict | None = None,
 ) -> dict:
     # Augmentation describes the actual input layout, so it must not be
     # inferred from the checkpoint's training data directory.  A single
@@ -217,11 +239,17 @@ def _build_sampling_metadata(
             "n_branches": args.n_branches,
             "n_children": args.n_children,
             "n_runs": args.n_runs,
+            "n_return": args.euler_beam_n_return,
+            "initial_seed_groups": args.euler_beam_initial_seed_groups,
             "score_mode": args.euler_beam_score_mode,
             "changed_state_bonus": args.euler_beam_changed_state_bonus,
             "matmul_precision": args.euler_beam_matmul_precision,
             "child_policy": args.euler_beam_child_policy,
-            "seed_scope": "stable product/run streams",
+            "seed_scope": (
+                "grouped virtual-run/branch streams"
+                if args.euler_beam_initial_seed_groups is not None
+                else "stable product/run streams"
+            ),
         })
     else:
         sampling["n_samples"] = args.n_samples
@@ -240,6 +268,8 @@ def _build_sampling_metadata(
         runtime["peak_cuda_reserved_bytes"] = peak_cuda_reserved_bytes
     if euler_beam_profile is not None:
         runtime["euler_beam_profile"] = euler_beam_profile
+    if euler_beam_stats is not None:
+        runtime["euler_beam_stats"] = euler_beam_stats
 
     return {
         "schema_version": 1,
@@ -301,6 +331,21 @@ def main():
                         help="每个父分支每步生成的后继数 (euler_beam)")
     parser.add_argument("--n_runs", type=int, default=1,
                         help="每个产物独立运行次数 (euler_beam, 等价于 Euler 的 --n_samples)")
+    parser.add_argument(
+        "--euler_beam_n_return",
+        type=int,
+        default=1,
+        help="Number of final ranked branches returned per Euler-Beam run",
+    )
+    parser.add_argument(
+        "--euler_beam_initial_seed_groups",
+        type=int,
+        default=None,
+        help=(
+            "Optional virtual-run seed groups inside one global branch pool; "
+            "requires n_runs=1 and n_branches divisible by this value"
+        ),
+    )
     parser.add_argument("--euler_beam_score_mode", type=str,
                         default="full_probability",
                         choices=["full_probability", "legacy_triggered_reverse"],
@@ -356,6 +401,25 @@ def main():
 
     if args.euler_beam_profile and args.sampler != "euler_beam":
         raise ValueError("euler_beam_profile requires --sampler euler_beam")
+    if args.sampler == "euler_beam":
+        if not 1 <= args.euler_beam_n_return <= args.n_branches:
+            raise ValueError(
+                "euler_beam_n_return must be between 1 and n_branches"
+            )
+        if args.euler_beam_initial_seed_groups is not None:
+            if args.n_runs != 1:
+                raise ValueError(
+                    "euler_beam_initial_seed_groups requires n_runs=1"
+                )
+            if args.euler_beam_initial_seed_groups < 1:
+                raise ValueError(
+                    "euler_beam_initial_seed_groups must be >= 1"
+                )
+            if args.n_branches % args.euler_beam_initial_seed_groups != 0:
+                raise ValueError(
+                    "n_branches must be divisible by "
+                    "euler_beam_initial_seed_groups"
+                )
 
     device = torch.device(args.device)
     if args.sampler == "euler_beam" and device.type == "cuda":
@@ -466,6 +530,7 @@ def main():
     use_greedy_beam = args.sampler in ("greedy_edit", "beam_edit")
     print(f"Sampler: {args.sampler}")
     euler_beam_profile = {} if args.euler_beam_profile else None
+    euler_beam_stats = {} if args.sampler == "euler_beam" else None
     if use_greedy_beam:
         # Build time policy.
         if args.time_policy == "depth":
@@ -486,6 +551,7 @@ def main():
     if args.sampler == "euler_beam":
         print(f"  n_branches={args.n_branches}, "
               f"n_children={args.n_children}, n_runs={args.n_runs}, "
+              f"n_return={args.euler_beam_n_return}, "
               f"matmul_precision={args.euler_beam_matmul_precision}, "
               f"child_policy={args.euler_beam_child_policy}")
 
@@ -525,10 +591,27 @@ def main():
                 B_prod = end - start
                 # _make_batch uses repeat_interleave, so rows are product-major:
                 # P0R0, P0R1, ..., P1R0, P1R1, ...
-                sample_seeds = _make_euler_beam_sample_seeds(
-                    args.seed, args.start_product + start,
-                    B_prod, args.n_runs,
-                )
+                initial_branch_seeds = None
+                if args.euler_beam_initial_seed_groups is not None:
+                    branches_per_group = (
+                        args.n_branches
+                        // args.euler_beam_initial_seed_groups
+                    )
+                    initial_branch_seeds = (
+                        _make_grouped_euler_beam_branch_seeds(
+                            args.seed,
+                            args.start_product + start,
+                            B_prod,
+                            args.euler_beam_initial_seed_groups,
+                            branches_per_group,
+                        )
+                    )
+                    sample_seeds = None
+                else:
+                    sample_seeds = _make_euler_beam_sample_seeds(
+                        args.seed, args.start_product + start,
+                        B_prod, args.n_runs,
+                    )
                 results = sample_euler_beam(
                     model, x_0, kappa_scheduler,
                     n_branches=args.n_branches,
@@ -546,6 +629,9 @@ def main():
                     changed_state_bonus=args.euler_beam_changed_state_bonus,
                     child_policy=args.euler_beam_child_policy,
                     profile=euler_beam_profile,
+                    n_return=args.euler_beam_n_return,
+                    initial_branch_seeds=initial_branch_seeds,
+                    sampling_stats=euler_beam_stats,
                 )
             elif args.sampler == "greedy_edit":
                 results = sample_greedy_single_edit(
@@ -592,9 +678,12 @@ def main():
             results = results.cpu()
             B = end - start
             for i in range(B):
-                n_out = args.n_samples if use_greedy_beam else n_rep
+                if args.sampler == "euler_beam":
+                    n_out = outputs_per_product
+                else:
+                    n_out = args.n_samples if use_greedy_beam else n_rep
                 for s in range(n_out):
-                    row_idx = i if use_greedy_beam else i * n_rep + s
+                    row_idx = i if use_greedy_beam else i * n_out + s
                     row = results[row_idx]
                     line = _ids_to_str(row.tolist(), id2token)
                     if f_out:
@@ -640,6 +729,7 @@ def main():
             peak_cuda_allocated_bytes=peak_cuda_allocated_bytes,
             peak_cuda_reserved_bytes=peak_cuda_reserved_bytes,
             euler_beam_profile=euler_beam_profile,
+            euler_beam_stats=euler_beam_stats,
         )
         metadata_path = os.path.join(
             args.output_dir, "sampling_metadata.json",
@@ -648,9 +738,11 @@ def main():
             json.dump(metadata, f, indent=2, sort_keys=True)
             f.write("\n")
         if args.sampler == "euler_beam":
-            print(f"Done. Total predictions: {n_products * args.n_runs} "
+            print(f"Done. Total predictions: "
+                  f"{n_products * outputs_per_product} "
                   f"(n_branches={args.n_branches}, "
-                  f"n_children={args.n_children}, n_runs={args.n_runs})")
+                  f"n_children={args.n_children}, n_runs={args.n_runs}, "
+                  f"n_return={args.euler_beam_n_return})")
         else:
             print(f"Done. Total predictions: {n_products * args.n_samples}")
         print(f"Saved to: {pred_file}")

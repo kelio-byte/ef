@@ -471,6 +471,9 @@ def sample_euler_beam(
     x_1: Optional[Tensor] = None,    # 未使用, 预留 (与 sample_euler 接口对齐)
     vocab_size: Optional[int] = None, # 未使用, 预留
     profile: Optional[Dict[str, object]] = None,
+    n_return: int = 1,
+    initial_branch_seeds: Optional[List[List[int]]] = None,
+    sampling_stats: Optional[Dict[str, int]] = None,
 ) -> Tensor:
     """Euler 采样 + 分支维护。
 
@@ -481,11 +484,14 @@ def sample_euler_beam(
         n_children: 每个父分支生成的独立随机后继数。
         n_steps: Euler 步数 (与 sample_euler 一致)。
         base_seed: 基础随机种子。
+        n_return: 每个输入样本返回的最终分支数，按现有搜索排名排序。
+        initial_branch_seeds: 可选的每样本、每初始分支 seed 布局。
         changed_state_bonus: 给非原始 token 状态的固定搜索先验；0 表示禁用。
         child_policy: `stochastic` 或 M=2 的启发式 `stochastic_noop`。
 
     Returns:
-        x_final: (B, L_out) 每条样本的最优分支, PAD 填充到等长。
+        x_final: (B * n_return, L_out) 每条样本的排名分支，按样本优先
+            排列并 PAD 到等长。
     """
     if n_branches < 1:
         raise ValueError(f"n_branches must be >= 1, got {n_branches}")
@@ -493,6 +499,11 @@ def sample_euler_beam(
         raise ValueError(f"n_children must be >= 1, got {n_children}")
     if n_steps < 1:
         raise ValueError(f"n_steps must be >= 1, got {n_steps}")
+    if n_return < 1 or n_return > n_branches:
+        raise ValueError(
+            "n_return must be between 1 and n_branches, got "
+            f"n_return={n_return}, n_branches={n_branches}"
+        )
     if x_0.shape[0] < 1:
         raise ValueError("x_0 batch must contain at least one sample")
     if use_origin_mask:
@@ -504,6 +515,25 @@ def sample_euler_beam(
             f"sample_seeds length must equal batch size {x_0.shape[0]}, "
             f"got {len(sample_seeds)}"
         )
+    if initial_branch_seeds is not None:
+        if sample_seeds is not None:
+            raise ValueError(
+                "initial_branch_seeds and sample_seeds are mutually exclusive"
+            )
+        if len(initial_branch_seeds) != x_0.shape[0]:
+            raise ValueError(
+                "initial_branch_seeds length must equal batch size "
+                f"{x_0.shape[0]}, got {len(initial_branch_seeds)}"
+            )
+        invalid_lengths = [
+            len(seeds) for seeds in initial_branch_seeds
+            if len(seeds) != n_branches
+        ]
+        if invalid_lengths:
+            raise ValueError(
+                "each initial_branch_seeds row must contain n_branches "
+                f"seeds ({n_branches}), got {invalid_lengths[0]}"
+            )
     if score_mode not in ("full_probability", "legacy_triggered_reverse"):
         raise ValueError(f"Unsupported score_mode: {score_mode}")
     if changed_state_bonus < 0:
@@ -533,18 +563,24 @@ def sample_euler_beam(
     # ── 初始化: 每条样本创建 n_branches 条分支 ──
     all_branches: List[List[_BranchState]] = []
     for b in range(B):
-        sample_seed = (
-            sample_seeds[b]
-            if sample_seeds is not None
-            else base_seed + b * n_branches
-        )
+        if initial_branch_seeds is None:
+            sample_seed = (
+                sample_seeds[b]
+                if sample_seeds is not None
+                else base_seed + b * n_branches
+            )
         branches = []
         for k in range(n_branches):
+            branch_seed = (
+                initial_branch_seeds[b][k]
+                if initial_branch_seeds is not None
+                else sample_seed + k
+            )
             branches.append(_BranchState(
                 x_t=x_0[b:b + 1].to(device),
                 log_mass=(-math.log(n_branches) if n_children > 1 else 0.0),
                 t=0.0,
-                seed=sample_seed + k,
+                seed=branch_seed,
             ))
         all_branches.append(branches)
 
@@ -771,21 +807,52 @@ def sample_euler_beam(
                 profile.get("child_candidate_evaluations", 0)
                 + len(parent_index_values)
             )
+        if sampling_stats is not None:
+            sampling_stats["steps"] = sampling_stats.get("steps", 0) + 1
+            sampling_stats["parent_branch_evaluations"] = (
+                sampling_stats.get("parent_branch_evaluations", 0) + N_br
+            )
+            sampling_stats["child_candidate_evaluations"] = (
+                sampling_stats.get("child_candidate_evaluations", 0)
+                + len(parent_index_values)
+            )
 
     # ── 返回每条样本的最优分支 ──
     section_started = _profile_start(profile, device)
     results: List[Tensor] = []
+    shortfall_samples = 0
+    shortfall_outputs = 0
     for b in range(B):
         if n_children > 1 and score_mode == "full_probability":
-            best = all_branches[b][0]
+            ranked = all_branches[b]
         else:
-            best = max(all_branches[b], key=sort_key)
-        results.append(best.x_t)
+            ranked = sorted(
+                all_branches[b], key=sort_key, reverse=True,
+            )
+        selected = ranked[:n_return]
+        missing = n_return - len(selected)
+        if missing:
+            shortfall_samples += 1
+            shortfall_outputs += missing
+            selected.extend([ranked[0]] * missing)
+        results.extend(branch.x_t for branch in selected)
+
+    if sampling_stats is not None:
+        sampling_stats["return_shortfall_samples"] = (
+            sampling_stats.get("return_shortfall_samples", 0)
+            + shortfall_samples
+        )
+        sampling_stats["return_shortfall_outputs"] = (
+            sampling_stats.get("return_shortfall_outputs", 0)
+            + shortfall_outputs
+        )
 
     out_len = max(r.shape[1] for r in results)
-    out = torch.full((B, out_len), pad_token, dtype=torch.long, device=device)
-    for b, r in enumerate(results):
-        out[b, :r.shape[1]] = r
+    out = torch.full(
+        (len(results), out_len), pad_token, dtype=torch.long, device=device,
+    )
+    for row_index, result in enumerate(results):
+        out[row_index, :result.shape[1]] = result
 
     _profile_finish(
         profile, "finalize_output_seconds", section_started, device,

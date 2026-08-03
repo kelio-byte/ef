@@ -28,6 +28,8 @@ def _euler_beam_args(tmp_path):
         n_branches=3,
         n_children=2,
         n_runs=3,
+        euler_beam_n_return=1,
+        euler_beam_initial_seed_groups=None,
         seed=42,
         euler_beam_score_mode="full_probability",
         euler_beam_changed_state_bonus=0.5,
@@ -113,6 +115,8 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
         "n_branches": 3,
         "n_children": 2,
         "n_runs": 3,
+        "n_return": 1,
+        "initial_seed_groups": None,
         "score_mode": "full_probability",
         "changed_state_bonus": 0.5,
         "matmul_precision": "high",
@@ -128,3 +132,10 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
     ).hexdigest()
     assert metadata["runtime"]["peak_cuda_allocated_bytes"] == 1024
     assert metadata["runtime"]["peak_cuda_reserved_bytes"] == 2048
+
+
+def test_euler_beam_output_count_includes_returned_branches(tmp_path):
+    args = _euler_beam_args(tmp_path)
+    args.n_runs = 1
+    args.euler_beam_n_return = 3
+    assert _outputs_per_product(args) == 3

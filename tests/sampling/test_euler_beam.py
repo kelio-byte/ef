@@ -592,6 +592,68 @@ def test_cli_sample_seeds_are_independent_of_batching_and_branch_count():
     assert len(set(whole)) == len(whole)
 
 
+def test_grouped_branch_seeds_recreate_three_run_three_branch_streams():
+    from scripts.sample_retro import (
+        _make_euler_beam_sample_seeds,
+        _make_grouped_euler_beam_branch_seeds,
+    )
+
+    grouped = _make_grouped_euler_beam_branch_seeds(
+        42, 20, n_products=2, n_seed_groups=3, branches_per_group=3,
+    )
+    run_seeds = _make_euler_beam_sample_seeds(42, 20, 2, 3)
+    expected = [
+        [seed + branch for seed in run_seeds[start:start + 3]
+         for branch in range(3)]
+        for start in (0, 3)
+    ]
+    assert grouped == expected
+
+
+def test_top_n_return_preserves_default_best_and_fixed_layout():
+    model = _StochasticModel()
+    x_0 = torch.tensor([[BOS_TOKEN, 4, 5, 6, PAD_TOKEN]])
+    common = dict(
+        scheduler=LinearScheduler(), n_branches=5, n_children=2,
+        n_steps=4, max_seq_len=32, base_seed=91,
+    )
+    best = sample_euler_beam(model, x_0, **common)
+    stats = {}
+    top_three = sample_euler_beam(
+        model, x_0, n_return=3, sampling_stats=stats, **common,
+    )
+
+    assert top_three.shape[0] == 3
+    best_key = tuple(best[0][best[0] != PAD_TOKEN].tolist())
+    first_key = tuple(top_three[0][top_three[0] != PAD_TOKEN].tolist())
+    assert first_key == best_key
+    assert stats["return_shortfall_samples"] == 0
+    assert stats["return_shortfall_outputs"] == 0
+    assert stats["parent_branch_evaluations"] > 0
+    assert stats["child_candidate_evaluations"] == (
+        2 * stats["parent_branch_evaluations"]
+    )
+
+    with pytest.raises(ValueError, match="n_return"):
+        sample_euler_beam(model, x_0, n_branches=2, n_return=3,
+                          scheduler=LinearScheduler())
+
+
+def test_initial_branch_seed_layout_is_validated():
+    model = _StochasticModel()
+    x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        sample_euler_beam(
+            model, x_0, LinearScheduler(), n_branches=2,
+            sample_seeds=[7], initial_branch_seeds=[[7, 8]],
+        )
+    with pytest.raises(ValueError, match="row must contain"):
+        sample_euler_beam(
+            model, x_0, LinearScheduler(), n_branches=2,
+            initial_branch_seeds=[[7]],
+        )
+
+
 def test_legacy_score_mode_matches_triggered_only_reference():
     from edit_flows.sampling.euler_beam import (
         _legacy_branch_sort_key,
