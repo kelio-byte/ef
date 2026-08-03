@@ -686,7 +686,91 @@ holdout 为 54/71.5/79.5、Oracle 91，Top-3 配对净增 11/200 且 p=0.0074。
 Commits：`475be15`（holdout 接口）、`ca3d90f`（CUDA memory）、`e91e5ea`（stage
 profiling）、`ce2bad8`（holdout 结果；本文档收口见后续 Git log）。
 
-## 10. 决策门槛
+## 10. 任务 14：Validation 基准与 NNN Forward 效率
+
+状态：`[-] 进行中；先建立 validation-200 基线，不接触 test target`
+
+### 14.0 固定范围与目的
+
+任务 14 只沿效率默认 NNN 主线推进：
+
+```text
+K=3, M=2, R=3, n_steps=100, seed=42
+score_mode=full_probability
+changed_state_bonus=0.5
+child_policy=stochastic_noop
+matmul_precision=high
+batch_size=64
+```
+
+激进 LL 与 NNN+LL 高覆盖模式保持冻结，只作为后续离线参考，不参与本任务参数选择。
+本任务不修改训练代码、checkpoint、数据集或 test 结果。
+
+数据协议：
+
+- 快速代码回归仍可使用 tiny，但不能据其 target 选择方案；
+- 方法筛选改用 validation 的 reaction 0–199，即 `src-val.txt` product 行 `[0, 4000)`；
+- 如果局部优化在 validation-200 上同时保持逐行输出和明显加速，再进入不重叠的
+  validation 确认区间；
+- 完整 5007 reaction test 只在方法和参数全部冻结后运行一次。
+
+### 14.1 首个实验：不改代码的 NNN 基线
+
+固定命令：
+
+```bash
+python scripts/sample_retro.py \
+    --checkpoint checkpoint_step600000.pt \
+    --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/val/src-val.txt" \
+    --start_product 0 --max_products 4000 \
+    --sampler euler_beam \
+    --n_branches 3 --n_children 2 --n_runs 3 \
+    --n_steps 100 --batch_size 64 --device cuda --seed 42 \
+    --euler_beam_score_mode full_probability \
+    --euler_beam_changed_state_bonus 0.5 \
+    --euler_beam_matmul_precision high \
+    --euler_beam_child_policy stochastic_noop \
+    --output_dir results/task14_val200_nnn_baseline/
+
+python 'scripts/score_#global#.py' \
+    --predictions results/task14_val200_nnn_baseline/predictions.txt \
+    --targets "datasets/USPTO_50K_PtoR_aug20_#global#/val/tgt-val.txt" \
+    --augmentation 20 --beam_size 3 --n_best 5 \
+    --length 200 --target_offset 0 --process_number 16 \
+    --aggregation_mode legacy_best_rank --diagnostics \
+    --diagnostics_json results/task14_val200_nnn_baseline/diagnostics.json
+```
+
+### 14.2 性能诊断和修改门槛
+
+基于任务 13 的 profile，优先检查模型 forward 和动态长度 padding，不继续优化只占不到
+1% 的 `_step_log_p`。在修改采样代码前，先用 opt-in profile 记录：
+
+- active parent/child 数；
+- 实际 non-PAD token 数与 padded token 数；
+- 每步最大长度和 padding 比例；
+- forward、分支准备、proposal、编辑与 merge/prune 时间。
+
+任何优化必须满足：
+
+1. 默认不开启时不改变现有路径；
+2. 相同 seed、product/run、不同 batch 划分时预测逐字节一致；
+3. CPU 单元测试和 Euler-Beam 回归通过；
+4. 短 profile 至少有明确的 padding/forward 证据；
+5. validation-200 Top-k、Oracle 和逐行预测不变；
+6. validation-200 wall time 至少降低 10%，否则不保留复杂实现。
+
+### 14.3 本任务完成记录
+
+实际修改：待填写。
+
+测试与实验：待填写。
+
+结论：待填写。
+
+Commit：待填写。
+
+## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
 
@@ -703,7 +787,7 @@ profiling）、`ce2bad8`（holdout 结果；本文档收口见后续 Git log）�
 - 某一条启发式路线失败；
 - 仍可通过只读诊断明确下一步。
 
-## 11. Git 和文档记录规则
+## 12. Git 和文档记录规则
 
 取得明确阶段性进展时：
 
