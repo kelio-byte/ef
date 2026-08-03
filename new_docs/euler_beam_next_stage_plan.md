@@ -1322,6 +1322,40 @@ bonus/policy。就准确率与 wall-time 主目标而言 M2 支配 M3；M3 仅�
 和真实唯一数两个探索诊断上较好。结果目录为 `results/task19_testmini_r1k10_m2/` 和
 `results/task19_testmini_r1k10_m3/`。
 
+## 21. 任务 20：轨迹口径、训练审计与前沿方法研究
+
+状态：`[x] 已完成代码口径修正、设计文档更新、训练审计和论文路线分析；未修改训练`
+
+本任务回应六项研究问题，不运行新的长采样，也不根据 test-mini target 调参：
+
+1. `stochastic_noop` 在 tiny 的固定 K3/M2/R3 消融中由 58/64/66 提升为 60/64/70，
+   wall 基本不变；该结论只适用于已测配置，policy 仍是无 proposal 校正的启发式。
+2. trajectory HTML 仍展示所有路径，但同 example 合流、跨 example state collision 和
+   控制台计数只使用最终 canonical SMILES 命中 Target 的路径。0 条命中明确跳过，1 条
+   命中因不足两条路径也跳过；原始 path 编号保持不变。
+3. `euler_beam_design.md` 已从早期单后继/CPU RNG/旧排序原型改写为当前 K×M、无状态
+   GPU RNG、full-probability state mass、R/K/M 和全部分支输出设计，并记录限制。
+4. 对本地 Edit Flows 论文逐项核对训练代码。主 Bregman loss 与 Eq.23 一致；确认 Noam
+   首次 update 顺序、fallback alignment、zip 静默截断、resume、无 validation/seed 等
+   问题。现 checkpoint 权重有限，预对齐数据结构完整，潜在 fallback/data 缺陷没有证据
+   影响该 checkpoint。全训练集目标编辑为 insert/sub/delete =
+   91.201/7.875/0.924%，并识别出缺少不可编辑 product conditioning 的建模限制。
+5. R10/K1/M1 在算法结构和分布语义上退化为十条独立 Euler 风格轨迹，但 RNG、seed
+   映射、categorical 实现和 bookkeeping 不同，不会与 `euler --n_samples 10` 逐字节相同。
+6. 论文路线形成 `frontier_methods_research.md`：近期优先 Q sharpening 与特殊 token
+   诊断；独立 `euler_smc` 是最值得的新 sampler 方向；显式 product conditioning 是下一
+   训练主方向；guidance/reverse/localized edits 和 RetroAgent 分别列明前提与成本。
+
+验证：`tests/test_visualization_scripts.py` 为 `14 passed`。新增测试覆盖 mismatch path
+过滤、原始 path index 映射、0-match 跳过和 cross-example 仅匹配路径语义。训练和 PDF
+仅做只读审计，`PDF/` 保持用户未跟踪文件，不纳入 commit。
+
+产出文档：
+
+- `new_docs/euler_beam_design.md`
+- `new_docs/training_code_audit.md`
+- `new_docs/frontier_methods_research.md`
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
