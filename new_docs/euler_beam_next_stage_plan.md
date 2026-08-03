@@ -1235,6 +1235,37 @@ R1K9 是低延迟模式。不能使用 test-mini target 决定二者；应先冻
 实验目录：`results/task18_val200_r3k3_all/`、`results/task18_val200_r1k9_all/`。
 实现 commit：`bdbd75a`；实验结论与文档收口 commit 见本次之后的 Git log。
 
+## 20. 任务 19：test-mini 上的 R1K10 children 对照
+
+状态：`[-] 已预注册，数据构建与实验进行中`
+
+用户指定在新建的完整 test-mini 上比较两个 R1K10 配置：
+
+| 配置 | R | K | M | 每 augmentation 输出 |
+|---|---:|---:|---:|---:|
+| R1K10M2 | 1 | 10 | 2 | 10 |
+| R1K10M3 | 1 | 10 | 3 | 10 |
+
+为保证只改变 M，两组统一使用 `child_policy=stochastic`。现有 `stochastic_noop` 仅支持
+M2，不能用于本对照。K10 不能被此前的 3 个 virtual seed group 整除，因此两组均不传
+`euler_beam_initial_seed_groups`，使用相同 `seed=42` 和相同默认 K10 初始 branch seed
+布局；本实验可以严格比较 M2/M3，但不能把它写成相对先前 grouped-seed K9 的单因素
+结论。
+
+数据固定从完整 `test/src-test.txt` 和 `test/tgt-test.txt` 各截取前 20020 行，写入新的
+`src-test-mini-1001.txt`、`tgt-test-mini-1001.txt`，不覆盖既有 20028 行 mini。必须核验：
+
+- source/target 均为 20020 行；
+- 均可整除 augmentation 20；
+- 新文件分别与完整文件的前 20020 行逐字节一致；
+- 评分 metadata 推导为 1001 reactions、beam10、target offset 0。
+
+两组固定 100 steps、batch64、CUDA、TF32 high、full probability、bonus0.5、legacy
+aggregation、Top-1～10 diagnostics。分别写入独立结果目录，不覆盖历史结果。报告 wall、
+显存、父/子评估、shortfall、Top-1～10、各 input-rank invalid、Oracle 和真实唯一候选。
+这是用户指定的并列 test 报告；完成后不根据 test target 继续选择 bonus、policy 或其它
+超参数。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
