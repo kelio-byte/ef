@@ -1,6 +1,6 @@
 # Euler-Beam 下一阶段任务规划
 
-更新日期：2026-08-01
+更新日期：2026-08-03
 
 ## 1. 文档用途
 
@@ -88,8 +88,9 @@ python 'scripts/score_#global#.py' \
     --predictions results/bench_beam/predictions.txt \
     --targets "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test-tiny.txt" \
     --augmentation 20 \
-    --beam_size 3 \
-    --n_best 5
+    --beam_size 9 \
+    --n_best 10 \
+    --diagnostics
 ```
 
 ### 3.2 Euler 对照
@@ -119,7 +120,7 @@ python 'scripts/score_#global#.py' \
 ```text
 预测文件 = 本次采样输出
 prediction lines = 原始反应数 × augmentation × beam_size
-beam_size = n_runs（Euler-Beam）或 n_samples（Euler）
+beam_size = n_runs × n_branches（Euler-Beam）或 n_samples（Euler）
 ```
 
 ## 4. 执行顺序
@@ -858,6 +859,10 @@ Commits：`1dfe8ae`（padding 诊断）、`06d8bbd`（拒绝内层分桶）、`c
 
 状态：`[x] 已完成；seed42/43 均确认全局池更快但 Top-k/Oracle 较弱`
 
+> 历史说明：本节记录当时只返回 Top-N 分支的实验接口。任务 18 已移除 `n_return`，
+> 当前实现固定输出每个 run 的全部 K 个槽位；本节参数只用于解释历史结果，不能作为
+> 当前命令模板。
+
 ### 15.0 研究问题与固定对照
 
 本任务检验当前收益究竟来自 9 个总分支，还是来自 3 个互不剪枝的独立 run。只比较：
@@ -1003,8 +1008,8 @@ seed42 与 seed43 的损失幅度不同：Top-3 分别下降 7.0pp 与 0.5pp，�
 - Oracle-any、覆盖但未进入 Top-3、target augmentation support；
 - 每个输出通道的 target-hit、invalid、duplicate，以及通道间 Jaccard overlap；
 - 平均 valid candidate、真实 unique candidate、Top-1～10 rank availability；
-- sampling wall time、峰值 CUDA allocated/reserved、父/子评估数、return shortfall；
-- checkpoint/input/output SHA-256、seed、K/M/R/n_return、score mode、bonus、policy、
+- sampling wall time、峰值 CUDA allocated/reserved、父/子评估数、final branch shortfall；
+- checkpoint/input/output SHA-256、seed、K/M/R、score mode、bonus、policy、
   precision、batch size 和 Git commit。
 
 固定评分模板：
@@ -1019,8 +1024,8 @@ python 'scripts/score_#global#.py' \
     --diagnostics --diagnostics_json RESULTS_DIR/diagnostics.json
 ```
 
-`beam_size` 始终等于每条 augmentation 的实际输出数（Euler-Beam 为
-`n_runs × n_return`），而 `n_best=10` 表示跨 augmentation 聚合后报告到 Top-10；二者
+`beam_size` 始终等于每条 augmentation 的实际输出数（Euler-Beam 当前为
+`n_runs × n_branches`），而 `n_best=10` 表示跨 augmentation 聚合后报告到 Top-10；二者
 不能混淆。若实验研究的是其他 aggregation mode，必须同时报告固定 legacy 默认，不能
 只呈现较好的聚合结果。
 
@@ -1147,7 +1152,7 @@ token state。对同一 example 的每对路径维护 divergence 区间，只有
 
 ## 19. 任务 18：全部分支输出、简洁轨迹与 R1/R3 公平比较
 
-状态：`[ ] 进行中`
+状态：`[x] 接口、测试和 validation 对比完成；test-mini 等待冻结速度/准确率目标`
 
 ### 19.1 接口和布局修改
 
@@ -1181,6 +1186,52 @@ validation reaction 0–199 上公平比较：
 若进入 test-mini，必须从完整 `src-test.txt` 选择前 20020 行，即 1001 个完整反应，target
 使用完整 test 文件并由 metadata 推导 `length=1001,target_offset=0`。test-mini 只用于
 冻结方案的规模化报告，不用于继续调参；完整 5007 test 留作最终一次评估。
+
+### 19.3 完成记录
+
+实现：
+
+- `visualize_trajectory.py` 新增布尔参数 `--table`（默认 True）。`--table False` 仅省略
+  `Per-path Event Analysis` 及逐 event oracle/model 表，完整路径总览、同 example
+  发散—合流和跨 example collision 均保留。
+- `sample_euler_beam()` 移除 `n_return`，始终返回每个 run 的 K 个最终槽位；状态不足 K
+  时确定性复制最高排名状态并记录 shortfall，保证固定文件布局。
+- `sample_retro.py` 和 `eval.py` 移除 `--euler_beam_n_return`，Euler-Beam 输出数和评分
+  beam size 统一为 `R*K`。多 run 文件采用 branch-rank-major、run-minor，历史各 run
+  winner 仍处于最前面的 R 个局部 rank。
+- 评分聚合公式未改；`eval.py` 从 metadata 自动读取 beam size、反应数和 target offset。
+
+验证：
+
+- 新增/更新形状、顺序、shortfall、metadata、CLI 和 `--table` 测试；排除与本任务无关
+  的既知 `tests/sampling/test_beam.py` 后为 `172 passed, 8 warnings`。
+- CUDA 轨迹冒烟确认 `--table False` 的 HTML 含完整 overview，且不含详细分析标题或
+  event table。
+- 20 个 product 行、R3K3、2 steps 的 `eval.py` 冒烟写出 `20*9=180` 行，metadata
+  自动驱动 beam9/Top-10 评分；每个 9 行块的前三行与旧 winner-only R3K3 完全一致。
+
+validation reaction 0–199（4000 条 aug20 输入）的公平对比：
+
+| 指标 | R3K3：三个隔离池 | R1K9：一个全局池 | 差值（R1-R3） |
+|---|---:|---:|---:|
+| 采样时间 | 482.18 s | 324.39 s | -32.7% |
+| Top-1 | 64.5% | 62.5% | -2.0 pp |
+| Top-2 | 80.5% | 75.5% | -5.0 pp |
+| Top-3 | 85.0% | 79.5% | -5.5 pp |
+| Top-5 | 88.0% | 83.5% | -4.5 pp |
+| Top-10 | 90.5% | 89.0% | -1.5 pp |
+| Oracle-any | 94.5% | 92.5% | -2.0 pp |
+| 平均真实唯一候选 | 22.57 | 26.28 | +3.71 |
+| 最终槽位不足占比 | 15.15% | 31.30% | +16.15 pp |
+
+结论：R1K9 的单个大矩阵和跨分支合并使其快约三分之一，并产生更多不同候选，但所有
+分支在同一 beam 中全局竞争，高分模式会共同淘汰其它搜索方向；R3K3 的三个 run 是隔离
+搜索岛，因而并非冗余随机重复。当前证据形成明确速度—准确率取舍：R3K3 是准确率模式，
+R1K9 是低延迟模式。不能使用 test-mini target 决定二者；应先冻结目标，再在从完整 test
+文件截取的 1001 个完整反应上只做确认性报告。
+
+实验目录：`results/task18_val200_r3k3_all/`、`results/task18_val200_r1k9_all/`。
+实现 commit：`bdbd75a`；实验结论与文档收口 commit 见本次之后的 Git log。
 
 ## 11. 决策门槛
 

@@ -74,7 +74,7 @@ canonicalize and aggregate 20 test augmentations -> Top-k accuracy
 | 采样器 | 入口 | 核心行为 | 每个产物的输出数 |
 |---|---|---|---:|
 | Euler | `sample_euler()` | 多位置随机编辑，轨迹互相独立 | `n_samples` |
-| Euler-Beam | `sample_euler_beam()` | 每个状态产生 M 个后继，合并、排序并保留 K 个状态 | `n_runs` |
+| Euler-Beam | `sample_euler_beam()` | 每个状态产生 M 个后继，合并、排序并保留 K 个状态 | `n_runs * n_branches` |
 | Greedy edit | `sample_greedy_single_edit()` | 每步选择一个最高分编辑 | 1 |
 | Beam edit | `sample_beam_single_edit()` | 单编辑候选展开与 beam 剪枝 | 1 |
 
@@ -92,7 +92,8 @@ Euler-Beam 的三个关键规模参数是：
 
 - `n_branches=K`：每个 run 最多保留的内部状态数；
 - `n_children=M`：每个父状态在每一步产生的随机后继数；
-- `n_runs=R`：对每个产物独立执行 R 次搜索，最终输出 R 条预测。
+- `n_runs=R`：对每个产物执行 R 个彼此隔离的搜索池；每个池输出 K 个最终槽位，因此
+  每条 augmentation 共输出 `R*K` 条预测。
 
 单步搜索结构为：
 
@@ -249,12 +250,15 @@ python 'scripts/score_#global#.py' \
     --predictions results/bench_beam/predictions.txt \
     --targets "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test-tiny.txt" \
     --augmentation 20 \
-    --beam_size 3 \
-    --n_best 5
+    --beam_size 9 \
+    --n_best 10 \
+    --diagnostics
 ```
 
-这里评分器的 `beam_size` 必须等于采样时的 `n_runs`，而不是内部的
-`n_branches` 或 `n_children`。
+这里评分器的 `beam_size` 必须等于每条 augmentation 的实际输出数；Euler-Beam 当前为
+`n_runs * n_branches`，不是 `n_runs` 或 `n_children`。多 run 的输出顺序为
+branch-rank-major、run-minor：先列出每个 run 的第一名，再列出每个 run 的第二名，以此
+类推。推荐优先使用 `eval.py`，由 metadata 自动推导该值，避免手工配置不一致。
 
 只要指定 `--output_dir`，采样器还会在同目录写入
 `sampling_metadata.json`，记录 checkpoint、输入文件及哈希、采样器配置、有效步数、
