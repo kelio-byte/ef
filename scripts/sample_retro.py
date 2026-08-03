@@ -2,7 +2,7 @@
 """Sampling script for Edit Flows retrosynthesis.
 
 Products are processed in GPU batches.  Each product produces consecutive
-outputs: ``n_samples`` for Euler or ``n_runs`` for Euler-Beam.
+outputs: ``n_samples`` for Euler or ``n_runs * n_branches`` for Euler-Beam.
 """
 
 import argparse
@@ -148,8 +148,28 @@ def _git_state() -> dict:
 
 def _outputs_per_product(args) -> int:
     if args.sampler == "euler_beam":
-        return args.n_runs * args.euler_beam_n_return
+        return args.n_runs * args.n_branches
     return args.n_samples
+
+
+def _euler_beam_output_row_indices(
+    product_index: int,
+    n_runs: int,
+    n_branches: int,
+) -> list[int]:
+    """Return rank-major/run-minor rows for one product.
+
+    ``sample_euler_beam`` returns K rows for each input run in run-major
+    order.  The prediction file instead places every run winner first, then
+    every rank-2 branch, so adding branch tails does not demote later run
+    winners in cross-augmentation local ranking.
+    """
+    input_start = product_index * n_runs
+    return [
+        (input_start + run_index) * n_branches + branch_rank
+        for branch_rank in range(n_branches)
+        for run_index in range(n_runs)
+    ]
 
 
 def _select_products(
@@ -239,7 +259,8 @@ def _build_sampling_metadata(
             "n_branches": args.n_branches,
             "n_children": args.n_children,
             "n_runs": args.n_runs,
-            "n_return": args.euler_beam_n_return,
+            "final_branches_per_run": args.n_branches,
+            "output_order": "branch-rank-major, run-minor",
             "initial_seed_groups": args.euler_beam_initial_seed_groups,
             "score_mode": args.euler_beam_score_mode,
             "changed_state_bonus": args.euler_beam_changed_state_bonus,
@@ -274,7 +295,11 @@ def _build_sampling_metadata(
     return {
         "schema_version": 1,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "layout": "input-product-major, output-minor",
+        "layout": (
+            "input-product-major, branch-rank-major, run-minor"
+            if args.sampler == "euler_beam"
+            else "input-product-major, output-minor"
+        ),
         "sampler": args.sampler,
         "augmentation": augmentation,
         "augmentation_inferred_from": augmentation_source,
@@ -331,12 +356,6 @@ def main():
                         help="每个父分支每步生成的后继数 (euler_beam)")
     parser.add_argument("--n_runs", type=int, default=1,
                         help="每个产物独立运行次数 (euler_beam, 等价于 Euler 的 --n_samples)")
-    parser.add_argument(
-        "--euler_beam_n_return",
-        type=int,
-        default=1,
-        help="Number of final ranked branches returned per Euler-Beam run",
-    )
     parser.add_argument(
         "--euler_beam_initial_seed_groups",
         type=int,
@@ -402,10 +421,6 @@ def main():
     if args.euler_beam_profile and args.sampler != "euler_beam":
         raise ValueError("euler_beam_profile requires --sampler euler_beam")
     if args.sampler == "euler_beam":
-        if not 1 <= args.euler_beam_n_return <= args.n_branches:
-            raise ValueError(
-                "euler_beam_n_return must be between 1 and n_branches"
-            )
         if args.euler_beam_initial_seed_groups is not None:
             if args.n_runs != 1:
                 raise ValueError(
@@ -551,7 +566,7 @@ def main():
     if args.sampler == "euler_beam":
         print(f"  n_branches={args.n_branches}, "
               f"n_children={args.n_children}, n_runs={args.n_runs}, "
-              f"n_return={args.euler_beam_n_return}, "
+              f"outputs_per_product={outputs_per_product}, "
               f"matmul_precision={args.euler_beam_matmul_precision}, "
               f"child_policy={args.euler_beam_child_policy}")
 
@@ -629,7 +644,6 @@ def main():
                     changed_state_bonus=args.euler_beam_changed_state_bonus,
                     child_policy=args.euler_beam_child_policy,
                     profile=euler_beam_profile,
-                    n_return=args.euler_beam_n_return,
                     initial_branch_seeds=initial_branch_seeds,
                     sampling_stats=euler_beam_stats,
                 )
@@ -679,11 +693,16 @@ def main():
             B = end - start
             for i in range(B):
                 if args.sampler == "euler_beam":
-                    n_out = outputs_per_product
+                    row_indices = _euler_beam_output_row_indices(
+                        i, args.n_runs, args.n_branches,
+                    )
                 else:
                     n_out = args.n_samples if use_greedy_beam else n_rep
-                for s in range(n_out):
-                    row_idx = i if use_greedy_beam else i * n_out + s
+                    row_indices = [
+                        i if use_greedy_beam else i * n_out + s
+                        for s in range(n_out)
+                    ]
+                for row_idx in row_indices:
                     row = results[row_idx]
                     line = _ids_to_str(row.tolist(), id2token)
                     if f_out:
@@ -742,7 +761,7 @@ def main():
                   f"{n_products * outputs_per_product} "
                   f"(n_branches={args.n_branches}, "
                   f"n_children={args.n_children}, n_runs={args.n_runs}, "
-                  f"n_return={args.euler_beam_n_return})")
+                  f"outputs_per_product={outputs_per_product})")
         else:
             print(f"Done. Total predictions: {n_products * args.n_samples}")
         print(f"Saved to: {pred_file}")

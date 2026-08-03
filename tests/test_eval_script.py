@@ -52,14 +52,14 @@ def test_derive_score_layout_rejects_misalignment(metadata, message):
 def test_sample_command_carries_current_euler_beam_settings():
     args = _args(
         "--n_branches", "5", "--n_children", "3", "--n_runs", "2",
-        "--euler_beam_n_return", "2", "--max_products", "200",
+        "--max_products", "200",
     )
     command = eval_script.build_sample_command(args)
     rendered = " ".join(command)
     assert "--n_branches 5" in rendered
     assert "--n_children 3" in rendered
     assert "--n_runs 2" in rendered
-    assert "--euler_beam_n_return 2" in rendered
+    assert "--euler_beam_n_return" not in rendered
     assert "--max_products 200" in rendered
 
 
@@ -108,11 +108,11 @@ def test_dry_run_derives_score_layout_without_running_subprocess(
         "--max_products", "200",
         "--start_product", "400",
         "--n_runs", "3",
-        "--euler_beam_n_return", "2",
+        "--n_branches", "3",
         "--dry_run",
     ])
     output = capsys.readouterr().out
     assert result == 0
-    assert "--beam_size 6" in output
+    assert "--beam_size 9" in output
     assert "--length 10" in output
     assert "--target_offset 20" in output

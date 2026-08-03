@@ -78,7 +78,6 @@ def build_parser() -> argparse.ArgumentParser:
     sampling.add_argument("--n_branches", type=int, default=3)
     sampling.add_argument("--n_children", type=int, default=2)
     sampling.add_argument("--n_runs", type=int, default=3)
-    sampling.add_argument("--euler_beam_n_return", type=int, default=1)
     sampling.add_argument(
         "--euler_beam_initial_seed_groups", type=int, default=None,
     )
@@ -172,7 +171,6 @@ def build_sample_command(args: argparse.Namespace) -> list[str]:
         "--n_branches", str(args.n_branches),
         "--n_children", str(args.n_children),
         "--n_runs", str(args.n_runs),
-        "--euler_beam_n_return", str(args.euler_beam_n_return),
         "--euler_beam_score_mode", args.euler_beam_score_mode,
         "--euler_beam_changed_state_bonus",
         str(args.euler_beam_changed_state_bonus),
@@ -348,7 +346,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         beam_size = (
-            args.n_runs * args.euler_beam_n_return
+            args.n_runs * args.n_branches
             if args.sampler == "euler_beam" else args.n_samples
         )
         reaction_count = args.max_products // args.augmentation

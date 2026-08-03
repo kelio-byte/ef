@@ -471,7 +471,6 @@ def sample_euler_beam(
     x_1: Optional[Tensor] = None,    # 未使用, 预留 (与 sample_euler 接口对齐)
     vocab_size: Optional[int] = None, # 未使用, 预留
     profile: Optional[Dict[str, object]] = None,
-    n_return: int = 1,
     initial_branch_seeds: Optional[List[List[int]]] = None,
     sampling_stats: Optional[Dict[str, int]] = None,
 ) -> Tensor:
@@ -484,13 +483,12 @@ def sample_euler_beam(
         n_children: 每个父分支生成的独立随机后继数。
         n_steps: Euler 步数 (与 sample_euler 一致)。
         base_seed: 基础随机种子。
-        n_return: 每个输入样本返回的最终分支数，按现有搜索排名排序。
         initial_branch_seeds: 可选的每样本、每初始分支 seed 布局。
         changed_state_bonus: 给非原始 token 状态的固定搜索先验；0 表示禁用。
         child_policy: `stochastic` 或 M=2 的启发式 `stochastic_noop`。
 
     Returns:
-        x_final: (B * n_return, L_out) 每条样本的排名分支，按样本优先
+        x_final: (B * n_branches, L_out) 每条样本的全部排名分支，按样本优先
             排列并 PAD 到等长。
     """
     if n_branches < 1:
@@ -499,11 +497,6 @@ def sample_euler_beam(
         raise ValueError(f"n_children must be >= 1, got {n_children}")
     if n_steps < 1:
         raise ValueError(f"n_steps must be >= 1, got {n_steps}")
-    if n_return < 1 or n_return > n_branches:
-        raise ValueError(
-            "n_return must be between 1 and n_branches, got "
-            f"n_return={n_return}, n_branches={n_branches}"
-        )
     if x_0.shape[0] < 1:
         raise ValueError("x_0 batch must contain at least one sample")
     if use_origin_mask:
@@ -817,7 +810,7 @@ def sample_euler_beam(
                 + len(parent_index_values)
             )
 
-    # ── 返回每条样本的最优分支 ──
+    # ── 返回每条样本的全部最终分支（固定 K 槽位）──
     section_started = _profile_start(profile, device)
     results: List[Tensor] = []
     shortfall_samples = 0
@@ -829,8 +822,8 @@ def sample_euler_beam(
             ranked = sorted(
                 all_branches[b], key=sort_key, reverse=True,
             )
-        selected = ranked[:n_return]
-        missing = n_return - len(selected)
+        selected = ranked[:n_branches]
+        missing = n_branches - len(selected)
         if missing:
             shortfall_samples += 1
             shortfall_outputs += missing
@@ -838,12 +831,12 @@ def sample_euler_beam(
         results.extend(branch.x_t for branch in selected)
 
     if sampling_stats is not None:
-        sampling_stats["return_shortfall_samples"] = (
-            sampling_stats.get("return_shortfall_samples", 0)
+        sampling_stats["final_branch_shortfall_samples"] = (
+            sampling_stats.get("final_branch_shortfall_samples", 0)
             + shortfall_samples
         )
-        sampling_stats["return_shortfall_outputs"] = (
-            sampling_stats.get("return_shortfall_outputs", 0)
+        sampling_stats["final_branch_shortfall_outputs"] = (
+            sampling_stats.get("final_branch_shortfall_outputs", 0)
             + shortfall_outputs
         )
 

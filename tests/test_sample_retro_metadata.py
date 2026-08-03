@@ -28,7 +28,6 @@ def _euler_beam_args(tmp_path):
         n_branches=3,
         n_children=2,
         n_runs=3,
-        euler_beam_n_return=1,
         euler_beam_initial_seed_groups=None,
         seed=42,
         euler_beam_score_mode="full_probability",
@@ -40,9 +39,9 @@ def _euler_beam_args(tmp_path):
     )
 
 
-def test_euler_beam_output_count_uses_n_runs_not_n_samples(tmp_path):
+def test_euler_beam_output_count_uses_runs_times_branches(tmp_path):
     args = _euler_beam_args(tmp_path)
-    assert _outputs_per_product(args) == 3
+    assert _outputs_per_product(args) == 9
     args.sampler = "euler"
     assert _outputs_per_product(args) == 99
 
@@ -79,7 +78,7 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
 ):
     args = _euler_beam_args(tmp_path)
     prediction_path = tmp_path / "predictions.txt"
-    prediction_bytes = b"A\nB\nC\nD\nE\nF\n"
+    prediction_bytes = b"A\n" * 18
     prediction_path.write_bytes(prediction_bytes)
 
     metadata = _build_sampling_metadata(
@@ -89,7 +88,7 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
         source_product_count=100,
         selection_start_product=20,
         product_count=2,
-        output_line_count=6,
+        output_line_count=18,
         n_sampling_steps=80,
         sample_scheduler_name="cubic",
         train_scheduler_name="linear",
@@ -100,9 +99,12 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
     )
 
     assert metadata["sampler"] == "euler_beam"
+    assert metadata["layout"] == (
+        "input-product-major, branch-rank-major, run-minor"
+    )
     assert metadata["augmentation"] == 20
-    assert metadata["output_beam_size"] == 3
-    assert metadata["output_line_count"] == 6
+    assert metadata["output_beam_size"] == 9
+    assert metadata["output_line_count"] == 18
     assert metadata["output_sha256"] == hashlib.sha256(
         prediction_bytes,
     ).hexdigest()
@@ -115,7 +117,8 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
         "n_branches": 3,
         "n_children": 2,
         "n_runs": 3,
-        "n_return": 1,
+        "final_branches_per_run": 3,
+        "output_order": "branch-rank-major, run-minor",
         "initial_seed_groups": None,
         "score_mode": "full_probability",
         "changed_state_bonus": 0.5,
@@ -134,8 +137,7 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
     assert metadata["runtime"]["peak_cuda_reserved_bytes"] == 2048
 
 
-def test_euler_beam_output_count_includes_returned_branches(tmp_path):
+def test_euler_beam_output_count_includes_all_final_branches(tmp_path):
     args = _euler_beam_args(tmp_path)
     args.n_runs = 1
-    args.euler_beam_n_return = 3
     assert _outputs_per_product(args) == 3

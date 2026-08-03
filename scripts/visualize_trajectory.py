@@ -333,7 +333,7 @@ def _build_trajectory_overview(
         parts.append(
             '<p>No exact token-state collision between different examples.</p>'
         )
-    parts.extend(['</div>', '</section>', '<h1>Per-path Event Analysis</h1>'])
+    parts.extend(['</div>', '</section>'])
     return "".join(parts)
 
 
@@ -721,6 +721,17 @@ def _decode_to_smiles(token_ids: torch.Tensor, id2token: Dict[int, str]) -> str:
     return _decode_token_sequence(token_ids, id2token, separator="")
 
 
+def _str_to_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in ("true", "1", "yes", "y"):
+        return True
+    if normalized in ("false", "0", "no", "n"):
+        return False
+    raise argparse.ArgumentTypeError(
+        f"expected a boolean value, got {value!r}"
+    )
+
+
 # ── main ───────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -732,8 +743,13 @@ def main() -> None:
     parser.add_argument("--targets_file", type=str, required=True)
     parser.add_argument("--vocab_file", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="visualizations/trajectory/")
-    parser.add_argument("--html", type=lambda x: x.lower() in ("true", "1", "yes"),
+    parser.add_argument("--html", type=_str_to_bool,
                         default=True, help="Generate HTML output (default: True)")
+    parser.add_argument(
+        "--table", type=_str_to_bool, default=True,
+        help=("Include per-event oracle/model tables after the all-example "
+              "path overview; False keeps only the compact overview"),
+    )
     parser.add_argument("--scheduler", type=str, default=None, choices=["cubic", "linear"])
     parser.add_argument("--deduplicate", type=int, default=0)
     parser.add_argument("--max_lines", type=int, default=0)
@@ -935,32 +951,34 @@ def main() -> None:
             ),
         ]
 
-        for bi, idx in enumerate(selected):
-            n_match = sum(path_correctness[bi])
-            for path_idx, events in enumerate(grouped_events[bi]):
-                final_prediction = _decode_token_sequence(
-                    grouped_finals[bi][path_idx], id2token,
-                )
-                sample_info = (
-                    f"Path #{path_idx + 1}; final={final_prediction}; "
-                    f"{n_match}/{args.n_samples} paths match"
-                )
-                html_parts.append(
-                    _build_example_section(
-                        example_idx=idx,
-                        path_idx=path_idx,
-                        product_str=products[idx],
-                        target_str=targets[idx],
-                        events=events,
-                        id2token=id2token,
-                        final_correct=path_correctness[bi][path_idx],
-                        scheduler=scheduler,
-                        use_rate_reparam=use_rate_reparam,
-                        clamp_kappa=cfg.get("clamp_kappa", False),
-                        clamp_max=cfg.get("clamp_max", 50.0),
-                        sample_info=sample_info,
+        if args.table:
+            html_parts.append('<h1>Per-path Event Analysis</h1>')
+            for bi, idx in enumerate(selected):
+                n_match = sum(path_correctness[bi])
+                for path_idx, events in enumerate(grouped_events[bi]):
+                    final_prediction = _decode_token_sequence(
+                        grouped_finals[bi][path_idx], id2token,
                     )
-                )
+                    sample_info = (
+                        f"Path #{path_idx + 1}; final={final_prediction}; "
+                        f"{n_match}/{args.n_samples} paths match"
+                    )
+                    html_parts.append(
+                        _build_example_section(
+                            example_idx=idx,
+                            path_idx=path_idx,
+                            product_str=products[idx],
+                            target_str=targets[idx],
+                            events=events,
+                            id2token=id2token,
+                            final_correct=path_correctness[bi][path_idx],
+                            scheduler=scheduler,
+                            use_rate_reparam=use_rate_reparam,
+                            clamp_kappa=cfg.get("clamp_kappa", False),
+                            clamp_max=cfg.get("clamp_max", 50.0),
+                            sample_info=sample_info,
+                        )
+                    )
 
         html_parts.append(_build_footer_html())
 

@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import re
 
+import pytest
 import torch
 
 from edit_flows.utils.tokens import BOS_TOKEN, PAD_TOKEN
@@ -21,6 +22,20 @@ def _load_script(name):
 
 trajectory = _load_script("visualize_trajectory.py")
 first_step = _load_script("visualize_first_step.py")
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("True", True), ("yes", True), ("1", True),
+     ("False", False), ("no", False), ("0", False)],
+)
+def test_trajectory_boolean_cli_values(text, expected):
+    assert trajectory._str_to_bool(text) is expected
+
+
+def test_trajectory_boolean_cli_rejects_unknown_value():
+    with pytest.raises(Exception, match="expected a boolean"):
+        trajectory._str_to_bool("maybe")
 
 
 def _actions(length, *, ins=None, sub=None, delete=None):

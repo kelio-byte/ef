@@ -560,9 +560,15 @@ def test_sample_seeds_match_individual_runs_and_validate_length(n_children):
         for seed in seeds
     ]
     max_len = max(row.shape[1] for row in individual_rows)
-    individual = torch.full((len(seeds), max_len), PAD_TOKEN, dtype=torch.long)
-    for i, row in enumerate(individual_rows):
-        individual[i, :row.shape[1]] = row[0]
+    individual = torch.full(
+        (len(seeds) * common["n_branches"], max_len),
+        PAD_TOKEN, dtype=torch.long,
+    )
+    output_index = 0
+    for run_rows in individual_rows:
+        for row in run_rows:
+            individual[output_index, :row.shape[0]] = row
+            output_index += 1
     assert torch.equal(batched, individual)
 
     with pytest.raises(ValueError, match="sample_seeds length"):
@@ -578,6 +584,17 @@ def test_make_batch_is_product_major():
     assert torch.equal(batch[3], batch[4])
     assert torch.equal(batch[4], batch[5])
     assert not torch.equal(batch[2], batch[3])
+
+
+def test_euler_beam_output_rows_are_branch_rank_major_then_run_minor():
+    from scripts.sample_retro import _euler_beam_output_row_indices
+
+    assert _euler_beam_output_row_indices(
+        product_index=0, n_runs=3, n_branches=3,
+    ) == [0, 3, 6, 1, 4, 7, 2, 5, 8]
+    assert _euler_beam_output_row_indices(
+        product_index=1, n_runs=2, n_branches=3,
+    ) == [6, 9, 7, 10, 8, 11]
 
 
 def test_cli_sample_seeds_are_independent_of_batching_and_branch_count():
@@ -610,34 +627,59 @@ def test_grouped_branch_seeds_recreate_three_run_three_branch_streams():
     assert grouped == expected
 
 
-def test_top_n_return_preserves_default_best_and_fixed_layout():
+def test_all_final_branches_are_returned_with_fixed_layout():
     model = _StochasticModel()
     x_0 = torch.tensor([[BOS_TOKEN, 4, 5, 6, PAD_TOKEN]])
     common = dict(
         scheduler=LinearScheduler(), n_branches=5, n_children=2,
         n_steps=4, max_seq_len=32, base_seed=91,
     )
-    best = sample_euler_beam(model, x_0, **common)
     stats = {}
-    top_three = sample_euler_beam(
-        model, x_0, n_return=3, sampling_stats=stats, **common,
+    all_branches = sample_euler_beam(
+        model, x_0, sampling_stats=stats, **common,
     )
 
-    assert top_three.shape[0] == 3
-    best_key = tuple(best[0][best[0] != PAD_TOKEN].tolist())
-    first_key = tuple(top_three[0][top_three[0] != PAD_TOKEN].tolist())
-    assert first_key == best_key
-    assert stats["return_shortfall_samples"] == 0
-    assert stats["return_shortfall_outputs"] == 0
+    assert all_branches.shape[0] == common["n_branches"]
+    assert stats["final_branch_shortfall_samples"] == 0
+    assert stats["final_branch_shortfall_outputs"] == 0
     assert stats["parent_branch_evaluations"] > 0
     assert stats["child_candidate_evaluations"] == (
         2 * stats["parent_branch_evaluations"]
     )
 
-    with pytest.raises(ValueError, match="n_return"):
-        sample_euler_beam(model, x_0, n_branches=2, n_return=3,
-                          scheduler=LinearScheduler())
 
+def test_final_branch_shortfall_is_duplicate_filled_and_recorded(monkeypatch):
+    import edit_flows.sampling.euler_beam as beam_module
+
+    def no_op_sampler(branch_seeds, x_t, *args, **kwargs):
+        shape = x_t.shape
+        return {
+            "ins_mask": torch.zeros(shape, dtype=torch.bool),
+            "sub_mask": torch.zeros(shape, dtype=torch.bool),
+            "del_mask": torch.zeros(shape, dtype=torch.bool),
+            "ins_tokens": torch.zeros(shape, dtype=torch.long),
+            "sub_tokens": torch.zeros(shape, dtype=torch.long),
+        }
+
+    monkeypatch.setattr(
+        beam_module, "_sample_actions_per_branch", no_op_sampler,
+    )
+    stats = {}
+    result = sample_euler_beam(
+        _StochasticModel(),
+        torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]]),
+        LinearScheduler(),
+        n_branches=3,
+        n_children=2,
+        n_steps=2,
+        sampling_stats=stats,
+    )
+
+    assert result.shape[0] == 3
+    assert torch.equal(result[0], result[1])
+    assert torch.equal(result[1], result[2])
+    assert stats["final_branch_shortfall_samples"] == 1
+    assert stats["final_branch_shortfall_outputs"] == 2
 
 def test_initial_branch_seed_layout_is_validated():
     model = _StochasticModel()
