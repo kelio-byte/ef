@@ -1024,6 +1024,47 @@ python 'scripts/score_#global#.py' \
 不能混淆。若实验研究的是其他 aggregation mode，必须同时报告固定 legacy 默认，不能
 只呈现较好的聚合结果。
 
+## 17. 任务 16：统一评估入口与完整轨迹可视化
+
+状态：`[ ] 进行中`
+
+本任务不改训练、数据、checkpoint、历史实验结果或 Euler-Beam 的搜索排序。目标是消除
+评估命令中重复且容易不一致的参数，并修复诊断可视化，使方法行为更容易审计。
+
+### 17.1 `eval.py` 的实现边界
+
+- 新增一个命令入口，先调用现有 `sample_retro.py` 生成预测，再调用
+  `score_#global#.py` 评分；采样和评分的核心实现仍各自只有一份，不复制算法。
+- checkpoint、products、targets、output directory、augmentation 和选择区间只在统一
+  命令中声明一次。评分所需的 `beam_size`、`length` 和 `target_offset` 优先从采样
+  metadata 与实际选择区间推导，避免手工填错。
+- 默认报告 Top-1～10、diagnostics 并保存 JSON；默认不得覆盖已有 predictions，只有
+  显式指定 overwrite 时才允许覆盖。
+- 子进程隔离不是主要性能瓶颈：采样完成后 GPU 模型无需在 RDKit CPU 评分阶段常驻，且
+  继续复用两份已验证 CLI 比大范围重构更安全。提供 dry-run/只评分能力用于检查命令和
+  复用已有预测。
+
+### 17.2 可视化修复范围
+
+- `visualize_trajectory.py` 不再只选择一个 exact/best sample；对每个反应显示所有请求的
+  Euler 路径，包括没有发生编辑的路径。
+- 每条路径按 Product、每次实际编辑后的完整 token 序列、Target 的顺序展示；每个中间
+  序列末尾显示具体原子操作（插入、删除、替换及位置），多个同时编辑不得被隐藏。
+- 事件记录增加编辑后的 `x_next`，只在诊断 recording 开启时保存，不改变普通采样结果、
+  seed 或性能路径。
+- 检查并修复 `visualize_first_step.py` 的重复导航、checkpoint/vocab/origin-mask 兼容问题，
+  同时明确区分“真正随机采样”与“逐位置 argmax 诊断”，避免把后者错误标为 actual。
+- 当前 `visualize_trajectory.py --n_branches` 调用的是尚未实现事件记录的 Euler-Beam 接口，
+  需要先明确报错或补齐记录，不能继续保留会在运行时错误解包的伪支持。
+
+### 17.3 验证与完成标准
+
+1. 单元测试覆盖统一参数推导、覆盖保护、Top-10 diagnostics 命令，以及多路径/多操作的
+   HTML 输出；
+2. Euler 普通 sampling 在 recording 关闭时结果不变，并验证 event 的 pre/post state；
+3. 用 checkpoint 做一个很短的 CUDA/HTML 冒烟，不运行无意义的完整数据实验；
+4. 更新本节实际修改、测试结果和结论，创建范围明确的 commit 并推送当前任务分支。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
