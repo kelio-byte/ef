@@ -131,6 +131,212 @@ def _build_sequence_ladder(
     return "".join(lines)
 
 
+def _state_key(token_ids: torch.Tensor) -> Tuple[int, ...]:
+    """Return the exact non-padding token state used for convergence tests."""
+    return tuple(
+        int(token_id)
+        for token_id in token_ids.tolist()
+        if int(token_id) not in (PAD_TOKEN, BOS_TOKEN)
+    )
+
+
+def _reconstruct_post_step_states(
+    initial_state: torch.Tensor,
+    events: List[dict],
+    n_steps: int,
+) -> List[Tuple[int, ...]]:
+    """Carry event states forward to reconstruct state after every Euler step."""
+    if n_steps < 1:
+        raise ValueError("n_steps must be at least 1")
+    event_states: Dict[int, Tuple[int, ...]] = {}
+    for event in events:
+        step = int(event["step_idx"])
+        if 0 <= step < n_steps and event.get("x_next") is not None:
+            event_states[step] = _state_key(event["x_next"])
+
+    current = _state_key(initial_state)
+    states: List[Tuple[int, ...]] = []
+    for step in range(n_steps):
+        current = event_states.get(step, current)
+        states.append(current)
+    return states
+
+
+def _find_reconvergence_episodes(
+    initial_state: torch.Tensor,
+    paths: List[List[dict]],
+    n_steps: int,
+) -> List[dict]:
+    """Find path pairs that differ and later regain the same exact state."""
+    states = [
+        _reconstruct_post_step_states(initial_state, events, n_steps)
+        for events in paths
+    ]
+    episodes: List[dict] = []
+    for left in range(len(states)):
+        for right in range(left + 1, len(states)):
+            divergence_step: Optional[int] = None
+            for step in range(n_steps):
+                equal = states[left][step] == states[right][step]
+                if not equal and divergence_step is None:
+                    divergence_step = step
+                elif equal and divergence_step is not None:
+                    episodes.append({
+                        "left_path": left,
+                        "right_path": right,
+                        "divergence_step": divergence_step,
+                        "reconvergence_step": step,
+                        "state": states[left][step],
+                    })
+                    divergence_step = None
+    return episodes
+
+
+def _find_cross_example_collisions(
+    initial_states: List[torch.Tensor],
+    grouped_events: List[List[List[dict]]],
+    n_steps: int,
+) -> List[dict]:
+    """Report exact same-step states shared by paths from different examples."""
+    states = [
+        [
+            _reconstruct_post_step_states(initial_states[example_idx], path, n_steps)
+            for path in example_paths
+        ]
+        for example_idx, example_paths in enumerate(grouped_events)
+    ]
+    collisions: List[dict] = []
+    seen = set()
+    for step in range(n_steps):
+        by_state: Dict[Tuple[int, ...], List[Tuple[int, int]]] = {}
+        for example_idx, example_paths in enumerate(states):
+            for path_idx, path_states in enumerate(example_paths):
+                by_state.setdefault(path_states[step], []).append(
+                    (example_idx, path_idx)
+                )
+        for state, members in by_state.items():
+            examples = {example_idx for example_idx, _ in members}
+            if len(examples) < 2:
+                continue
+            identity = (state, tuple(members))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            collisions.append({
+                "step": step,
+                "state": state,
+                "members": members,
+            })
+    return collisions
+
+
+def _state_key_to_text(
+    state: Tuple[int, ...], id2token: Dict[int, str],
+) -> str:
+    return " ".join(id2token.get(token_id, "?") for token_id in state)
+
+
+def _build_trajectory_overview(
+    example_ids: List[int],
+    product_strs: List[str],
+    target_strs: List[str],
+    initial_states: List[torch.Tensor],
+    grouped_events: List[List[List[dict]]],
+    grouped_finals: List[torch.Tensor],
+    path_correctness: List[List[bool]],
+    id2token: Dict[int, str],
+    n_steps: int,
+) -> str:
+    """Build the all-examples path overview before detailed event tables."""
+    parts = [
+        '<section id="trajectory-overview">',
+        '<h1>All Examples — Complete Path Overview</h1>',
+        '<p style="color:#666">Reconvergence uses exact token states at the '
+        'same post-Euler step (0-based). It does not use Target or chemical '
+        'canonicalization.</p>',
+    ]
+    for local_idx, example_id in enumerate(example_ids):
+        episodes = _find_reconvergence_episodes(
+            initial_states[local_idx], grouped_events[local_idx], n_steps,
+        )
+        parts.extend([
+            f'<div class="ex-section" id="overview-ex{example_id}">',
+            f'<h2>Example #{example_id} — all paths</h2>',
+        ])
+        if episodes:
+            parts.append(
+                '<div class="summary-box"><b>Detected divergence → '
+                'reconvergence:</b><ul>'
+            )
+            for episode in episodes:
+                state_text = _state_key_to_text(episode["state"], id2token)
+                parts.append(
+                    '<li>'
+                    f'Path #{episode["left_path"] + 1} vs Path '
+                    f'#{episode["right_path"] + 1}: diverged at step '
+                    f'{episode["divergence_step"]}, reconverged at step '
+                    f'{episode["reconvergence_step"]} → '
+                    f'<code>{esc(state_text)}</code></li>'
+                )
+            parts.append('</ul></div>')
+        else:
+            parts.append(
+                '<div class="summary-box">No exact divergence → '
+                'reconvergence detected among this example\'s paths.</div>'
+            )
+
+        for path_idx, events in enumerate(grouped_events[local_idx]):
+            correct = path_correctness[local_idx][path_idx]
+            result = "MATCH" if correct else "MISMATCH"
+            result_class = "correct" if correct else "wrong"
+            final_text = _decode_token_sequence(
+                grouped_finals[local_idx][path_idx], id2token,
+            )
+            detail_anchor = (
+                f"ex{example_id}" if path_idx == 0
+                else f"ex{example_id}_path{path_idx}"
+            )
+            parts.extend([
+                '<div class="summary-box" '
+                'style="margin-left:16px;border-left:4px solid #78909c">',
+                f'<h3>Path #{path_idx + 1} — '
+                f'<span class="{result_class}">{result}</span> '
+                f'<a href="#{detail_anchor}" '
+                'style="font-size:12px">detailed analysis ↓</a></h3>',
+                _build_sequence_ladder(
+                    product_strs[local_idx], target_strs[local_idx],
+                    events, id2token,
+                ),
+                '<div class="smiles-meta"><b>Final:</b> '
+                f'<code>{esc(final_text)}</code></div></div>',
+            ])
+        parts.append('</div>')
+
+    collisions = _find_cross_example_collisions(
+        initial_states, grouped_events, n_steps,
+    )
+    parts.append('<div class="ex-section"><h2>Cross-example state collisions</h2>')
+    if collisions:
+        parts.append('<ul>')
+        for collision in collisions:
+            members = ", ".join(
+                f'Ex#{example_ids[example_idx]} Path#{path_idx + 1}'
+                for example_idx, path_idx in collision["members"]
+            )
+            state_text = _state_key_to_text(collision["state"], id2token)
+            parts.append(
+                f'<li>step {collision["step"]}: {esc(members)} → '
+                f'<code>{esc(state_text)}</code></li>'
+            )
+        parts.append('</ul>')
+    else:
+        parts.append(
+            '<p>No exact token-state collision between different examples.</p>'
+        )
+    parts.extend(['</div>', '</section>', '<h1>Per-path Event Analysis</h1>'])
+    return "".join(parts)
+
+
 # ── trajectory HTML builders ──────────────────────────────────────────
 
 def _build_event_table(
@@ -496,7 +702,7 @@ def _build_index_html(
         eid = example_ids[idx]
         fc_str = "✓" if fc else "✗"
         lines.append(
-            f'<a href="#ex{eid}">Ex#{eid} {fc_str}</a> '
+            f'<a href="#overview-ex{eid}">Ex#{eid} {fc_str}</a> '
             f'<span style="color:#999;font-size:11px">({esc(prod[:50])} → {esc(tgt[:50])})</span><br>'
         )
 
@@ -627,6 +833,7 @@ def main() -> None:
     sel_products = [tokenize_smiles(products[i], token2id) for i in selected]
     sel_targets = [tokenize_smiles(targets[i], token2id) for i in selected]
     x_0, x_1 = build_model_batch(sel_products, sel_targets)
+    initial_rows = x_0.clone()
     target_rows = x_1.clone()
     n_sel = len(selected)
 
@@ -688,6 +895,22 @@ def main() -> None:
             f"  Example #{idx}: {n_match}/{args.n_samples} paths match; "
             f"edit events per path={event_counts}"
         )
+    reconvergence_count = sum(
+        len(_find_reconvergence_episodes(
+            initial_rows[bi], grouped_events[bi], args.n_steps,
+        ))
+        for bi in range(n_sel)
+    )
+    cross_collision_count = len(_find_cross_example_collisions(
+        [initial_rows[i] for i in range(n_sel)],
+        grouped_events,
+        args.n_steps,
+    ))
+    print(
+        "Trajectory comparison: "
+        f"{reconvergence_count} within-example divergence/reconvergence "
+        f"episodes; {cross_collision_count} cross-example state collisions"
+    )
 
     # ── Build HTML (only when --html) ──
     if args.html:
@@ -698,6 +921,17 @@ def main() -> None:
                 [targets[i] for i in selected],
                 final_corrects,
                 checkpoint=args.checkpoint,
+            ),
+            _build_trajectory_overview(
+                example_ids=selected,
+                product_strs=[products[i] for i in selected],
+                target_strs=[targets[i] for i in selected],
+                initial_states=[initial_rows[i] for i in range(n_sel)],
+                grouped_events=grouped_events,
+                grouped_finals=grouped_finals,
+                path_correctness=path_correctness,
+                id2token=id2token,
+                n_steps=args.n_steps,
             ),
         ]
 

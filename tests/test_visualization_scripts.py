@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import re
 
 import torch
 
@@ -66,14 +67,73 @@ def test_sequence_ladder_lists_every_post_edit_state_and_operation():
         "C", "O ) C", events, id2token,
     )
 
-    assert html.count("+Edit ") == 2
+    assert len(re.findall(r"\+?Edit \d+", html)) == 2
     assert "C )" in html
     assert "O ) C" in html
     assert "+) after pos 1" in html
     assert "C→O @pos 1" in html
     assert "+C after pos 2" in html
-    assert html.index("Product") < html.index("+Edit 1")
-    assert html.index("+Edit 2") < html.index("Target")
+    edit_labels = list(re.finditer(r"\+?Edit [12]", html))
+    assert html.index("Product") < edit_labels[0].start()
+    assert edit_labels[1].start() < html.index("Target")
+
+
+def _state_event(step, *tokens):
+    return {
+        "step_idx": step,
+        "x_next": torch.tensor([BOS_TOKEN, *tokens, PAD_TOKEN]),
+    }
+
+
+def test_reconvergence_detection_requires_prior_state_divergence():
+    initial = torch.tensor([BOS_TOKEN, 3, PAD_TOKEN])
+    paths = [
+        [
+            _state_event(0, 4),
+            _state_event(2, 6),
+            _state_event(3, 7),
+            _state_event(4, 9),
+        ],
+        [
+            _state_event(0, 5),
+            _state_event(2, 6),
+            _state_event(3, 8),
+            _state_event(4, 9),
+        ],
+        [],
+    ]
+
+    episodes = trajectory._find_reconvergence_episodes(initial, paths, 6)
+
+    pair_episodes = [
+        episode for episode in episodes
+        if (episode["left_path"], episode["right_path"]) == (0, 1)
+    ]
+    assert [
+        (episode["divergence_step"], episode["reconvergence_step"])
+        for episode in pair_episodes
+    ] == [(0, 2), (3, 4)]
+    assert all(episode["right_path"] != 2 for episode in episodes)
+
+
+def test_cross_example_collisions_are_reported_separately():
+    initial_states = [
+        torch.tensor([BOS_TOKEN, 3, PAD_TOKEN]),
+        torch.tensor([BOS_TOKEN, 4, PAD_TOKEN]),
+    ]
+    grouped_events = [
+        [[_state_event(1, 6)]],
+        [[_state_event(1, 6)]],
+    ]
+
+    collisions = trajectory._find_cross_example_collisions(
+        initial_states, grouped_events, 3,
+    )
+
+    assert len(collisions) == 1
+    assert collisions[0]["step"] == 1
+    assert collisions[0]["state"] == (6,)
+    assert collisions[0]["members"] == [(0, 0), (1, 0)]
 
 
 def test_first_step_navigation_has_one_description_per_link():
