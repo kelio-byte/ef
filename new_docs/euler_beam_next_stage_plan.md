@@ -1110,6 +1110,24 @@ child 0 也可能恰好 no-op。不同 parent 也可能编辑后汇聚到相同 
 所以“随机流不同”不等于“结果一定不同”；相同 child 是正常的离散采样碰撞，也是分支
 数有时缩减的直接原因。
 
+## 18. 任务 17：轨迹全局总览与发散—合流检测
+
+状态：`[ ] 进行中`
+
+在不改变采样器结果的前提下，扩展 trajectory HTML：
+
+1. 在任何逐 event 详情之前，先按 example 列出全部 `n_samples` 路径的 Product、每次
+   edit 后状态、具体动作、Final 和 Target，作为不经过 target 选择的全局总览；
+2. 对同一 example 内的每对路径，在相同 Euler step 上重建 post-step token state。只有
+   路径先出现不同状态、随后恢复成完全相同 token 序列，才标记为 reconvergence，并记录
+   divergence step、reconvergence step 和汇合状态；
+3. 单独统计不同 example 在同一步出现完全相同 token state 的 cross-example collision，
+   不把它与同一输入的随机路径合流混为一谈；
+4. 检测采用精确 token 序列，不利用 target，也不把不同 SMILES 写法的化学等价性误报为
+   序列相同。后续如需 canonical-SMILES 合流，应作为独立分析维度；
+5. 用构造轨迹单测覆盖“持续分离”“先分离后合流”“再次分离后再次合流”和跨 example
+   碰撞，再做短 CUDA HTML 冒烟，更新本节结果并提交、推送。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
