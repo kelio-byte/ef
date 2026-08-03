@@ -741,6 +741,25 @@ python 'scripts/score_#global#.py' \
     --diagnostics_json results/task14_val200_nnn_baseline/diagnostics.json
 ```
 
+基线完成结果：
+
+| 指标 | validation reaction 0–199 |
+|---|---:|
+| Top-1/2/3 | 62.5/79.0/86.0% |
+| Top-4/5 | 87.0/88.0% |
+| Oracle-any | 93.0%（186/200） |
+| 覆盖但未进 Top-3 | 7.0%（14/200） |
+| invalid rank 1/2/3 | 5.850/5.675/5.250% |
+| 平均真实唯一候选 | 9.820 |
+| wall time | 487.303s |
+| peak CUDA allocated | 1,600,589,824 B |
+| peak CUDA reserved | 24,559,747,072 B |
+
+输出严格为 12000 行，SHA-256 为
+`795b150d7f1f7be59b1b939fb213cbb78142b412e06d7cdd85f6e240881af591`；sampling
+metadata 记录 Git commit `ab185d0` 且 `dirty=false`。这组 validation 指标作为任务 14
+唯一的正式优化基线，后续不使用 test target 选择方案。
+
 ### 14.2 性能诊断和修改门槛
 
 基于任务 13 的 profile，优先检查模型 forward 和动态长度 padding，不继续优化只占不到
