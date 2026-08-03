@@ -808,6 +808,18 @@ width 8 虽降低峰值 allocated 并保持输出，但 wall time 回归 16.2%�
 padding FLOP 节省。按照预注册门槛，不运行 validation-200，不保留分桶实现；仅在
 profile 中保留 `model_forward_calls` 计数作为诊断字段。
 
+随后评估了“只按 product 初始长度重排外层 batch、输出时恢复原顺序”的低风险候选。
+离线静态长度计算表明，它在 validation-200 上理论上可将初始 batch 的 padded attention
+平方代理降低 43.22%，且不会增加每步 forward 次数。为避免把静态估计误当成实际收益，
+先以默认关闭的隔离开关完成 validation 前 5 个反应短筛，再决定是否保留。
+
+短筛仍使用相同的 100 条 augmented 输入和完整 100 步：动态 padded token 仅降低
+4.05%，动态 padded attention 代理仅降低 6.58%；forward 从 9.614s 降到 9.530s
+（仅 0.86%），总 wall 从 14.117s 增至 14.265s（回归 1.05%）。300 行中有 1 行发生
+变化，首个差异在第 169 行；这说明 batch shape 引起的浮点差异已传播到随机离散决策。
+该候选同时未通过逐行正确性与 10% 加速门槛，因此不运行 validation-200，代码和测试
+开关已完整回退，仅保留本实验记录。
+
 ### 14.3 本任务完成记录
 
 实际修改：待填写。
