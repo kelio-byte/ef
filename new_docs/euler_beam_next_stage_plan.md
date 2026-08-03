@@ -990,6 +990,40 @@ seed42 与 seed43 的损失幅度不同：Top-3 分别下降 7.0pp 与 0.5pp，�
 为 Top-1 `62.0/60.5`、Top-2 `78.5/74.5`、Top-3 `84.25/80.5`、Oracle
 `92.75/90.25`。因此 seed43 加强而非推翻原结论，不继续扫描 seed。
 
+## 16. 后续实验固定报告格式
+
+状态：`[x] 已按用户要求固定为后续所有正式采样实验的报告规范`
+
+从任务 15 之后，每个正式实验的评分命令统一使用 `--n_best 10 --diagnostics`，并通过
+`--diagnostics_json` 保存机器可读结果。报告至少包含：
+
+- Top-1～Top-10 accuracy；
+- 每个原始输出 rank 的 invalid rate 和 sorted invalid；当 `beam_size < 10` 时，
+  Top-4～10 没有对应的原始 rank，invalid 必须显示 N/A，不能伪造；
+- Oracle-any、覆盖但未进入 Top-3、target augmentation support；
+- 每个输出通道的 target-hit、invalid、duplicate，以及通道间 Jaccard overlap；
+- 平均 valid candidate、真实 unique candidate、Top-1～10 rank availability；
+- sampling wall time、峰值 CUDA allocated/reserved、父/子评估数、return shortfall；
+- checkpoint/input/output SHA-256、seed、K/M/R/n_return、score mode、bonus、policy、
+  precision、batch size 和 Git commit。
+
+固定评分模板：
+
+```bash
+python 'scripts/score_#global#.py' \
+    --predictions RESULTS_DIR/predictions.txt \
+    --targets TARGET_FILE \
+    --augmentation 20 --beam_size OUTPUTS_PER_AUGMENTATION \
+    --n_best 10 --length REACTION_COUNT --target_offset REACTION_OFFSET \
+    --process_number 16 --aggregation_mode legacy_best_rank \
+    --diagnostics --diagnostics_json RESULTS_DIR/diagnostics.json
+```
+
+`beam_size` 始终等于每条 augmentation 的实际输出数（Euler-Beam 为
+`n_runs × n_return`），而 `n_best=10` 表示跨 augmentation 聚合后报告到 Top-10；二者
+不能混淆。若实验研究的是其他 aggregation mode，必须同时报告固定 legacy 默认，不能
+只呈现较好的聚合结果。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
