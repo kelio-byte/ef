@@ -1200,6 +1200,8 @@ validation reaction 0–199 上公平比较：
   beam size 统一为 `R*K`。多 run 文件采用 branch-rank-major、run-minor，历史各 run
   winner 仍处于最前面的 R 个局部 rank。
 - 评分聚合公式未改；`eval.py` 从 metadata 自动读取 beam size、反应数和 target offset。
+- 评分诊断将原来容易误解的 `Run N` 控制台标签改为 `Input rank N`；兼容性所需的 JSON
+  字段保留原名，指标和聚合数值均不改变。
 
 验证：
 
