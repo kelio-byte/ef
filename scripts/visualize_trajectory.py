@@ -119,7 +119,7 @@ def _build_sequence_ladder(
         description = _describe_actions(event, id2token)
         lines.append(
             '<div class="smiles-line">'
-            f'<span class="smiles-label">+Edit {event_idx}</span>'
+            f'<span class="smiles-label">Edit {event_idx}</span>'
             f'<span class="smiles-str">{esc(sequence)} '
             f'<span style="color:#8a4b08">--&gt; {esc(description)}</span>'
             '</span></div>'
