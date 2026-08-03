@@ -579,7 +579,9 @@ def sample_euler_beam(
         # 3. 单次模型前向 (所有分支共享)
         section_started = _profile_start(profile, device)
         x_pad_mask = x_batch == pad_token
-        t_model = _compute_model_time(t_vals, scheduler, time_input, train_scheduler)
+        t_model = _compute_model_time(
+            t_vals, scheduler, time_input, train_scheduler,
+        )
         log_rates, log_ins_probs, log_sub_probs = model(
             x_batch, t_model, x_pad_mask,
         )
@@ -588,10 +590,12 @@ def sample_euler_beam(
         if not use_rate_reparam and train_scheduler is not None and \
            scheduler.name != train_scheduler.name:
             k_sample = get_rate_scale(
-                t_vals, scheduler, clamp_kappa=clamp_kappa, clamp_max=clamp_max,
+                t_vals, scheduler,
+                clamp_kappa=clamp_kappa, clamp_max=clamp_max,
             )
             k_train = get_rate_scale(
-                t_model, train_scheduler, clamp_kappa=clamp_kappa, clamp_max=clamp_max,
+                t_model, train_scheduler,
+                clamp_kappa=clamp_kappa, clamp_max=clamp_max,
             )
             log_correction = torch.log(
                 k_sample / k_train.clamp_min(1e-2)
@@ -603,6 +607,11 @@ def sample_euler_beam(
             use_rate_reparam=use_rate_reparam,
             clamp_kappa=clamp_kappa, clamp_max=clamp_max,
         )
+        if profile is not None:
+            profile["model_forward_calls"] = (
+                int(profile.get("model_forward_calls", 0))
+                + 1
+            )
         _profile_finish(
             profile, "model_forward_and_rates_seconds",
             section_started, device,

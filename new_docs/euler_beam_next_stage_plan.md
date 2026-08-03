@@ -795,6 +795,19 @@ metadata 记录 Git commit `ab185d0` 且 `dirty=false`。这组 validation 指�
 37.45%/25.43%；但它们会增加每步模型 forward 次数，真实收益必须通过 opt-in 短运行验证，
 不能把理论 FLOP 降低直接当作 wall-time 加速。
 
+长度分桶短筛结果（相同 validation 5 反应、完整 100 步）：
+
+| 路径 | wall time | forward time | forward calls | peak allocated | 输出 |
+|---|---:|---:|---:|---:|---|
+| 单 forward 基线 | 14.117s | 9.614s | 200 | 1,087.6 MB | 基准 SHA |
+| bucket width 8 | 16.397s | 11.538s | 929 | 582.2 MB | 逐字节一致 |
+| bucket width 16 | 15.588s | 10.664s | 699 | 708.7 MB | 第 67 行起有差异 |
+
+width 8 虽降低峰值 allocated 并保持输出，但 wall time 回归 16.2%；width 16 回归 10.4%
+且不满足逐行正确性门槛。原因是每步 1 次 forward 增加到约 3.5–4.6 次，调用开销超过
+padding FLOP 节省。按照预注册门槛，不运行 validation-200，不保留分桶实现；仅在
+profile 中保留 `model_forward_calls` 计数作为诊断字段。
+
 ### 14.3 本任务完成记录
 
 实际修改：待填写。
