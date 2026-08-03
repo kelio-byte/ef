@@ -205,7 +205,27 @@ scheduler。
 
 ## 6. 快速开始
 
-### 6.1 当前推荐 Euler-Beam 基准
+### 6.1 单命令采样与评分（推荐）
+
+`eval.py` 复用现有采样器和评分器，自动从 `sampling_metadata.json` 推导
+`beam_size`、反应数和 target offset。默认输出 Top-1～10、invalid/coverage diagnostics
+及 `diagnostics.json`，并拒绝覆盖已有预测：
+
+```bash
+python scripts/eval.py \
+    --checkpoint checkpoint_step600000.pt \
+    --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt" \
+    --targets "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test-tiny.txt" \
+    --output_dir results/bench_beam/ \
+    --sampler euler_beam \
+    --n_branches 3 --n_children 2 --n_runs 3 \
+    --n_steps 100 --batch_size 64 --device cuda --seed 42
+```
+
+用 `--dry_run` 可先审查两条底层命令；用 `--score_only` 可复用目录中已有的 prediction
+和 metadata。只有明确要替换已有结果时才添加 `--overwrite`。
+
+### 6.2 当前推荐 Euler-Beam 基准（底层两步命令）
 
 ```bash
 python scripts/sample_retro.py \
@@ -246,7 +266,7 @@ seed 语义、输出行数与哈希、运行时间、CUDA 峰值显存和 Git �
 全局 product index。评分对应区间时用 `--target_offset` 指定原始反应偏移，评分器会与
 sampling metadata 自动交叉校验。
 
-### 6.2 Euler 对照实验
+### 6.3 Euler 对照实验
 
 ```bash
 python scripts/sample_retro.py \
@@ -270,7 +290,7 @@ python 'scripts/score_#global#.py' \
 
 不要把 Euler 的评分路径误写为 `results/bench_beam/predictions.txt`。
 
-### 6.3 预计算训练对齐
+### 6.4 预计算训练对齐
 
 ```bash
 PYTHONPATH=. python scripts/precompute_alignments.py \
@@ -279,7 +299,7 @@ PYTHONPATH=. python scripts/precompute_alignments.py \
     --num_workers 16
 ```
 
-### 6.4 训练或恢复训练
+### 6.5 训练或恢复训练
 
 ```bash
 python scripts/train_retro.py \
@@ -293,6 +313,22 @@ python scripts/train_retro.py \
 ```
 
 本轮 Euler-Beam 研究固定使用已有 checkpoint，不修改训练代码、数据集或模型权重。
+
+### 6.6 完整 Euler 轨迹可视化
+
+```bash
+python scripts/visualize_trajectory.py \
+    --checkpoint checkpoint_step600000.pt \
+    --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt" \
+    --targets_file "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test-tiny.txt" \
+    --example_ids 0,20 --n_samples 3 --n_steps 100 --device cuda \
+    --output_dir visualizations/trajectory/
+```
+
+每个 example 会保留全部 `n_samples` 独立路径，而不是只显示命中 target 的一条。每条
+路径依次列出 Product、每次编辑后的完整 token 序列和具体操作、Target。当前
+Euler-Beam 搜索器尚未记录剪枝前后的 branch ancestry，因此该脚本不会伪造
+`--n_branches` 的分支树；完整分支树需要独立的、带父节点 ID 的诊断接口。
 
 ## 7. 评分协议与已知限制
 
@@ -358,6 +394,7 @@ edit_flows/
 scripts/
 ├── train_retro.py              # 逆合成训练
 ├── sample_retro.py             # 统一采样入口
+├── eval.py                     # 采样 + metadata 推导 + Top-k 评分
 ├── mix_retro_runs.py           # 离线组合已对齐的独立 run
 ├── score_#global#.py           # #global# 数据评分
 ├── score.py                    # standard 数据评分

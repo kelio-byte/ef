@@ -1026,7 +1026,7 @@ python 'scripts/score_#global#.py' \
 
 ## 17. 任务 16：统一评估入口与完整轨迹可视化
 
-状态：`[ ] 进行中`
+状态：`[x] 已完成`
 
 本任务不改训练、数据、checkpoint、历史实验结果或 Euler-Beam 的搜索排序。目标是消除
 评估命令中重复且容易不一致的参数，并修复诊断可视化，使方法行为更容易审计。
@@ -1064,6 +1064,51 @@ python 'scripts/score_#global#.py' \
 2. Euler 普通 sampling 在 recording 关闭时结果不变，并验证 event 的 pre/post state；
 3. 用 checkpoint 做一个很短的 CUDA/HTML 冒烟，不运行无意义的完整数据实验；
 4. 更新本节实际修改、测试结果和结论，创建范围明确的 commit 并推送当前任务分支。
+
+### 17.4 完成记录
+
+统一评估入口：新增 `scripts/eval.py`，以参数列表（非 shell 拼接）依次复用现有采样和
+评分 CLI。checkpoint、products、targets、output directory、augmentation 和选择区间
+只声明一次；评分的 `beam_size`、`length`、`target_offset` 从采样 metadata 推导。
+默认 `n_best=10` 并保存 diagnostics JSON，默认拒绝覆盖，另支持 `--dry_run`、
+`--score_only` 和显式 `--overwrite`。没有复制或改写采样/评分算法，子进程隔离还能在
+RDKit CPU 评分前释放模型进程的 CUDA 上下文。实现 commit：`04c4895`。
+
+轨迹诊断：Euler event 在仅开启 recording 时增加准确的 post-edit `x_next`；相同 seed
+下开启/关闭 recording 的最终采样结果测试一致。trajectory HTML 不再按 target 选中
+“最佳一条”，而是保留全部 `n_samples` 路径，包括零编辑路径。每条路径显示 Product、
+每个 edit event 后的完整 token 序列、`-->` 后的所有具体插入/删除/替换动作和 Target；
+同一步多个位置、同位置多个动作不再被 `elif` 隐藏。实际 CUDA 冒烟的两条路径分别显示
+2/3 个 edit event，HTML 中确认出现 `+C`、`+)`、`n→[nH]` 等操作。
+
+旧 `visualize_trajectory --n_branches` 实际调用了未实现 recording 的 Euler-Beam 并错误
+解包 Tensor，本来会在运行时崩溃。现在会在加载 checkpoint 前明确报错，避免把“最终
+最佳 branch”伪装成完整分支树；若以后需要完整剪枝树，必须在 Euler-Beam 中记录 node
+ID、parent ID、候选是否合并/保留等信息。`visualize_first_step.py` 同时修复 vocab size
+fallback、DDP `module.` 前缀和 origin-embedding 兼容，并把并未随机采样的逐位置最高
+rate 行从 `ACTUAL` 更名为 `MODEL ARGMAX (NOT SAMPLED)`。实现 commit：`e57bf19`。
+
+统一入口端到端冒烟使用 1 个反应的 20 条 augmentation、2 个采样步：成功生成 60 行
+预测，自动验证为 `1 × 20 × beam_size 3`，并输出 Top-1～10、per-run invalid、Oracle/
+coverage 和 diagnostics JSON。该短步结果只验证接口，不作为准确率实验。排除仓库已知的
+`tests/sampling/test_beam.py` 后完整回归为 `161 passed, 8 warnings`。
+
+### 17.5 Euler-Beam child 独立性审计
+
+同一 parent 的 M 个 child 使用不同、可复现的无状态随机流：child 0 延续 parent seed，
+child 1 及以后由 `(parent_seed, step, child_index)` 混合 seed；每个动作随机数再由
+`(seed, step, position, stream)` 生成，插入触发、删除/替换触发、类型选择、插入 token、
+替换 token 使用五个不同 stream。因此它们是给定 parent 状态和模型分布下的独立式
+伪随机 proposal，不是共享同一随机数，也不受向量化 batch 顺序影响；但它们是确定性
+hash 生成，不应称为数学或密码学意义的严格独立随机变量。
+
+不同 child 完全可能得到相同状态：都采到 no-op、碰巧采到相同编辑，或模型分布高度
+集中时都会发生；`stochastic_noop` 的指定时间步还会把 child 1 强制为 no-op，而随机
+child 0 也可能恰好 no-op。不同 parent 也可能编辑后汇聚到相同 token 序列。当前
+`full_probability, M>1` 会按最终 token key 合并这些候选，以 log-sum-exp 合并质量，再按
+`log_mass + changed_state_bonus`、原始 `log_mass` 和确定性 seed tie-break 排序保留 Top-K。
+所以“随机流不同”不等于“结果一定不同”；相同 child 是正常的离散采样碰撞，也是分支
+数有时缩减的直接原因。
 
 ## 11. 决策门槛
 
