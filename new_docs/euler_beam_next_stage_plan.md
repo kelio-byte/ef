@@ -854,6 +854,56 @@ profile 中保留 `model_forward_calls` 计数作为诊断字段。
 Commits：`1dfe8ae`（padding 诊断）、`06d8bbd`（拒绝内层分桶）、`c75b805`
 （拒绝外层长度排序；本文档收口见后续 Git log）。
 
+## 15. 任务 15：独立搜索岛与全局大分支池
+
+状态：`[-] 进行中；实现前已固定公平预算和 validation 协议`
+
+### 15.0 研究问题与固定对照
+
+本任务检验当前收益究竟来自 9 个总分支，还是来自 3 个互不剪枝的独立 run。只比较：
+
+| 方案 | 搜索池 | 每步最大父/子候选 | 每 augmentation 输出 |
+|---|---|---:|---:|
+| 当前 NNN | `R=3 × K=3`，三个独立池各返回 Top-1 | 9 / 18 | 3 |
+| 全局池 | `R=1 × K=9`，统一池返回 Top-3 | 9 / 18 | 3 |
+
+两者固定 `M=2`、100 步、full-probability、stochastic-noop、bonus 0.5、TF32 high、
+batch=64、seed=42。全局池复用当前 R3K3 的九条 `(virtual run, branch)` 初始随机流，
+避免把 seed 更换混入“是否跨 run 竞争”的比较。除搜索池边界和最终返回 Top-3 外不改变
+评分、模型、checkpoint 或数据。
+
+### 15.1 实现与正确性门槛
+
+- 新增默认 `1` 的 Euler-Beam Top-N 返回参数；默认输出和历史 metadata 不变；
+- 新增显式初始 seed group 参数，仅用于把 R3K3 九条流放入 R1K9 全局池；
+- 返回顺序保持 product-major、run-major、branch-rank-minor，固定输出 3 行；
+- 全局池最终返回按现有状态质量和 changed-state bonus 排名的前三个状态；不足三个时
+  必须采用确定性固定长度行为并记录，不得静默改变文件布局；
+- 单元测试覆盖默认兼容、Top-N 顺序/数量、seed 等价、非法参数和 metadata；
+- validation 前 5 个反应只检查运行、输出布局、显存和时间，不据其 target 调参。
+
+### 15.2 固定 validation 实验
+
+实现通过短测后，只运行一个预注册配置：validation reaction 0–199、product 行
+`[0, 4000)` 的 R1K9 Top-3。直接与任务 14 已存在的同区间 R3K3 基线比较，不重复运行
+基线。评分固定 `augmentation=20`、`beam_size=3`、`n_best=10`、
+`legacy_best_rank`，同时输出 diagnostics。
+
+报告 Top-1 至 Top-10、Oracle、覆盖未进 Top-3、invalid、真实唯一候选、最终返回重复/
+shortfall、父子候选评估数、wall time 和显存。该实验是方法消融，输出变化属于预期；
+不得沿用任务 14 的逐行一致门槛。只有全局池在准确率/覆盖与时间上形成清晰 Pareto 收益
+时才考虑替换默认，否则保留 R3K3 默认并把全局池标为 opt-in 消融。
+
+### 15.3 本任务完成记录
+
+实际修改：待填写。
+
+测试与实验：待填写。
+
+结论：待填写。
+
+Commit：待填写。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
