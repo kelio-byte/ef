@@ -230,6 +230,30 @@ def _find_cross_example_collisions(
     return collisions
 
 
+def _matching_path_view(
+    grouped_events: List[List[List[dict]]],
+    path_correctness: List[List[bool]],
+) -> Tuple[List[List[List[dict]]], List[List[int]]]:
+    """Keep Target-matching paths and remember their original path indices."""
+    if len(grouped_events) != len(path_correctness):
+        raise ValueError("grouped_events and path_correctness must align")
+
+    matched_events: List[List[List[dict]]] = []
+    matched_indices: List[List[int]] = []
+    for example_paths, example_correctness in zip(
+        grouped_events, path_correctness,
+    ):
+        if len(example_paths) != len(example_correctness):
+            raise ValueError("each example must have one correctness flag per path")
+        indices = [
+            path_idx for path_idx, correct in enumerate(example_correctness)
+            if correct
+        ]
+        matched_indices.append(indices)
+        matched_events.append([example_paths[path_idx] for path_idx in indices])
+    return matched_events, matched_indices
+
+
 def _state_key_to_text(
     state: Tuple[int, ...], id2token: Dict[int, str],
 ) -> str:
@@ -251,38 +275,57 @@ def _build_trajectory_overview(
     parts = [
         '<section id="trajectory-overview">',
         '<h1>All Examples — Complete Path Overview</h1>',
-        '<p style="color:#666">Reconvergence uses exact token states at the '
-        'same post-Euler step (0-based). It does not use Target or chemical '
-        'canonicalization.</p>',
+        '<p style="color:#666">Reconvergence and cross-example collision '
+        'analysis include only paths whose final canonical SMILES matches '
+        'Target. State equality itself uses exact token states at the same '
+        'post-Euler step (0-based), without chemical canonicalization.</p>',
     ]
+    matched_events, matched_indices = _matching_path_view(
+        grouped_events, path_correctness,
+    )
     for local_idx, example_id in enumerate(example_ids):
-        episodes = _find_reconvergence_episodes(
-            initial_states[local_idx], grouped_events[local_idx], n_steps,
-        )
         parts.extend([
             f'<div class="ex-section" id="overview-ex{example_id}">',
             f'<h2>Example #{example_id} — all paths</h2>',
         ])
+        if len(matched_indices[local_idx]) >= 2:
+            episodes = _find_reconvergence_episodes(
+                initial_states[local_idx], matched_events[local_idx], n_steps,
+            )
+        else:
+            episodes = []
         if episodes:
             parts.append(
                 '<div class="summary-box"><b>Detected divergence → '
-                'reconvergence:</b><ul>'
+                'reconvergence among Target-matching paths:</b><ul>'
             )
             for episode in episodes:
                 state_text = _state_key_to_text(episode["state"], id2token)
+                left_path = matched_indices[local_idx][episode["left_path"]]
+                right_path = matched_indices[local_idx][episode["right_path"]]
                 parts.append(
                     '<li>'
-                    f'Path #{episode["left_path"] + 1} vs Path '
-                    f'#{episode["right_path"] + 1}: diverged at step '
+                    f'Path #{left_path + 1} vs Path '
+                    f'#{right_path + 1}: diverged at step '
                     f'{episode["divergence_step"]}, reconverged at step '
                     f'{episode["reconvergence_step"]} → '
                     f'<code>{esc(state_text)}</code></li>'
                 )
             parts.append('</ul></div>')
+        elif not matched_indices[local_idx]:
+            parts.append(
+                '<div class="summary-box">Reconvergence analysis skipped: '
+                'no path matches Target.</div>'
+            )
+        elif len(matched_indices[local_idx]) == 1:
+            parts.append(
+                '<div class="summary-box">Reconvergence analysis skipped: '
+                'fewer than two paths match Target.</div>'
+            )
         else:
             parts.append(
                 '<div class="summary-box">No exact divergence → '
-                'reconvergence detected among this example\'s paths.</div>'
+                'reconvergence detected among Target-matching paths.</div>'
             )
 
         for path_idx, events in enumerate(grouped_events[local_idx]):
@@ -313,14 +356,18 @@ def _build_trajectory_overview(
         parts.append('</div>')
 
     collisions = _find_cross_example_collisions(
-        initial_states, grouped_events, n_steps,
+        initial_states, matched_events, n_steps,
     )
-    parts.append('<div class="ex-section"><h2>Cross-example state collisions</h2>')
+    parts.append(
+        '<div class="ex-section"><h2>Cross-example state collisions '
+        '(Target-matching paths only)</h2>'
+    )
     if collisions:
         parts.append('<ul>')
         for collision in collisions:
             members = ", ".join(
-                f'Ex#{example_ids[example_idx]} Path#{path_idx + 1}'
+                f'Ex#{example_ids[example_idx]} '
+                f'Path#{matched_indices[example_idx][path_idx] + 1}'
                 for example_idx, path_idx in collision["members"]
             )
             state_text = _state_key_to_text(collision["state"], id2token)
@@ -331,7 +378,8 @@ def _build_trajectory_overview(
         parts.append('</ul>')
     else:
         parts.append(
-            '<p>No exact token-state collision between different examples.</p>'
+            '<p>No exact token-state collision between Target-matching paths '
+            'from different examples.</p>'
         )
     parts.extend(['</div>', '</section>'])
     return "".join(parts)
@@ -911,19 +959,23 @@ def main() -> None:
             f"  Example #{idx}: {n_match}/{args.n_samples} paths match; "
             f"edit events per path={event_counts}"
         )
+    matched_events, _ = _matching_path_view(
+        grouped_events, path_correctness,
+    )
     reconvergence_count = sum(
         len(_find_reconvergence_episodes(
-            initial_rows[bi], grouped_events[bi], args.n_steps,
+            initial_rows[bi], matched_events[bi], args.n_steps,
         ))
         for bi in range(n_sel)
+        if len(matched_events[bi]) >= 2
     )
     cross_collision_count = len(_find_cross_example_collisions(
         [initial_rows[i] for i in range(n_sel)],
-        grouped_events,
+        matched_events,
         args.n_steps,
     ))
     print(
-        "Trajectory comparison: "
+        "Target-matching trajectory comparison: "
         f"{reconvergence_count} within-example divergence/reconvergence "
         f"episodes; {cross_collision_count} cross-example state collisions"
     )

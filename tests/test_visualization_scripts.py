@@ -151,6 +151,76 @@ def test_cross_example_collisions_are_reported_separately():
     assert collisions[0]["members"] == [(0, 0), (1, 0)]
 
 
+def test_matching_path_view_excludes_mismatches_and_preserves_indices():
+    grouped_events = [
+        [[_state_event(0, 4)], [_state_event(0, 5)], [_state_event(0, 6)]],
+        [[_state_event(0, 7)]],
+    ]
+
+    matched_events, matched_indices = trajectory._matching_path_view(
+        grouped_events, [[False, True, True], [False]],
+    )
+
+    assert matched_indices == [[1, 2], []]
+    assert matched_events == [[grouped_events[0][1], grouped_events[0][2]], []]
+
+
+def test_overview_reconvergence_uses_only_target_matching_paths():
+    initial_states = [torch.tensor([BOS_TOKEN, 3, PAD_TOKEN])]
+    def overview_event(step, *tokens):
+        event = _state_event(step, *tokens)
+        event["actions"] = _actions(len(tokens) + 2)
+        event["x_t"] = event["x_next"].clone()
+        return event
+
+    grouped_events = [[
+        [overview_event(0, 4), overview_event(1, 6)],
+        [overview_event(0, 5), overview_event(1, 6)],
+        [overview_event(0, 8), overview_event(1, 6)],
+    ]]
+    grouped_finals = [torch.tensor([
+        [BOS_TOKEN, 6, PAD_TOKEN],
+        [BOS_TOKEN, 6, PAD_TOKEN],
+        [BOS_TOKEN, 6, PAD_TOKEN],
+    ])]
+
+    html = trajectory._build_trajectory_overview(
+        example_ids=[7],
+        product_strs=["C"],
+        target_strs=["O"],
+        initial_states=initial_states,
+        grouped_events=grouped_events,
+        grouped_finals=grouped_finals,
+        path_correctness=[[True, False, True]],
+        id2token={BOS_TOKEN: "<bos>", 3: "C", 4: "N", 5: "F", 6: "O", 8: "S"},
+        n_steps=2,
+    )
+
+    assert "Path #1 vs Path #3" in html
+    assert "Path #1 vs Path #2" not in html
+    assert "Target-matching paths only" in html
+
+
+def test_overview_skips_reconvergence_when_no_path_matches_target():
+    initial = torch.tensor([BOS_TOKEN, 3, PAD_TOKEN])
+    grouped_events = [[[], []]]
+    grouped_finals = [torch.stack([initial, initial])]
+
+    html = trajectory._build_trajectory_overview(
+        example_ids=[2],
+        product_strs=["C"],
+        target_strs=["O"],
+        initial_states=[initial],
+        grouped_events=grouped_events,
+        grouped_finals=grouped_finals,
+        path_correctness=[[False, False]],
+        id2token={BOS_TOKEN: "<bos>", 3: "C"},
+        n_steps=2,
+    )
+
+    assert "analysis skipped: no path matches Target" in html
+
+
 def test_first_step_navigation_has_one_description_per_link():
     html = first_step._build_index_html(
         "unused", [7], [0.0, 0.1], ["C C"], ["C O"],
