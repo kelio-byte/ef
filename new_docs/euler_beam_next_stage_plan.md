@@ -1145,6 +1145,43 @@ token state。对同一 example 的每对路径维护 divergence 区间，只有
 该真实短样本检测到 0 次合流，作为正常零结果保留，不据此推断完整数据分布。排除已知
 `test_beam.py` 后回归为 `163 passed, 8 warnings`。实现 commit：`9e99bc0`。
 
+## 19. 任务 18：全部分支输出、简洁轨迹与 R1/R3 公平比较
+
+状态：`[ ] 进行中`
+
+### 19.1 接口和布局修改
+
+- `visualize_trajectory.py` 新增 `--table`，默认 True；False 时仍生成完整的 all-example
+  path overview、发散—合流和 cross-example collision，但不追加逐 event 的大表格。
+- Euler-Beam 用户接口移除 `n_return`：每个 run 固定输出 K 个最终槽位，单条
+  augmentation 的 `output_beam_size=R×K`。最终唯一状态不足 K 时仍用最高排名状态补齐
+  固定布局，并在 metadata 中报告 final branch shortfall；canonical 去重会移除补齐重复。
+- 多 run 输出采用 branch-rank-major、run-minor：先输出所有 run 的 rank1，再输出所有
+  run 的 rank2，以此类推。这样 R3K3 新增 rank2/3 时，历史三个 run winner 仍占局部
+  rank1～3，不因 run-major 布局被挤到 rank4/7。
+- `eval.py` 自动推导 beam size，不再暴露 `euler_beam_n_return`。评分器的聚合算法不改，
+  只接收新的固定 beam size 和 metadata layout。
+
+### 19.2 预注册验证顺序
+
+先用短测试验证形状、顺序、metadata、shortfall 和默认 Top-10 diagnostics；通过后在同一
+validation reaction 0–199 上公平比较：
+
+| 配置 | 搜索宽度 | 输出/augmentation | 目的 |
+|---|---:|---:|---|
+| R3K3 | 3 个隔离池 × K3 | 9 | 独立搜索岛基线 |
+| R1K9 | 1 个全局池 × K9 | 9 | 相同初始随机流总量的全局竞争池 |
+
+两者固定 M2、100 steps、seed42、相同 grouped initial seeds、bonus0.5、noop、TF32 high；
+评分固定 beam9、Top-10、legacy 和 diagnostics。比较 Top-1～10、Oracle、有效/唯一候选、
+各输出通道 invalid/duplicate、shortfall、wall 和父/子评估数。不能根据 test-mini target
+选择 R/K。
+
+现有 `src-test-mini.txt` 为 20028 行，不是完整 augmentation block（`20028 % 20 = 8`）。
+若进入 test-mini，必须从完整 `src-test.txt` 选择前 20020 行，即 1001 个完整反应，target
+使用完整 test 文件并由 metadata 推导 `length=1001,target_offset=0`。test-mini 只用于
+冻结方案的规模化报告，不用于继续调参；完整 5007 test 留作最终一次评估。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
