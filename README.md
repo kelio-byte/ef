@@ -326,7 +326,10 @@ python scripts/visualize_trajectory.py \
 ```
 
 每个 example 会保留全部 `n_samples` 独立路径，而不是只显示命中 target 的一条。每条
-路径依次列出 Product、每次编辑后的完整 token 序列和具体操作、Target。当前
+路径依次列出 Product、每次编辑后的完整 token 序列和具体操作、Target。HTML 先集中
+列出所有 example 的全部路径，再进入逐路径 oracle/model 详情；同时按相同 Euler step
+检测同一 example 内的“先发散、后恢复为相同 token 序列”，并把不同 example 的同一步
+状态碰撞单独报告。该判断比较精确 token 序列，不使用 Target 或 canonical SMILES。当前
 Euler-Beam 搜索器尚未记录剪枝前后的 branch ancestry，因此该脚本不会伪造
 `--n_branches` 的分支树；完整分支树需要独立的、带父节点 ID 的诊断接口。
 

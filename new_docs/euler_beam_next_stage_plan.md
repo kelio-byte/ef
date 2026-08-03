@@ -1112,7 +1112,7 @@ child 0 也可能恰好 no-op。不同 parent 也可能编辑后汇聚到相同 
 
 ## 18. 任务 17：轨迹全局总览与发散—合流检测
 
-状态：`[ ] 进行中`
+状态：`[x] 已完成`
 
 在不改变采样器结果的前提下，扩展 trajectory HTML：
 
@@ -1127,6 +1127,23 @@ child 0 也可能恰好 no-op。不同 parent 也可能编辑后汇聚到相同 
    序列相同。后续如需 canonical-SMILES 合流，应作为独立分析维度；
 5. 用构造轨迹单测覆盖“持续分离”“先分离后合流”“再次分离后再次合流”和跨 example
    碰撞，再做短 CUDA HTML 冒烟，更新本节结果并提交、推送。
+
+完成记录：trajectory HTML 现在先输出 `All Examples — Complete Path Overview`，逐个
+example 展示全部路径的状态阶梯、具体编辑、Final/Target 和详情跳转；所有总览结束后才
+进入 `Per-path Event Analysis` 的 oracle/model 表。导航栏也先跳到 overview，不再直接
+跳过全局比较。
+
+检测器从每条路径的初始状态和 event `x_next` 重建每个 0-based Euler step 结束后的精确
+token state。对同一 example 的每对路径维护 divergence 区间，只有“不相等后重新相等”
+才生成 episode，因此初始共同 Product 或一直相同不会误报；同一对路径可以记录多次
+发散—合流。不同 example 的同一步相同状态单列为 cross-example collision，持续不变的
+同一碰撞只报告首次，避免日志膨胀。
+
+构造测试验证 Path 1/2 在 step `0→2` 和 `3→4` 的两次发散—合流均被识别，未合流的第三
+条路径不误报；跨 example 在 step 1 的相同状态只进入 collision 报告。CUDA 冒烟使用
+2 个 example × 3 paths × 6 steps，HTML 中 6 条 overview 路径全部位于 6 条详细路径前；
+该真实短样本检测到 0 次合流，作为正常零结果保留，不据此推断完整数据分布。排除已知
+`test_beam.py` 后回归为 `163 passed, 8 warnings`。实现 commit：`9e99bc0`。
 
 ## 11. 决策门槛
 
