@@ -779,6 +779,22 @@ metadata 记录 Git commit `ab185d0` 且 `dirty=false`。这组 validation 指�
 5. validation-200 Top-k、Oracle 和逐行预测不变；
 6. validation-200 wall time 至少降低 10%，否则不保留复杂实现。
 
+首轮 padding profile 使用 validation 前 5 个反应、100 条 augmentation 输入、batch=64、
+完整 100 步，共覆盖 69,909 次 active parent evaluation：
+
+| 诊断 | 数值 |
+|---|---:|
+| 实际 / padded token | 3,517,796 / 4,918,873 |
+| token padding 浪费 | 28.48% |
+| 实际 / padded attention 长度平方代理 | 197,074,542 / 361,907,321 |
+| attention padding 浪费 | 45.55% |
+| 最大 active length | 103 |
+| forward+rate 占分项时间 | 68.64% |
+
+按长度直方图离线估计，固定 bucket width 8/16 可分别将当前 attention 长度平方代理降低
+37.45%/25.43%；但它们会增加每步模型 forward 次数，真实收益必须通过 opt-in 短运行验证，
+不能把理论 FLOP 降低直接当作 wall-time 加速。
+
 ### 14.3 本任务完成记录
 
 实际修改：待填写。

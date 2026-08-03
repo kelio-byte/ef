@@ -380,7 +380,7 @@ def _set_second_child_noop(actions: dict, n_children: int) -> None:
     actions["del_mask"][noop_rows] = False
 
 
-def _profile_start(profile: Optional[Dict[str, float]], device) -> float:
+def _profile_start(profile: Optional[Dict[str, object]], device) -> float:
     if profile is None:
         return 0.0
     if device.type == "cuda":
@@ -389,7 +389,7 @@ def _profile_start(profile: Optional[Dict[str, float]], device) -> float:
 
 
 def _profile_finish(
-    profile: Optional[Dict[str, float]],
+    profile: Optional[Dict[str, object]],
     key: str,
     started_at: float,
     device,
@@ -398,7 +398,44 @@ def _profile_finish(
         return
     if device.type == "cuda":
         torch.cuda.synchronize(device)
-    profile[key] = profile.get(key, 0.0) + time.perf_counter() - started_at
+    profile[key] = (
+        float(profile.get(key, 0.0)) + time.perf_counter() - started_at
+    )
+
+
+def _record_padding_profile(
+    profile: Optional[Dict[str, object]],
+    x_batch: Tensor,
+    pad_token: int,
+) -> None:
+    """Record length/padding diagnostics only for explicit profile runs."""
+    if profile is None:
+        return
+    lengths = (x_batch != pad_token).sum(dim=1).cpu().tolist()
+    padded_length = x_batch.shape[1]
+    row_count = len(lengths)
+    profile["actual_token_count"] = (
+        int(profile.get("actual_token_count", 0)) + sum(lengths)
+    )
+    profile["padded_token_count"] = (
+        int(profile.get("padded_token_count", 0))
+        + row_count * padded_length
+    )
+    profile["actual_attention_cost_proxy"] = (
+        int(profile.get("actual_attention_cost_proxy", 0))
+        + sum(length * length for length in lengths)
+    )
+    profile["padded_attention_cost_proxy"] = (
+        int(profile.get("padded_attention_cost_proxy", 0))
+        + row_count * padded_length * padded_length
+    )
+    profile["max_active_length"] = max(
+        int(profile.get("max_active_length", 0)),
+        max(lengths),
+    )
+    histogram = profile.setdefault("active_length_histogram", {})
+    for length in lengths:
+        histogram[str(length)] = histogram.get(str(length), 0) + 1
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +470,7 @@ def sample_euler_beam(
     record_all_events: bool = False, # 未实现, 预留
     x_1: Optional[Tensor] = None,    # 未使用, 预留 (与 sample_euler 接口对齐)
     vocab_size: Optional[int] = None, # 未使用, 预留
-    profile: Optional[Dict[str, float]] = None,
+    profile: Optional[Dict[str, object]] = None,
 ) -> Tensor:
     """Euler 采样 + 分支维护。
 
@@ -537,6 +574,7 @@ def sample_euler_beam(
         _profile_finish(
             profile, "prepare_branches_seconds", section_started, device,
         )
+        _record_padding_profile(profile, x_batch, pad_token)
 
         # 3. 单次模型前向 (所有分支共享)
         section_started = _profile_start(profile, device)

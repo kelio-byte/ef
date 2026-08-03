@@ -228,6 +228,14 @@ def test_optional_profile_records_stages_without_changing_output():
     assert profile["steps"] == 3
     assert profile["parent_branch_evaluations"] > 0
     assert profile["child_candidate_evaluations"] >= 2
+    assert profile["actual_token_count"] > 0
+    assert profile["padded_token_count"] >= profile["actual_token_count"]
+    assert profile["padded_attention_cost_proxy"] >= (
+        profile["actual_attention_cost_proxy"]
+    )
+    assert sum(profile["active_length_histogram"].values()) == (
+        profile["parent_branch_evaluations"]
+    )
     for key in (
         "prepare_branches_seconds",
         "model_forward_and_rates_seconds",
