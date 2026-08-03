@@ -101,6 +101,24 @@ class TestSampleEuler:
         assert result.shape[0] == 1
         assert len(first_events) == 1
 
+    def test_all_event_recording_does_not_change_sampling(self, dummy_model):
+        dummy_model.eval()
+        scheduler = CubicScheduler()
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+
+        torch.manual_seed(123)
+        result_plain, _ = sample_euler(
+            dummy_model, x_0, scheduler,
+            n_steps=5, max_seq_len=32,
+        )
+        torch.manual_seed(123)
+        result_recorded, _, _ = sample_euler(
+            dummy_model, x_0, scheduler,
+            n_steps=5, max_seq_len=32, record_all_events=True,
+        )
+
+        assert torch.equal(result_plain, result_recorded)
+
 
 class TestModelTimeMapping:
     def test_compute_model_time_same_scheduler_returns_t(self):
@@ -213,3 +231,24 @@ class TestOriginMaskSampling:
         assert torch.equal(result, expected_tokens)
         assert torch.equal(model.observed_masks[0], torch.tensor([[True, True, True, True]]))
         assert torch.equal(model.observed_masks[1], expected_mask)
+
+    def test_all_event_recording_contains_exact_post_edit_state(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setattr(
+            torch, "rand_like",
+            lambda x, **kwargs: torch.zeros_like(
+                x, dtype=kwargs.get("dtype", x.dtype),
+            ),
+        )
+        model = OriginMaskProbeModel(op="ins", target_token=9)
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+
+        result, _, all_events = sample_euler(
+            model, x_0, LinearScheduler(),
+            n_steps=2, max_seq_len=16, record_all_events=True,
+        )
+
+        assert len(all_events[0]) == 1
+        assert torch.equal(all_events[0][0]["x_t"], x_0[0])
+        assert torch.equal(all_events[0][0]["x_next"], result[0])

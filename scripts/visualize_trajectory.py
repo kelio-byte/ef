@@ -36,7 +36,6 @@ from edit_flows.core.scheduler import CubicScheduler, LinearScheduler
 from edit_flows.data.dataset import load_vocab
 from edit_flows.models.transformer import EditFlowsTransformer
 from edit_flows.sampling.euler import sample_euler
-from edit_flows.sampling.euler_beam import sample_euler_beam
 from edit_flows.utils.tokens import BOS_TOKEN, PAD_TOKEN
 
 import sys
@@ -64,10 +63,79 @@ def _canonicalize_smiles(smiles: str) -> str:
     return ""
 
 
+def _decode_token_sequence(
+    token_ids: torch.Tensor, id2token: Dict[int, str], *, separator: str = " ",
+) -> str:
+    """Decode a state without hiding token boundaries."""
+    tokens = [
+        id2token.get(int(token_id), "?")
+        for token_id in token_ids.tolist()
+        if int(token_id) not in (PAD_TOKEN, BOS_TOKEN)
+    ]
+    return separator.join(tokens)
+
+
+def _describe_actions(event: dict, id2token: Dict[int, str]) -> str:
+    """Describe every atomic edit in an event, including simultaneous ones."""
+    actions = event["actions"]
+    x_t = event["x_t"]
+    descriptions: List[str] = []
+    for pos in range(actions["ins_mask"].numel()):
+        if pos == 0 or int(x_t[pos].item()) == PAD_TOKEN:
+            continue
+        old_token = id2token.get(int(x_t[pos].item()), "?")
+        if actions["sub_mask"][pos].item():
+            new_token = id2token.get(
+                int(actions["sub_tokens"][pos].item()), "?",
+            )
+            descriptions.append(f"{old_token}→{new_token} @pos {pos}")
+        if actions["del_mask"][pos].item():
+            descriptions.append(f"-{old_token} @pos {pos}")
+        if actions["ins_mask"][pos].item():
+            new_token = id2token.get(
+                int(actions["ins_tokens"][pos].item()), "?",
+            )
+            descriptions.append(f"+{new_token} after pos {pos}")
+    return "; ".join(descriptions) if descriptions else "no edit"
+
+
+def _build_sequence_ladder(
+    product_str: str,
+    target_str: str,
+    events: List[dict],
+    id2token: Dict[int, str],
+) -> str:
+    """Render Product -> every post-edit state -> Target for one path."""
+    lines = [
+        '<div class="smiles-line"><span class="smiles-label">Product</span>'
+        f'<span class="smiles-str">{esc(product_str)}</span></div>'
+    ]
+    for event_idx, event in enumerate(events, start=1):
+        x_next = event.get("x_next")
+        sequence = (
+            _decode_token_sequence(x_next, id2token)
+            if x_next is not None else "[post-edit state unavailable]"
+        )
+        description = _describe_actions(event, id2token)
+        lines.append(
+            '<div class="smiles-line">'
+            f'<span class="smiles-label">+Edit {event_idx}</span>'
+            f'<span class="smiles-str">{esc(sequence)} '
+            f'<span style="color:#8a4b08">--&gt; {esc(description)}</span>'
+            '</span></div>'
+        )
+    lines.append(
+        '<div class="smiles-line"><span class="smiles-label">Target</span>'
+        f'<span class="smiles-str">{esc(target_str)}</span></div>'
+    )
+    return "".join(lines)
+
+
 # ── trajectory HTML builders ──────────────────────────────────────────
 
 def _build_event_table(
     example_idx: int,
+    path_idx: int,
     event_idx: int,
     n_events: int,
     step_idx: int,
@@ -200,18 +268,24 @@ def _build_event_table(
     for j in range(L):
         if j == 0:
             ae_cells.append('<td class="ae-row" style="background:#e8e8e8;color:#999">—</td>')
-        elif act_ins_mask[j].item():
-            tok_id = int(act_ins_tokens[j].item())
-            tok_str = id2token.get(tok_id, "?")
-            ae_cells.append(f'<td class="ae-row ae-ins">+{esc(tok_str)}</td>')
-        elif act_sub_mask[j].item():
-            tok_id = int(act_sub_tokens[j].item())
-            tok_str = id2token.get(tok_id, "?")
-            ae_cells.append(f'<td class="ae-row ae-sub">→{esc(tok_str)}</td>')
-        elif act_del_mask[j].item():
-            ae_cells.append('<td class="ae-row ae-del">DEL</td>')
         else:
-            ae_cells.append('<td class="ae-row"></td>')
+            operations: List[str] = []
+            classes = ["ae-row"]
+            if act_sub_mask[j].item():
+                tok_id = int(act_sub_tokens[j].item())
+                operations.append(f'→{esc(id2token.get(tok_id, "?"))}')
+                classes.append("ae-sub")
+            if act_del_mask[j].item():
+                operations.append("DEL")
+                classes.append("ae-del")
+            if act_ins_mask[j].item():
+                tok_id = int(act_ins_tokens[j].item())
+                operations.append(f'+{esc(id2token.get(tok_id, "?"))}')
+                classes.append("ae-ins")
+            ae_cells.append(
+                f'<td class="{" ".join(classes)}">'
+                f'{"; ".join(operations)}</td>'
+            )
 
     actual_html = (
         '<tr class="sec-hdr"><th class="lbl sec-label" colspan="%d">ACTUAL</th></tr>' % (L + 1)
@@ -224,12 +298,13 @@ def _build_event_table(
     # ---- meta bar ----
     fc_str = "Y" if final_correct else "N"
     meta = (
-        f"Ex#{example_idx} Event #{event_idx + 1}/{n_events} &nbsp; "
+        f"Ex#{example_idx} Path #{path_idx + 1} "
+        f"Event #{event_idx + 1}/{n_events} &nbsp; "
         f"step={step_idx} &nbsp; t={t_value:.4f} &nbsp; "
         f"Final-Correct: {fc_str}"
     )
 
-    anchor = f"ex{example_idx}_ev{event_idx}"
+    anchor = f"ex{example_idx}_path{path_idx}_ev{event_idx}"
     return (
         f'<div class="ex" id="{anchor}">'
         f'<h4>{meta}</h4>'
@@ -241,6 +316,7 @@ def _build_event_table(
 
 def _build_example_section(
     example_idx: int,
+    path_idx: int,
     product_str: str,
     target_str: str,
     events: List[dict],
@@ -293,23 +369,20 @@ def _build_example_section(
         t_val = ev["t"]
         step = ev["step_idx"]
         nav_parts.append(
-            f'<a class="{cls}" href="#ex{example_idx}_ev{ei}">'
+            f'<a class="{cls}" href="#ex{example_idx}_path{path_idx}_ev{ei}">'
             f'#{ei + 1} t={t_val:.3f} s={step}</a>'
         )
         if ei < n_events - 1:
             nav_parts.append('<span class="sep">→</span>')
     nav_parts.append("</div>")
 
-    # Summary box — three-line layout for easy product↔target comparison
+    # Summary box with every concrete intermediate post-edit state.
     fc_str = "MATCH" if final_correct else "MISMATCH"
     fc_cls = "correct" if final_correct else "wrong"
     n_correct_events = sum(event_correctness)
     summary = (
         f'<div class="summary-box">'
-        f'<div class="smiles-line"><span class="smiles-label">Product</span>'
-        f'<span class="smiles-str">{esc(product_str)}</span></div>'
-        f'<div class="smiles-line"><span class="smiles-label">Target </span>'
-        f'<span class="smiles-str">{esc(target_str)}</span></div>'
+        f'{_build_sequence_ladder(product_str, target_str, events, id2token)}'
         f'<div class="smiles-meta">'
         f'<b>Result:</b> <span class="{fc_cls}">{fc_str}</span> &nbsp; '
         f'<b>Events:</b> {n_events} total, {n_correct_events} correct'
@@ -348,6 +421,7 @@ def _build_example_section(
         event_tables.append(
             _build_event_table(
                 example_idx=example_idx,
+                path_idx=path_idx,
                 event_idx=ei,
                 n_events=n_events,
                 step_idx=ev["step_idx"],
@@ -368,9 +442,13 @@ def _build_example_section(
             )
         )
 
+    section_anchor = (
+        f"ex{example_idx}" if path_idx == 0
+        else f"ex{example_idx}_path{path_idx}"
+    )
     return (
-        f'<div class="ex-section" id="ex{example_idx}">'
-        f"<h2>Example #{example_idx}</h2>"
+        f'<div class="ex-section" id="{section_anchor}">'
+        f"<h2>Example #{example_idx} — Path #{path_idx + 1}</h2>"
         f"{summary}"
         f"{''.join(nav_parts)}"
         f"{''.join(event_tables)}"
@@ -434,13 +512,7 @@ def _build_footer_html() -> str:
 
 def _decode_to_smiles(token_ids: torch.Tensor, id2token: Dict[int, str]) -> str:
     """Decode token IDs to SMILES string, dropping BOS and PAD."""
-    tokens = []
-    for tid in token_ids.tolist():
-        tid = int(tid)
-        if tid in (PAD_TOKEN, BOS_TOKEN):
-            continue
-        tokens.append(id2token.get(tid, "?"))
-    return "".join(tokens)
+    return _decode_token_sequence(token_ids, id2token, separator="")
 
 
 # ── main ───────────────────────────────────────────────────────────────
@@ -468,12 +540,25 @@ def main() -> None:
     parser.add_argument("--n_samples", type=int, default=1,
                         help="Number of independent Euler samples per example")
     parser.add_argument("--n_branches", type=int, default=0,
-                        help="If >1, use Euler-Beam with K parallel branches")
+                        help=("Reserved for a future Euler-Beam branch-tree "
+                              "recorder; current complete-path view uses "
+                              "--n_samples"))
     args = parser.parse_args()
+
+    if args.n_samples < 1:
+        parser.error("--n_samples must be at least 1")
+    if args.n_branches:
+        parser.error(
+            "Euler-Beam does not currently expose branch ancestry/events. "
+            "The former --n_branches path attempted to unpack an unsupported "
+            "return value. Use --n_samples for complete independent Euler "
+            "paths; branch-tree recording must be implemented separately."
+        )
 
     if args.html:
         os.makedirs(args.output_dir, exist_ok=True)
     device = torch.device(args.device)
+    torch.manual_seed(args.seed)
 
     # ── Load model ──
     ckpt = torch.load(args.checkpoint, map_location=device)
@@ -524,9 +609,6 @@ def main() -> None:
         args.products_file, args.targets_file,
         deduplicate=args.deduplicate, max_lines=args.max_lines,
     )
-    product_ids_all = [tokenize_smiles(line, token2id) for line in products]
-    target_ids_all = [tokenize_smiles(line, token2id) for line in targets]
-
     # ── Select examples ──
     if args.example_ids:
         selected = [int(x) for x in args.example_ids.split(",")]
@@ -535,15 +617,17 @@ def main() -> None:
         rng = random.Random(args.seed)
         selected = sorted(rng.sample(range(len(products)), min(args.n_examples, len(products))))
 
-    use_branches = args.n_branches > 1
-    n_display = f"n_branches={args.n_branches}" if use_branches else str(args.n_samples)
-    print(f"Running trajectory sampling for {len(selected)} examples x {n_display}: {selected}")
+    print(
+        f"Running trajectory sampling for {len(selected)} examples x "
+        f"{args.n_samples} complete paths: {selected}"
+    )
     print(f"Scheduler: {scheduler_name}, n_steps: {args.n_steps}")
 
     # ── Build batch of selected examples ──
-    sel_products = [product_ids_all[i] for i in selected]
-    sel_targets = [target_ids_all[i] for i in selected]
+    sel_products = [tokenize_smiles(products[i], token2id) for i in selected]
+    sel_targets = [tokenize_smiles(targets[i], token2id) for i in selected]
     x_0, x_1 = build_model_batch(sel_products, sel_targets)
+    target_rows = x_1.clone()
     n_sel = len(selected)
 
     # ── Run Euler sampling with event recording ──
@@ -554,102 +638,56 @@ def main() -> None:
     print(f"use_rate_reparam={use_rate_reparam}, use_origin_mask={use_origin_mask}, "
           f"time_input={time_input}")
 
-    if use_branches:
-        print(f"Sampler: Euler-Beam (K={args.n_branches}, n_steps={args.n_steps})")
-        # Quick model forward sanity check
-        with torch.no_grad():
-            t_test = torch.zeros(1, 1, device=device)
-            xp = x_0[:1].to(device)
-            pad = xp == 0
-            lr, _, _ = model(xp, t_test, pad)
-            print(f"Model forward check (t=0): log_rates mean={lr.mean().item():.2f}, "
-                  f"std={lr.std().item():.2f}")
+    # Repeat for n_samples independent Euler trajectories.  Every path is
+    # retained below; none is selected away based on target correctness.
+    x_0 = x_0.repeat_interleave(args.n_samples, dim=0)
+    x_1 = x_1.repeat_interleave(args.n_samples, dim=0)
+    x_final, _trajectory, all_events = sample_euler(
+        model, x_0, scheduler,
+        n_steps=args.n_steps,
+        max_seq_len=cfg["max_seq_len"],
+        use_rate_reparam=use_rate_reparam,
+        clamp_kappa=cfg.get("clamp_kappa", False),
+        clamp_max=cfg.get("clamp_max", 50.0),
+        time_input=time_input,
+        train_scheduler=train_scheduler,
+        record_all_events=True,
+        x_1=x_1,
+        vocab_size=model.vocab_size,
+        use_origin_mask=use_origin_mask,
+    )
+    grouped_events = []
+    grouped_finals = []
+    for i in range(n_sel):
+        start = i * args.n_samples
+        end = start + args.n_samples
+        grouped_events.append(all_events[start:end])
+        grouped_finals.append(x_final[start:end])
 
-        x_final, all_events = sample_euler_beam(
-            model, x_0, scheduler,
-            n_branches=args.n_branches,
-            n_steps=args.n_steps,
-            max_seq_len=cfg["max_seq_len"],
-            use_rate_reparam=use_rate_reparam,
-            clamp_kappa=cfg.get("clamp_kappa", False),
-            clamp_max=cfg.get("clamp_max", 50.0),
-            time_input=time_input,
-            train_scheduler=train_scheduler,
-            record_all_events=True,
-            x_1=x_1,
-            vocab_size=model.vocab_size,
-            use_origin_mask=use_origin_mask,
-        )
-        # Beam returns one result per example (best branch)
-        grouped_events = [[ev] for ev in all_events]
-        grouped_finals = [x_final[i:i+1] for i in range(n_sel)]
-        effective_samples = 1
-    else:
-        # Repeat for n_samples independent Euler trajectories
-        x_0 = x_0.repeat_interleave(args.n_samples, dim=0)
-        x_1 = x_1.repeat_interleave(args.n_samples, dim=0)
-
-        # Quick model forward sanity check
-        with torch.no_grad():
-            t_test = torch.zeros(1, 1, device=device)
-            xp = x_0[:1].to(device)
-            pad = xp == 0
-            lr, _, _ = model(xp, t_test, pad)
-            print(f"Model forward check (t=0): log_rates mean={lr.mean().item():.2f}, "
-                  f"std={lr.std().item():.2f}")
-
-        x_final, _trajectory, all_events = sample_euler(
-            model, x_0, scheduler,
-            n_steps=args.n_steps,
-            max_seq_len=cfg["max_seq_len"],
-            use_rate_reparam=use_rate_reparam,
-            clamp_kappa=cfg.get("clamp_kappa", False),
-            clamp_max=cfg.get("clamp_max", 50.0),
-            time_input=time_input,
-            train_scheduler=train_scheduler,
-            record_all_events=True,
-            x_1=x_1,
-            vocab_size=model.vocab_size,
-            use_origin_mask=use_origin_mask,
-        )
-        # Regroup results: (n_sel * n_samples) -> n_sel groups
-        grouped_events = []
-        grouped_finals = []
-        for i in range(n_sel):
-            start = i * args.n_samples
-            end = start + args.n_samples
-            grouped_events.append(all_events[start:end])
-            grouped_finals.append(x_final[start:end])
-        effective_samples = args.n_samples
-
-    # ── Determine final correctness & pick best sample per example ──
-    best_sample_idx: List[int] = []
+    # ── Determine correctness without target-based path selection ──
+    path_correctness: List[List[bool]] = []
     final_corrects: List[bool] = []
     for i in range(n_sel):
-        tgt_raw = _decode_to_smiles(x_1[i * args.n_samples], id2token) if not use_branches else _decode_to_smiles(x_1[i], id2token)
+        tgt_raw = _decode_to_smiles(target_rows[i], id2token)
         tgt_canon = _canonicalize_smiles(tgt_raw)
-        best_idx = 0
-        best_correct = False
-        for s in range(effective_samples):
+        example_path_correctness: List[bool] = []
+        for s in range(args.n_samples):
             pred_raw = _decode_to_smiles(grouped_finals[i][s], id2token)
             pred_canon = _canonicalize_smiles(pred_raw)
-            if pred_canon and tgt_canon and pred_canon == tgt_canon:
-                best_idx = s
-                best_correct = True
-                break
-        best_sample_idx.append(best_idx)
-        final_corrects.append(best_correct)
+            example_path_correctness.append(
+                bool(pred_canon and tgt_canon and pred_canon == tgt_canon)
+            )
+        path_correctness.append(example_path_correctness)
+        final_corrects.append(any(example_path_correctness))
 
     # ── Print per-example summary (always) ──
     for bi, idx in enumerate(selected):
-        si = best_sample_idx[bi]
-        events = grouped_events[bi][si]
-        n_match = sum(1 for s in range(effective_samples)
-                      if _canonicalize_smiles(_decode_to_smiles(grouped_finals[bi][s], id2token))
-                      == _canonicalize_smiles(_decode_to_smiles(x_1[bi * args.n_samples] if not use_branches else x_1[bi], id2token))
-                      and _canonicalize_smiles(_decode_to_smiles(grouped_finals[bi][s], id2token)) != "")
-        print(f"  Example #{idx}: {n_match}/{effective_samples} match, "
-              f"best sample #{si} ({len(events)} edit events)")
+        n_match = sum(path_correctness[bi])
+        event_counts = [len(events) for events in grouped_events[bi]]
+        print(
+            f"  Example #{idx}: {n_match}/{args.n_samples} paths match; "
+            f"edit events per path={event_counts}"
+        )
 
     # ── Build HTML (only when --html) ──
     if args.html:
@@ -664,22 +702,24 @@ def main() -> None:
         ]
 
         for bi, idx in enumerate(selected):
-            si = best_sample_idx[bi]
-            events = grouped_events[bi][si]
-            n_match = sum(1 for s in range(effective_samples)
-                          if _canonicalize_smiles(_decode_to_smiles(grouped_finals[bi][s], id2token))
-                          == _canonicalize_smiles(_decode_to_smiles(x_1[bi * args.n_samples] if not use_branches else x_1[bi], id2token))
-                          and _canonicalize_smiles(_decode_to_smiles(grouped_finals[bi][s], id2token)) != "")
-            sample_info = f"Sample #{si}, {n_match}/{effective_samples} match" if effective_samples > 1 else ""
-            if events:
+            n_match = sum(path_correctness[bi])
+            for path_idx, events in enumerate(grouped_events[bi]):
+                final_prediction = _decode_token_sequence(
+                    grouped_finals[bi][path_idx], id2token,
+                )
+                sample_info = (
+                    f"Path #{path_idx + 1}; final={final_prediction}; "
+                    f"{n_match}/{args.n_samples} paths match"
+                )
                 html_parts.append(
                     _build_example_section(
                         example_idx=idx,
+                        path_idx=path_idx,
                         product_str=products[idx],
                         target_str=targets[idx],
                         events=events,
                         id2token=id2token,
-                        final_correct=final_corrects[bi],
+                        final_correct=path_correctness[bi][path_idx],
                         scheduler=scheduler,
                         use_rate_reparam=use_rate_reparam,
                         clamp_kappa=cfg.get("clamp_kappa", False),

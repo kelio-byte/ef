@@ -348,6 +348,7 @@ def sample_euler(
     if verbose:
         pbar = tqdm(total=n_steps, desc="Euler Sampling")
     while (t < 1.0).any():
+        recorded_event_samples: List[int] = []
         x_pad_mask = x_t == pad_token
 
         t_model = _compute_model_time(t, scheduler, time_input, train_scheduler)
@@ -455,6 +456,7 @@ def sample_euler(
                                 "del_mask": oracle["del_mask"][sample_idx].cpu().clone(),
                             }
                         all_events[sample_idx].append(event)
+                        recorded_event_samples.append(sample_idx)
 
         x_t[actions["sub_mask"]] = actions["sub_tokens"][actions["sub_mask"]]
         if use_origin_mask:
@@ -474,6 +476,13 @@ def sample_euler(
             x_t, actions["ins_mask"], actions["del_mask"], actions["ins_tokens"],
             max_seq_len=max_seq_len, pad_token=pad_token,
         )
+        # Store the exact post-edit state for diagnostic reconstruction.  This
+        # runs only when event recording is enabled and does not alter normal
+        # sampling, RNG consumption, or model calls.
+        for sample_idx in recorded_event_samples:
+            all_events[sample_idx][-1]["x_next"] = (
+                x_t[sample_idx].cpu().clone()
+            )
 
         t = t + adapt_h
         if record_trajectory:
