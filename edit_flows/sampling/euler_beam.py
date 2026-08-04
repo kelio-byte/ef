@@ -438,6 +438,46 @@ def _record_padding_profile(
         histogram[str(length)] = histogram.get(str(length), 0) + 1
 
 
+def _record_protected_parent_profile(
+    profile: Optional[Dict[str, object]],
+    flat: List[Tuple[int, int, _BranchState]],
+    x_batch: Tensor,
+    pad_token: int,
+    bos_token: int,
+    sample_group_size: int,
+) -> None:
+    """Measure exact-state forward sharing without merging search lineages."""
+    if profile is None:
+        return
+    keys = _token_keys_batch(x_batch, pad_token, bos_token)
+    unique_by_group: Dict[
+        int, set[Tuple[float, Tuple[int, ...]]]
+    ] = {}
+    for (sample_index, _, branch), key in zip(flat, keys):
+        group_index = sample_index // sample_group_size
+        unique_by_group.setdefault(group_index, set()).add((branch.t, key))
+
+    logical_rows = len(flat)
+    unique_rows = sum(len(states) for states in unique_by_group.values())
+    profile["protected_sample_group_size"] = sample_group_size
+    profile["protected_parent_rows"] = (
+        int(profile.get("protected_parent_rows", 0)) + logical_rows
+    )
+    profile["protected_unique_parent_rows"] = (
+        int(profile.get("protected_unique_parent_rows", 0)) + unique_rows
+    )
+    profile["potential_shared_parent_rows"] = (
+        int(profile.get("potential_shared_parent_rows", 0))
+        + logical_rows - unique_rows
+    )
+    profile.setdefault("protected_parent_rows_by_step", []).append(
+        logical_rows
+    )
+    profile.setdefault("protected_unique_parent_rows_by_step", []).append(
+        unique_rows
+    )
+
+
 # ---------------------------------------------------------------------------
 # 公开 API
 # ---------------------------------------------------------------------------
@@ -471,6 +511,7 @@ def sample_euler_beam(
     x_1: Optional[Tensor] = None,    # 未使用, 预留 (与 sample_euler 接口对齐)
     vocab_size: Optional[int] = None, # 未使用, 预留
     profile: Optional[Dict[str, object]] = None,
+    profile_sample_group_size: int = 1,
     initial_branch_seeds: Optional[List[List[int]]] = None,
     sampling_stats: Optional[Dict[str, int]] = None,
 ) -> Tensor:
@@ -486,6 +527,8 @@ def sample_euler_beam(
         initial_branch_seeds: 可选的每样本、每初始分支 seed 布局。
         changed_state_bonus: 给非原始 token 状态的固定搜索先验；0 表示禁用。
         child_policy: `stochastic` 或 M=2 的启发式 `stochastic_noop`。
+        profile_sample_group_size: 仅用于显式profile；相邻多少个sample
+            属于同一product的受保护lineage组。
 
     Returns:
         x_final: (B * n_branches, L_out) 每条样本的全部排名分支，按样本优先
@@ -499,6 +542,16 @@ def sample_euler_beam(
         raise ValueError(f"n_steps must be >= 1, got {n_steps}")
     if x_0.shape[0] < 1:
         raise ValueError("x_0 batch must contain at least one sample")
+    if profile_sample_group_size < 1:
+        raise ValueError(
+            "profile_sample_group_size must be >= 1, got "
+            f"{profile_sample_group_size}"
+        )
+    if x_0.shape[0] % profile_sample_group_size != 0:
+        raise ValueError(
+            "x_0 batch size must be divisible by profile_sample_group_size, "
+            f"got {x_0.shape[0]} and {profile_sample_group_size}"
+        )
     if use_origin_mask:
         raise NotImplementedError(
             "Euler-Beam does not yet track origin_mask across edits"
@@ -618,6 +671,14 @@ def sample_euler_beam(
             profile, "prepare_branches_seconds", section_started, device,
         )
         _record_padding_profile(profile, x_batch, pad_token)
+        _record_protected_parent_profile(
+            profile,
+            flat,
+            x_batch,
+            pad_token,
+            bos_token,
+            profile_sample_group_size,
+        )
 
         # 3. 单次模型前向 (所有分支共享)
         section_started = _profile_start(profile, device)
@@ -759,6 +820,36 @@ def sample_euler_beam(
             candidates = new_branches[b]
 
             if n_children > 1 and score_mode == "full_probability":
+                if profile is not None and n_branches == 1 and \
+                   n_children == 2:
+                    first_key, second_key = new_keys[b]
+                    profile["k1_child_pairs"] = (
+                        int(profile.get("k1_child_pairs", 0)) + 1
+                    )
+                    if first_key == second_key:
+                        profile["k1_identical_child_pairs"] = (
+                            int(profile.get("k1_identical_child_pairs", 0))
+                            + 1
+                        )
+                    else:
+                        changed_first = first_key != origin_keys[b]
+                        changed_second = second_key != origin_keys[b]
+                        if changed_first != changed_second and \
+                           changed_state_bonus > 0:
+                            profile["k1_bonus_decisions"] = (
+                                int(profile.get("k1_bonus_decisions", 0)) + 1
+                            )
+                        else:
+                            profile["k1_seed_tiebreak_decisions"] = (
+                                int(profile.get(
+                                    "k1_seed_tiebreak_decisions", 0,
+                                )) + 1
+                            )
+                    if child_policy == "stochastic_noop" and \
+                       step == noop_step:
+                        profile["k1_noop_anchor_pairs"] = (
+                            int(profile.get("k1_noop_anchor_pairs", 0)) + 1
+                        )
                 paired = list(zip(candidates, new_keys[b]))
                 all_branches[b] = _merge_state_candidates(
                     paired,

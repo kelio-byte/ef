@@ -250,6 +250,62 @@ def test_optional_profile_records_stages_without_changing_output():
         assert profile[key] >= 0.0
 
 
+def test_profile_records_protected_parent_sharing_and_k1_decisions():
+    model = _StochasticModel()
+    product = torch.tensor([BOS_TOKEN, 4, 5, 6, PAD_TOKEN])
+    x_0 = product.unsqueeze(0).repeat(3, 1)
+    kwargs = dict(
+        scheduler=LinearScheduler(),
+        n_branches=1,
+        n_children=2,
+        n_steps=3,
+        max_seq_len=32,
+        sample_seeds=[11, 22, 33],
+        changed_state_bonus=0.5,
+    )
+    expected = sample_euler_beam(model, x_0, **kwargs)
+    profile = {}
+    actual = sample_euler_beam(
+        model,
+        x_0,
+        profile=profile,
+        profile_sample_group_size=3,
+        **kwargs,
+    )
+
+    assert torch.equal(actual, expected)
+    assert profile["protected_sample_group_size"] == 3
+    assert profile["protected_parent_rows"] == 9
+    assert profile["protected_unique_parent_rows"] <= 9
+    assert profile["potential_shared_parent_rows"] >= 2
+    assert profile["protected_parent_rows_by_step"] == [3, 3, 3]
+    assert len(profile["protected_unique_parent_rows_by_step"]) == 3
+    assert profile["k1_child_pairs"] == 9
+    decisions = (
+        profile.get("k1_identical_child_pairs", 0)
+        + profile.get("k1_bonus_decisions", 0)
+        + profile.get("k1_seed_tiebreak_decisions", 0)
+    )
+    assert decisions == profile["k1_child_pairs"]
+
+
+def test_profile_sample_group_size_must_divide_batch():
+    model = _StochasticModel()
+    x_0 = torch.tensor([
+        [BOS_TOKEN, 4, PAD_TOKEN],
+        [BOS_TOKEN, 5, PAD_TOKEN],
+        [BOS_TOKEN, 6, PAD_TOKEN],
+    ])
+    with pytest.raises(ValueError, match="profile_sample_group_size"):
+        sample_euler_beam(
+            model,
+            x_0,
+            LinearScheduler(),
+            profile={},
+            profile_sample_group_size=2,
+        )
+
+
 def test_sample_euler_beam_rejects_unsupported_origin_mask():
     model = _StochasticModel()
     x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])

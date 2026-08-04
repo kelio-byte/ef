@@ -644,6 +644,7 @@ def main():
                     changed_state_bonus=args.euler_beam_changed_state_bonus,
                     child_policy=args.euler_beam_child_policy,
                     profile=euler_beam_profile,
+                    profile_sample_group_size=args.n_runs,
                     initial_branch_seeds=initial_branch_seeds,
                     sampling_stats=euler_beam_stats,
                 )
