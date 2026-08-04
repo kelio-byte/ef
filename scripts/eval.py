@@ -90,6 +90,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--euler_beam_changed_state_bonus", type=float, default=0.5,
     )
     sampling.add_argument(
+        "--euler_beam_q_temperature", type=float, default=1.0,
+    )
+    sampling.add_argument(
         "--euler_beam_matmul_precision",
         choices=["highest", "high"],
         default="high",
@@ -177,6 +180,8 @@ def build_sample_command(args: argparse.Namespace) -> list[str]:
         "--euler_beam_score_mode", args.euler_beam_score_mode,
         "--euler_beam_changed_state_bonus",
         str(args.euler_beam_changed_state_bonus),
+        "--euler_beam_q_temperature",
+        str(args.euler_beam_q_temperature),
         "--euler_beam_matmul_precision",
         args.euler_beam_matmul_precision,
         "--euler_beam_child_policy", args.euler_beam_child_policy,

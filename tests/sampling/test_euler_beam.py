@@ -116,6 +116,37 @@ def test_step_log_p_is_finite_for_extreme_rates():
         assert math.isfinite(result)
 
 
+def test_q_temperature_preserves_t1_and_normalizes_sharpened_logits():
+    from edit_flows.sampling.euler_beam import _apply_q_temperature
+
+    log_probs = torch.log_softmax(torch.tensor([[0.0, 1.0, 2.0]]), dim=-1)
+    unchanged = _apply_q_temperature(log_probs, 1.0)
+    sharpened = _apply_q_temperature(log_probs, 0.8)
+
+    assert unchanged is log_probs
+    assert torch.equal(unchanged, log_probs)
+    assert torch.allclose(
+        torch.exp(sharpened).sum(dim=-1), torch.ones(1), atol=1e-6,
+    )
+    assert torch.exp(sharpened)[0, -1] > torch.exp(log_probs)[0, -1]
+
+
+def test_q_temperature_one_is_sampling_compatible():
+    model = _StochasticModel()
+    x_0 = torch.tensor([[BOS_TOKEN, 4, 5, 6, PAD_TOKEN]])
+    common = dict(
+        scheduler=LinearScheduler(),
+        n_branches=1,
+        n_children=2,
+        n_steps=4,
+        max_seq_len=32,
+        base_seed=42,
+    )
+    implicit = sample_euler_beam(model, x_0, **common)
+    explicit = sample_euler_beam(model, x_0, q_temperature=1.0, **common)
+    assert torch.equal(implicit, explicit)
+
+
 def test_branch_sort_prefers_state_mass_then_stable_seed():
     high = _BranchState(
         torch.tensor([[BOS_TOKEN, 4]]), path_log_p=-2.0,
@@ -360,6 +391,8 @@ def test_sample_euler_beam_validates_sizes():
         sample_euler_beam(model, x_0, LinearScheduler(), n_steps=0)
     with pytest.raises(ValueError, match="n_children"):
         sample_euler_beam(model, x_0, LinearScheduler(), n_children=0)
+    with pytest.raises(ValueError, match="q_temperature"):
+        sample_euler_beam(model, x_0, LinearScheduler(), q_temperature=0.0)
     with pytest.raises(ValueError, match="changed_state_bonus"):
         sample_euler_beam(
             model, x_0, LinearScheduler(), changed_state_bonus=-0.1,

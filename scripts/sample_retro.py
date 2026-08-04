@@ -266,6 +266,7 @@ def _build_sampling_metadata(
             "changed_state_bonus": args.euler_beam_changed_state_bonus,
             "matmul_precision": args.euler_beam_matmul_precision,
             "child_policy": args.euler_beam_child_policy,
+            "q_temperature": args.euler_beam_q_temperature,
             "share_identical_forwards": (
                 args.euler_beam_share_identical_forwards
             ),
@@ -375,6 +376,13 @@ def main():
     parser.add_argument("--euler_beam_changed_state_bonus", type=float,
                         default=0.0,
                         help="Fixed search bonus for states changed from the product")
+    parser.add_argument(
+        "--euler_beam_q_temperature", type=float, default=1.0,
+        help=(
+            "Temperature for insert/substitute token posterior; 1.0 keeps "
+            "the checkpoint distribution"
+        ),
+    )
     parser.add_argument("--euler_beam_matmul_precision", type=str,
                         default="highest", choices=["highest", "high"],
                         help=("Float32 matmul precision for CUDA Euler-Beam; "
@@ -655,6 +663,7 @@ def main():
                     score_mode=args.euler_beam_score_mode,
                     changed_state_bonus=args.euler_beam_changed_state_bonus,
                     child_policy=args.euler_beam_child_policy,
+                    q_temperature=args.euler_beam_q_temperature,
                     profile=euler_beam_profile,
                     profile_sample_group_size=args.n_runs,
                     share_identical_forwards=(

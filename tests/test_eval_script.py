@@ -59,6 +59,7 @@ def test_sample_command_carries_current_euler_beam_settings():
     assert "--n_branches 5" in rendered
     assert "--n_children 3" in rendered
     assert "--n_runs 2" in rendered
+    assert "--euler_beam_q_temperature 1.0" in rendered
     assert "--euler_beam_n_return" not in rendered
     assert "--max_products 200" in rendered
     assert "--euler_beam_share_identical_forwards" in rendered

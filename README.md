@@ -270,6 +270,10 @@ tiny测试中该模式缩短sampling wall约25.95%，Top-1～10及coverage指标
 矩阵形状会带来极少量TF32数值漂移（2/9000输出行），目前保持opt-in。使用
 `--euler_beam_matmul_precision highest`时，已测区间与非共享路径逐字节一致。
 
+Q sharpening可通过`--euler_beam_q_temperature`显式设置，默认`1.0`保持checkpoint原始
+insert/substitute token分布；`T<1`会使token proposal更集中，但不会改变编辑事件rate。
+该参数正在validation-only消融，尚未替换默认配置。
+
 只要指定 `--output_dir`，采样器还会在同目录写入
 `sampling_metadata.json`，记录 checkpoint、输入文件及哈希、采样器配置、有效步数、
 seed 语义、输出行数与哈希、运行时间、CUDA 峰值显存和 Git 状态。`predictions.txt`

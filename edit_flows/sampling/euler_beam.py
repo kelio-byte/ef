@@ -346,6 +346,13 @@ def _sample_tokens_from_uniform(log_probs: Tensor, uniform: Tensor) -> Tensor:
     )
 
 
+def _apply_q_temperature(log_probs: Tensor, temperature: float) -> Tensor:
+    """Sharpen or flatten token probabilities while preserving log-normalization."""
+    if temperature == 1.0:
+        return log_probs
+    return torch.log_softmax(log_probs / temperature, dim=-1)
+
+
 def _sample_actions_per_branch(
     branch_seeds: Tensor,
     x_t: Tensor,
@@ -582,6 +589,7 @@ def sample_euler_beam(
     profile: Optional[Dict[str, object]] = None,
     profile_sample_group_size: int = 1,
     share_identical_forwards: bool = False,
+    q_temperature: float = 1.0,
     initial_branch_seeds: Optional[List[List[int]]] = None,
     sampling_stats: Optional[Dict[str, int]] = None,
 ) -> Tensor:
@@ -601,6 +609,8 @@ def sample_euler_beam(
             属于同一product的受保护lineage组。
         share_identical_forwards: 对同一product内相同时间、相同token状态
             只执行一次确定性模型前向，再映射回独立seed lineage。
+        q_temperature: 对insert/substitute token posterior应用的采样温度；
+            1.0保持checkpoint原始分布。
 
     Returns:
         x_final: (B * n_branches, L_out) 每条样本的全部排名分支，按样本优先
@@ -612,6 +622,10 @@ def sample_euler_beam(
         raise ValueError(f"n_children must be >= 1, got {n_children}")
     if n_steps < 1:
         raise ValueError(f"n_steps must be >= 1, got {n_steps}")
+    if not math.isfinite(q_temperature) or q_temperature <= 0:
+        raise ValueError(
+            f"q_temperature must be finite and > 0, got {q_temperature}"
+        )
     if x_0.shape[0] < 1:
         raise ValueError("x_0 batch must contain at least one sample")
     if profile_sample_group_size < 1:
@@ -823,6 +837,12 @@ def sample_euler_beam(
             log_sub_probs = log_sub_probs.index_select(
                 0, inverse_forward_indices,
             )
+        log_ins_probs = _apply_q_temperature(
+            log_ins_probs, q_temperature,
+        )
+        log_sub_probs = _apply_q_temperature(
+            log_sub_probs, q_temperature,
+        )
         if profile is not None:
             profile["model_forward_calls"] = (
                 int(profile.get("model_forward_calls", 0))

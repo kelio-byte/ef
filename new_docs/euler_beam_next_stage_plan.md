@@ -2194,7 +2194,7 @@ commit为profile `98cbcfb`、forward共享`ccf273a`、K1M2选择`14f9523`。
 
 ## 32. 任务 29：Q sharpening推理改进
 
-状态：`[ ] 已完成方法说明和实验占位，尚未实现`
+状态：`[~] 方法说明和接口实现完成，等待validation-A消融`
 
 ### 32.A 方法/改进介绍
 
@@ -2238,8 +2238,9 @@ invalid、让正确高概率token更早出现、提高Top-1/3；额外wall近似
 
 ### 32.E 实验预注册
 
-- 数据：`[待填写：validation筛选区间A]`用于首轮，`[待填写：不重叠validation区间B]`
-  用于方向复核；不使用test选择温度。
+- 数据：validation `src-val/tgt-val` 的前1000行（50个完整augmentation反应）作为A，
+  紧接的1000行（50个不重叠反应）作为B；不使用test选择温度。若A/B方向一致，再扩大
+  到validation-200，而不是直接运行完整validation。
 - 固定baseline：R9K1M2、100 steps、batch64、TF32 high、seed42、bonus0.5、
   stochastic_noop、forward共享。
 - 单变量：`T ∈ {1.0, 0.9, 0.8}`；第一轮不扫描top-k/top-p。
@@ -2250,12 +2251,15 @@ invalid、让正确高概率token更早出现、提高Top-1/3；额外wall近似
   一致改善。若只提高Top-1却降低Top-10/Oracle，记录为集中化权衡，不替换默认配置。
 - 输出目录：`results/task29_qtemp_<split>_t<temperature>/`。
 
-### 32.F 实现与正确性测试（占位）
+### 32.F 实现与正确性测试
 
-- 修改文件：`[待填写]`
-- 单元/集成测试：`[待填写]`
-- T=1 prediction SHA：`[待填写]`
-- 正确性异常及处理：`[待填写]`
+- 修改文件：`edit_flows/sampling/euler_beam.py`、`scripts/sample_retro.py`、
+  `scripts/eval.py`及对应测试。
+- 单元/入口测试：52项通过。
+- T=1 prediction SHA：`62eaf2e0cf4fca7f2d5bb15ab02e1b08f73aa5677c0b9459303205abccef6d95`，
+  与既有隐式T=1共享版smoke逐字节一致。
+- 正确性异常及处理：T=1显式/隐式输出对照、温度log-prob归一化和`q_temperature<=0`
+  参数校验已覆盖；真实checkpoint结果待回填。
 
 ### 32.G 实验结果（占位）
 
