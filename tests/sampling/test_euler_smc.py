@@ -6,11 +6,14 @@ import torch
 from edit_flows.sampling.euler_smc import (
     SMCParticleSet,
     advance_particles,
+    euler_transition_step,
     effective_sample_size,
     normalize_log_weights,
     systematic_resample,
     systematic_resample_batch,
 )
+from edit_flows.core.scheduler import LinearScheduler
+from edit_flows.utils.tokens import BOS_TOKEN, PAD_TOKEN
 
 
 def test_normalize_log_weights_and_ess_are_stable():
@@ -132,4 +135,102 @@ def test_particle_validation_rejects_missing_resampling_seed():
             log_target_increment=torch.tensor([2.0, 0.0, -2.0]),
             log_proposal_increment=torch.zeros(3),
             ess_threshold=2.9,
+        )
+
+
+class _TransitionModel(torch.nn.Module):
+    def __init__(self, vocab_size=16):
+        super().__init__()
+        self.anchor = torch.nn.Parameter(torch.zeros(1))
+        self.vocab_size = vocab_size
+
+    def forward(self, tokens, time_step, padding_mask, origin_mask=None):
+        batch, length = tokens.shape
+        log_rates = torch.full(
+            (batch, length, 3), -0.3, device=tokens.device,
+        )
+        logits = torch.arange(
+            self.vocab_size, dtype=torch.float, device=tokens.device,
+        ).view(1, 1, -1).expand(batch, length, -1)
+        log_probs = torch.log_softmax(logits / 4.0, dim=-1)
+        pad_mask = padding_mask.unsqueeze(-1)
+        return (
+            log_rates.masked_fill(pad_mask, -1e9),
+            log_probs.masked_fill(pad_mask, -1e9),
+            log_probs.masked_fill(pad_mask, -1e9),
+        )
+
+
+def test_euler_transition_is_seeded_and_closes_bootstrap_smc():
+    model = _TransitionModel()
+    states = torch.tensor([
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 7, 8, PAD_TOKEN],
+    ])
+    kwargs = dict(
+        scheduler=LinearScheduler(),
+        step=0,
+        n_steps=4,
+        seeds=torch.tensor([11, 29]),
+        max_seq_len=16,
+    )
+    first = euler_transition_step(model, states, **kwargs)
+    second = euler_transition_step(model, states, **kwargs)
+
+    assert torch.equal(first.next_states, second.next_states)
+    assert torch.equal(
+        first.log_proposal_increment, second.log_proposal_increment,
+    )
+    assert torch.isfinite(first.log_proposal_increment).all()
+    assert (first.next_states != PAD_TOKEN).any(dim=1).all()
+
+    particles = SMCParticleSet.initial(states)
+    identity = torch.arange(states.shape[0], dtype=torch.long)
+    bootstrap = advance_particles(
+        particles,
+        next_states=first.next_states,
+        parent_indices=identity,
+        log_target_increment=first.log_proposal_increment,
+        log_proposal_increment=first.log_proposal_increment,
+        ess_threshold=1.5,
+        resample_seed=123,
+    )
+    assert not bootstrap.resampled
+    assert bootstrap.ess_before_resampling == pytest.approx(2.0)
+    assert bootstrap.log_evidence_increment == pytest.approx(0.0)
+
+
+def test_euler_transition_at_terminal_time_is_identity():
+    model = _TransitionModel()
+    states = torch.tensor([[BOS_TOKEN, 4, 5, PAD_TOKEN]])
+    result = euler_transition_step(
+        model,
+        states,
+        LinearScheduler(),
+        step=3,
+        n_steps=4,
+        seeds=[19],
+        t=1.0,
+        max_seq_len=16,
+    )
+
+    # apply_ins_del_operations canonicalizes trailing PAD columns, so compare
+    # the logical token sequence rather than the storage width.
+    assert torch.equal(result.next_states, states[:, :3])
+    assert torch.allclose(result.step_size, torch.zeros(1))
+    assert torch.allclose(
+        result.log_proposal_increment, torch.zeros(1), atol=1e-6,
+    )
+
+
+def test_euler_transition_rejects_unmatched_linear_probability():
+    with pytest.raises(ValueError, match="event_prob_mode='poisson'"):
+        euler_transition_step(
+            _TransitionModel(),
+            torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]]),
+            LinearScheduler(),
+            step=0,
+            n_steps=4,
+            seeds=[1],
+            event_prob_mode="linear",
         )

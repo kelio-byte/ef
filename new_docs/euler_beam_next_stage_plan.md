@@ -2361,8 +2361,12 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 - 修改/新增文件：新增`edit_flows/sampling/euler_smc.py`和
   `tests/sampling/test_euler_smc.py`；没有修改`euler_beam.py`、`sample_retro.py`、
   checkpoint或训练代码。
-- synthetic测试结果：6项测试通过，覆盖log-sum-exp归一化、ESS、确定性systematic
-  resampling、批次布局独立性、importance ratio和非法输入校验。
+- synthetic测试结果：9项测试通过，覆盖log-sum-exp归一化、ESS、确定性systematic
+  resampling、批次布局独立性、importance ratio、Euler proposal闭合和非法输入校验。
+- transition adapter：新增`euler_transition_step()`，一次只执行一个Euler proposal，
+  复用Euler-Beam的无状态seed动作、Poisson事件概率、编辑应用和完整step log-prob；
+  `target=proposal`时可直接送入`advance_particles()`做bootstrap smoke。为避免把linear
+  事件概率用Poisson scorer误计，当前明确拒绝`event_prob_mode='linear'`。
 - 回归测试：Task30相关测试及Euler-Beam/入口测试共`58 passed`；完整
   `tests/sampling`另有17个既有`beam.py` API不匹配失败（测试构造仍传入已移除的
   `log_u_real`，且一个受控模型序列长度不一致），本次新增文件未触及这些代码，故不把它们
@@ -2378,15 +2382,19 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | synthetic mechanics | 3 | — | — | — | — | invariant pass | genealogy pass | <1s CPU |
 | bootstrap invariant | 4 | — | — | — | — | 4.0 | no resampling | <1s CPU |
+| checkpoint transition smoke (2 rows, 1 step) | 2 | — | — | — | — | not scored | not scored | shape/finite pass |
 | validation baseline R9 | not run | — | — | — | — | — | — | — |
 | validation Euler-SMC | not run | — | — | — | — | — | — | — |
 
-真实checkpoint阶段尚未执行；因此本阶段没有Top-k、invalid或wall改进结论。
+真实checkpoint只完成单步transition smoke（2行、GPU、log-proposal有限且输出shape正确）；
+尚未运行多步粒子采样，因此本阶段没有Top-k、invalid或wall改进结论。
 
 ### 33.H 结果分析与结论
 
 - mechanics是否满足理论不变量：是；log-weight归一化、ESS、target/proposal比值和
   systematic resampling的单元测试均通过。
+- Euler transition接口是否闭合：是；合成模型的proposal可稳定复现，并在真实
+  `checkpoint_step600000.pt`上完成一次2行GPU forward、编辑应用和有限log-prob输出。
 - 是否出现粒子坍缩/谱系灭绝：尚未在真实transition/reward上评估；合成测试只验证了
   resampling后谱系传播，不把一次抽样误写成坍缩结论。
 - reward是否提供独立于base模型的排序信息：尚未定义或测量。bootstrap设置中

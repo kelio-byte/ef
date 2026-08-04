@@ -10,10 +10,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Optional
+from typing import Optional, Sequence
 
 import torch
 from torch import Tensor
+
+from edit_flows.core.rate_scale import apply_rate_parameterization, get_rate_scale
+from edit_flows.core.scheduler import KappaScheduler
+from edit_flows.sampling.euler import _compute_model_time, get_adaptive_h
+from edit_flows.sampling.euler_beam import (
+    _apply_edits_batch,
+    _apply_q_temperature,
+    _sample_actions_per_branch,
+    _step_log_p_batch,
+)
+from edit_flows.utils.tokens import BOS_TOKEN, PAD_TOKEN
 
 
 def _validate_log_weights(log_weights: Tensor) -> None:
@@ -179,6 +190,173 @@ class SMCStepResult:
     resampled: bool
     resample_indices: Optional[Tensor]
     log_evidence_increment: float
+
+
+@dataclass
+class EulerTransitionResult:
+    """One batched Euler proposal and its exact Poisson log probability."""
+
+    next_states: Tensor
+    log_proposal_increment: Tensor
+    step_size: Tensor
+    actions: dict
+
+
+@torch.inference_mode()
+def euler_transition_step(
+    model,
+    states: Tensor,
+    scheduler: KappaScheduler,
+    *,
+    step: int,
+    n_steps: int,
+    seeds: Sequence[int] | Tensor,
+    t: float | Tensor = 0.0,
+    max_seq_len: int = 512,
+    pad_token: int = PAD_TOKEN,
+    bos_token: int = BOS_TOKEN,
+    use_rate_reparam: bool = False,
+    clamp_kappa: bool = False,
+    clamp_max: float = 50.0,
+    time_input: str = "t",
+    train_scheduler: Optional[KappaScheduler] = None,
+    event_prob_mode: str = "poisson",
+    q_temperature: float = 1.0,
+) -> EulerTransitionResult:
+    """Propose one Euler step for a particle population.
+
+    This is deliberately an adapter, not a sampler: it performs one model
+    forward, one stateless Euler action draw per particle, and returns the
+    resulting states together with the proposal log probability.  The
+    proposal uses the same Poisson event semantics and vectorized action
+    helpers as Euler-Beam, so a first SMC smoke test can set target=proposal
+    without changing the existing sampler.
+
+    ``states`` must be a padded ``(N, L)`` tensor and ``seeds`` must contain
+    one stable seed per row.  All rows share the same Euler step index but may
+    carry different times, which is useful when testing batch/layout invariance.
+    ``event_prob_mode='linear'`` is intentionally rejected until its exact
+    scorer is implemented; using the current Poisson log-probability for a
+    linear proposal would silently invalidate the importance ratio.
+    """
+    if states.ndim != 2 or states.shape[0] < 1 or states.shape[1] < 1:
+        raise ValueError(
+            "states must be a non-empty 2-D padded tensor, got "
+            f"shape {tuple(states.shape)}"
+        )
+    if n_steps < 1:
+        raise ValueError(f"n_steps must be >= 1, got {n_steps}")
+    if step < 0:
+        raise ValueError(f"step must be >= 0, got {step}")
+    if max_seq_len < 1:
+        raise ValueError(f"max_seq_len must be >= 1, got {max_seq_len}")
+    if event_prob_mode != "poisson":
+        raise ValueError(
+            "Euler-SMC currently supports only event_prob_mode='poisson'; "
+            "a linear proposal needs a matching exact log-probability"
+        )
+    if not math.isfinite(q_temperature) or q_temperature <= 0:
+        raise ValueError(
+            f"q_temperature must be finite and > 0, got {q_temperature}"
+        )
+
+    device = next(model.parameters()).device
+    states = states.to(device=device, dtype=torch.long)
+    n_particles = states.shape[0]
+    seeds = torch.as_tensor(seeds, dtype=torch.long, device=device)
+    if seeds.ndim != 1 or seeds.numel() != n_particles:
+        raise ValueError(
+            "seeds must be 1-D with one value per state row, got "
+            f"shape {tuple(seeds.shape)} for {n_particles} rows"
+        )
+    if (seeds < 0).any():
+        raise ValueError("seeds must be non-negative")
+
+    if isinstance(t, Tensor):
+        times = t.to(device=device, dtype=torch.float32)
+        if times.ndim == 0:
+            times = times.expand(n_particles)
+        elif times.ndim == 2 and times.shape == (n_particles, 1):
+            times = times[:, 0]
+        elif times.ndim != 1 or times.shape[0] != n_particles:
+            raise ValueError(
+                "t must be scalar, (N,), or (N, 1), got "
+                f"shape {tuple(times.shape)}"
+            )
+    else:
+        times = torch.full(
+            (n_particles,), float(t), dtype=torch.float32, device=device,
+        )
+    if not torch.isfinite(times).all() or (times < 0).any():
+        raise ValueError("t must contain finite non-negative values")
+    t_column = times.unsqueeze(-1)
+
+    x_pad_mask = states == pad_token
+    t_model = _compute_model_time(
+        t_column, scheduler, time_input, train_scheduler,
+    )
+    log_rates, log_ins_probs, log_sub_probs = model(
+        states, t_model, x_pad_mask,
+    )
+
+    if not use_rate_reparam and train_scheduler is not None and \
+       scheduler.name != train_scheduler.name:
+        k_sample = get_rate_scale(
+            t_column, scheduler,
+            clamp_kappa=clamp_kappa, clamp_max=clamp_max,
+        )
+        k_train = get_rate_scale(
+            t_model, train_scheduler,
+            clamp_kappa=clamp_kappa, clamp_max=clamp_max,
+        )
+        log_rates = log_rates + torch.log(
+            k_sample / k_train.clamp_min(1e-2)
+        ).unsqueeze(1)
+
+    log_rates = apply_rate_parameterization(
+        log_rates, t_column, scheduler,
+        use_rate_reparam=use_rate_reparam,
+        clamp_kappa=clamp_kappa, clamp_max=clamp_max,
+    )
+    log_ins_probs = _apply_q_temperature(log_ins_probs, q_temperature)
+    log_sub_probs = _apply_q_temperature(log_sub_probs, q_temperature)
+
+    default_h = torch.full_like(t_column, 1.0 / n_steps)
+    step_size = get_adaptive_h(default_h, t_column, scheduler)
+    actions = _sample_actions_per_branch(
+        seeds,
+        states,
+        log_rates,
+        log_ins_probs,
+        log_sub_probs,
+        step_size,
+        pad_token=pad_token,
+        event_prob_mode=event_prob_mode,
+        step=step,
+    )
+    done = times >= 1.0
+    if done.any():
+        actions["ins_mask"][done] = False
+        actions["del_mask"][done] = False
+        actions["sub_mask"][done] = False
+
+    log_proposal = _step_log_p_batch(
+        actions,
+        log_rates,
+        log_ins_probs,
+        log_sub_probs,
+        step_size,
+        score_mode="full_probability",
+    )
+    next_states = _apply_edits_batch(
+        states, actions, max_seq_len=max_seq_len, pad_token=pad_token,
+    )
+    return EulerTransitionResult(
+        next_states=next_states,
+        log_proposal_increment=log_proposal,
+        step_size=step_size[:, 0],
+        actions=actions,
+    )
 
 
 def advance_particles(
