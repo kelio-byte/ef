@@ -1955,6 +1955,34 @@ R10M2比R9M2多11.11%的最终输出，wall增加365.76秒（11.95%），unique�
 R10K1M1或R10K1M2加入推荐配置，也不继续扩大R。** R10实验揭示的6个新增Oracle候选应
 在下一阶段通过聚合排序或Q sharpening转化，而不是继续线性堆独立run。
 
+## 29. 任务 27：Euler、局部 child 选择与全局 beam 的机制复盘
+
+状态：`[~] 问题与公平对照已冻结，等待两项补充实验`
+
+本任务不继续扫描参数，而是回答当前创新究竟由哪一部分产生：普通Euler、每步M个child
+的局部择优、K个长期分支的合并剪枝，以及R个隔离搜索池分别贡献什么。已有实验先作为
+证据盘点；只补两个无法由历史结果严格回答的对照：
+
+1. `R9K1M2`对`R1K9M2`：完整test-mini-1001、宽度和输出均为9、M2、noop、bonus0.5、
+   100 steps、batch64、TF32 high、seed42。R1使用`initial_seed_groups=9`，把R9的9个
+   run初始流原样放进同一个K9池，唯一主要变量是隔离边界/跨流竞争。R9复用已存在结果，
+   R1写入新目录，不覆盖历史实验。
+2. 普通Euler对当前R9：使用同一test-mini前200个完整反应、每augmentation输出9条、
+   100 steps和TF32 high。当前Euler入口的`--seed`尚未接入采样器，故本诊断通过同进程
+   `torch.manual_seed(42)`固定全局CUDA RNG，并固定batch16；metadata仍会如实标记CLI
+   seed未接入。它足以提供算法级方向证据，但在正式修复per-product稳定seed前不宣称为
+   最终可复现Euler基准。R9直接从完整mini diagnostics/predictions取相同前200反应。
+
+两项都统一使用legacy augmentation aggregation、Top-1～10、Oracle、invalid、unique、
+wall和逐反应配对。结果解释规则提前冻结：
+
+- 若M2/R9只改善Top-1却损害Top-3/10或Oracle，则创新只能表述为排序集中化，不称全面
+  优于Euler；若主Top-k和覆盖一致改善，才称多child局部选择有效。
+- 若R1K9更快但Top-k/Oracle下降，则全局K分支剪枝定位为速度优化而非准确率创新；若同
+  seed流下同时提高准确率和wall，才替代R9。
+- 本任务完成后不依据test-mini继续扫描R/K/M/bonus；下一步只针对实验暴露的具体失败
+  环节立项。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
