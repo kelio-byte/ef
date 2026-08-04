@@ -2277,7 +2277,7 @@ invalid、让正确高概率token更早出现、提高Top-1/3；额外wall近似
 
 ### 32.I Git记录（占位）
 
-- 预注册commit：`[待填写]`
+- 预注册commit：`e56021e`
 - 实现commit：`[待填写]`
 - 实验结论commit：`[待填写]`
 
@@ -2364,7 +2364,7 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 
 ### 33.I Git记录（占位）
 
-- 预注册commit：`[待填写]`
+- 预注册commit：`e56021e`
 - mechanics实现commit：`[待填写]`
 - validation结论commit：`[待填写]`
 
