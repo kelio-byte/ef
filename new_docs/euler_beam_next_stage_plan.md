@@ -1465,6 +1465,66 @@ tiny 的 Top-k。
 安全备选；batch128 被否决。没有证据支持继续用 test target 对48/80/96等相邻 batch
 做细粒度寻优。
 
+## 23. 任务 22：Euler-Beam 与采样入口效率再审计
+
+状态：`[x] 已完成当前代码 profiling 和性价比分级；本任务不保留低收益代码改动`
+
+使用当前准确率默认 R3K3M2、`stochastic_noop`、TF32 high、batch64，在 tiny 前100行、
+完整100步上重新开启分阶段 profile。profile 会在阶段边界同步CUDA，只用于占比诊断，
+不能与正式 wall 直接混用：
+
+| 阶段 | 时间 | 占 sampling wall |
+|---|---:|---:|
+| model forward + rate | 8.963 s | 74.40% |
+| apply edits + token keys | 1.032 s | 8.57% |
+| merge + prune | 0.944 s | 7.84% |
+| child proposal | 0.710 s | 5.89% |
+| step scoring | 0.129 s | 1.07% |
+| branch batch preparation | 0.126 s | 1.05% |
+| finalize output | 0.010 s | 0.08% |
+| 入口/其它未归因 | 0.133 s | 1.10% |
+
+本次 fast branch preparation 在200/200个step均命中；此前已占10.9%的准备阶段现在只占
+1.05%，说明上一项优化已把该热点基本消除。动态 token padding浪费21.20%，attention
+长度平方代理浪费36.95%；但任务14已证明内层长度分桶、外层初始长度排序和
+`need_weights=False` attention短筛均没有转化成wall收益，不能重复同一路线。
+
+### 23.1 低风险候选及收益上限
+
+`apply_ins_del_operations()` 中除分配长度所需的 `.item()` 外，还有三处GPU tensor
+`.any()`被Python判断，形成同步。使用约700×70的代表张量做不改仓库的等价微基准，删除
+空mask分支后输出完全一致，单次从1.411降至1.311 ms（编辑helper快7.1%）；由于编辑阶段
+只占8.57%，端到端预期仅约0.6%。该候选只适合以后与其它改动捆绑，不单独修改公共
+`ops.py`。
+
+其它低风险外围候选同样受Amdahl上限约束：
+
+- M>1正式排名不使用`path_log_p`，条件跳过`_step_log_p_batch()`的绝对上限只有1.07%，
+  还会损失现有轨迹诊断语义；
+- 用GPU `arange/repeat_interleave`替换Python parent index列表、批量生成输出字符串、
+  `writelines`、pinned-memory传输等，只覆盖proposal或入口的一小部分，预计各自低于1%；
+- `sample_retro.py`的batch构建、CPU解码、写文件和其它入口开销合计仅约1.1%，不是当前
+  mini/full采样时间的来源；现有batch64也已经过32/64/128完整tiny复核。
+
+因此不为了微小benchmark数字堆积复杂路径，本任务不保留上述代码修改。
+
+### 23.2 后续候选的性价比分级
+
+| 候选 | 现实端到端收益预期 | 改动/风险 | 结论 |
+|---|---:|---|---|
+| 去掉编辑中的`.any()`同步 | 约0.5～1% | 低 | 只与其它改动捆绑 |
+| 简化Python对象、连续slice合并 | 约2～4% | 中 | 可做下一轮低风险原型 |
+| GPU状态key/组内去重，只回传保留索引 | 约4～8% | 高；需保证无hash碰撞、tie顺序 | Beam文件内最值得的隔离研究 |
+| child维广播，减少K×M的rates/probs复制 | 约2～4% | 中高；显存和数值路径会变化 | 排在GPU去重之后 |
+| inference-only SDPA/attention kernel | 约10～25%潜力 | 高；修改共享模型且可能改变预测 | 只有允许配对准确率复核时研究 |
+| 将100 steps降为75/50 | 约25/50% | 方法与准确率改变，不是代码优化 | 单列validation研究，不能静默修改 |
+
+纯粹消灭全部非forward阶段的理论加速上限也只有约1.34倍；要得到稳定的两位数提升，必须
+处理占74.4%的模型forward。当前模型为10层、hidden256、FFN2048，且过去的full-model
+`torch.compile`、BF16、padding bucket和attention开关均已有失败证据。若保持“逐行预测
+不变、只改`euler_beam.py/sample_retro.py`”的严格边界，当前已经接近低风险收益上限；
+下一项建议是先做默认关闭的GPU状态合并原型，而不是重写采样入口。
+
 验证：Euler-Beam 与采样 metadata 定向测试为 `36 passed`；排除仓库中既知且与本任务
 无关的 `tests/sampling/test_beam.py` 后，完整回归为 `176 passed, 8 warnings`。实现 commit：
 `f921ee8`。用户的 `old_*.py`、`PDF/` 和既有 `visualize_trajectory.py` 本地修改均保持
