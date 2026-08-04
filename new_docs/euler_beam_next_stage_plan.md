@@ -2400,7 +2400,7 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 ### 33.I Git记录（占位）
 
 - 预注册commit：`e56021e`
-- mechanics实现commit：`[本次提交后填写]`
+- mechanics实现commit：`fd149f1`
 - validation结论commit：`[待填写]`
 
 ## 11. 决策门槛
