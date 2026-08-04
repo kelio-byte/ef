@@ -1591,6 +1591,48 @@ seed group原样放进R1全局池。数据为validation reaction 0～199，即`s
 需1小时。因此不需要等待新训练；完成这一次未见validation确认并冻结代码后，下一轮
 即可安排完整src-test，最好作为过夜实验。
 
+## 24. 任务 23：R1K10M2 专属validation参数选择
+
+状态：`[~] 已预注册；等待分阶段筛选和独立区间确认`
+
+R3K3的bonus/no-op证据不能直接外推到单一K10全局池。本任务只用validation选择R1K10
+参数，不再使用已经看过target的test-mini；不修改训练、checkpoint、模型或评分算法。
+
+固定项：R1K10M2、100 steps、cubic、full probability、TF32 high、batch64、seed42、
+legacy aggregation、Top-1～10 diagnostics。M2已在规模化M2/M3实验中同时取得更高Top-k、
+Oracle和更低wall，故本任务不重复M3；K、R、steps、precision和batch也不加入网格，避免
+把一次policy/bonus选择扩大为组合搜索。
+
+### 24.1 分阶段筛选
+
+筛选数据固定为validation reaction 200～399，即`src-val.txt/tgt-val.txt` product行
+`[4000,8000)`的200个完整aug20反应，与历史reaction 0～199不重叠。
+
+第一阶段只比较：
+
+| 候选 | child policy | bonus |
+|---|---|---:|
+| 当前K10基线 | stochastic | 0.5 |
+| R3启发式迁移 | stochastic_noop | 0.5 |
+
+第二阶段只对第一阶段胜出policy补跑bonus0.0和1.0，与已有bonus0.5组成三点筛选；不扫描
+0.1间隔，也不改变no-op时刻。若policy没有清晰胜者，则保留纯stochastic作为保守基线，
+第二阶段仍只在该policy上检查bonus，不能用bonus补偿另一个policy后反复交叉搜索。
+
+选择规则预先固定：候选必须Top-1不下降，并使Top-3、Top-10、Oracle至少两项改善且其余
+不出现超过1pp的回归，才视为清晰晋级；多候选同时满足时依次比较Top-1、Top-3、Top-10、
+Oracle、invalid和wall。互有小幅胜负时保留`stochastic, bonus0.5`，不从噪声中挑最高点。
+
+### 24.2 独立确认与test门槛
+
+筛选胜者必须与当前K10基线在不重叠的validation reaction 400～1400，即product行
+`[8000,28020)`的1001个完整反应上成对确认。确认阶段不再改变参数；报告逐反应paired
+hit、Top-1～10、Oracle、invalid、unique、shortfall、父/子评估和wall。只有方向保持且
+达到上述无明显回归规则，才更新R1K10推荐配置；否则维持当前基线。
+
+所有采样写入新的`results/task23_r1k10_*`目录，不覆盖历史结果。R1K10确认完成后，才能
+与冻结的R3K3/R1K9一起决定完整test报告名单；完整test只评估，不再调参。
+
 验证：Euler-Beam 与采样 metadata 定向测试为 `36 passed`；排除仓库中既知且与本任务
 无关的 `tests/sampling/test_beam.py` 后，完整回归为 `176 passed, 8 warnings`。实现 commit：
 `f921ee8`。用户的 `old_*.py`、`PDF/` 和既有 `visualize_trajectory.py` 本地修改均保持
