@@ -1442,6 +1442,29 @@ mini 约 25.5 分钟，完整 100140 行 test 约 2.1～2.5 小时；这只是�
 在决定给普通 Euler 启用 TF32 前，应先单独修复其 seed、再在同 seed 上做 FP32/TF32
 准确率复核；当前不因短吞吐实验修改默认精度或 batch。Euler-Beam 的推荐 batch64 不变。
 
+### 22.5 当前 R3K3 Euler-Beam 的完整 tiny batch 复核
+
+此前任务 13 已在 100 行 profiling 上比较当前准确率配置 R3K3M2、`stochastic_noop`、
+TF32 high 的 batch32/64/128：时间分别为 12.806/12.690/13.542 秒，三组输出 SHA 完全
+一致，因此选择 batch64。但 R1K10 的实验表明过短样本可能误判 batch，故本任务又使用
+当前代码在完整 tiny 1000 行上重跑三档：
+
+| product batch | sampling wall | peak allocated | peak reserved | 相对 batch64 不同行 |
+|---:|---:|---:|---:|---:|
+| 32 | 109.783 s | 0.80 GiB | 12.44 GiB | 23/9000 |
+| 64 | 110.119 s | 1.39 GiB | 23.15 GiB | 0 |
+| 128 | 117.128 s | 2.56 GiB | 22.77 GiB | 13/9000 |
+
+batch32 与64只差 0.336 秒（0.3%），小于正常 wall 波动，不能宣称32更快；batch128 则
+稳定慢约 6.4%。三组评分的 Top-1～10 均为 `60/64/70/72/72/76/76/80/82/82%`，
+Oracle 均为 90%。少量逐行差异来自 TF32 在不同矩阵 shape 下的数值路径，没有改变该
+tiny 的 Top-k。
+
+结论：Euler-Beam 继续以 batch64 作为可复现的正式默认，因为 validation/test-mini
+历史基线均使用64，且短 profile 中64也略快；batch32 是速度相当、显存 allocated 更低的
+安全备选；batch128 被否决。没有证据支持继续用 test target 对48/80/96等相邻 batch
+做细粒度寻优。
+
 验证：Euler-Beam 与采样 metadata 定向测试为 `36 passed`；排除仓库中既知且与本任务
 无关的 `tests/sampling/test_beam.py` 后，完整回归为 `176 passed, 8 warnings`。实现 commit：
 `f921ee8`。用户的 `old_*.py`、`PDF/` 和既有 `visualize_trajectory.py` 本地修改均保持
