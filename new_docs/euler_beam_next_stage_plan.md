@@ -2029,7 +2029,7 @@ R9每step重复父状态，研究“共享相同state forward但保留独立line
 
 ## 30. 任务 28：R9受保护分支的效率优化
 
-状态：`[~] profile完成，进入默认关闭的forward共享原型`
+状态：`[x] forward共享、K1M2快速选择和batch复核完成`
 
 用户决定优先优化当前最高准确率`R9K1M2`。概念上可把R9描述为9条受保护的独立分支，
 但不能直接改写成现有K9：R分支互不淘汰，K分支共享状态质量并全局竞争。接口命名可以在
@@ -2129,6 +2129,35 @@ profile中merge/prune约占短集wall的6.8%。当前K1M2仍为每个sample创�
 wall从11.875秒到11.396秒，但该4.04%差异可能包含GPU波动；同步profile中merge/prune
 从1.018秒降到0.945秒（该阶段-7.17%，总wall绝对约-0.073秒），其他阶段存在更大的计时
 波动。因此结论只记为小幅等价优化，不宣称稳定4%端到端提速，也不继续扩大K1剪枝重写。
+
+### 30.4 forward共享后的batch size复核
+
+共享版5反应profile中模型阶段由11.150秒降至8.426秒，仍占总wall 65.7%；apply edits、
+merge/prune和child proposal分别只有9.7%、7.8%、6.6%。完全相同state的共享已穷尽，
+继续重写后三级路径的预期收益较低。由于共享把物理model rows显著压缩，非共享R9采用的
+product batch64不一定仍能充分利用RTX 3090。
+
+固定R9K1M2、noop、bonus0.5、TF32 high、seed42、100 steps和共享开关，在tiny前400条
+输入上比较batch64/128/256。只以sampling wall、input throughput、物理model rows、峰值
+显存和预测SHA为判据；不从20个反应的accuracy选择batch。若更大batch没有稳定收益或显存
+增长不成比例，继续保留64，不再扩大扫描。
+
+结果如下：
+
+| product batch | wall | input throughput | physical model rows | peak CUDA allocated |
+|---:|---:|---:|---:|---:|
+| 64 | 44.920s | 8.905/s | 237,439 | 1,553,148,416 B |
+| 128 | 47.587s | 8.406/s | 237,438 | 2,800,537,600 B |
+| 256 | 48.906s | 8.179/s | 237,438 | 4,082,305,024 B |
+
+batch128/256相对64分别慢5.94%/8.87%，峰值allocated增长80.3%/162.8%，没有减少实质
+搜索工作。TF32不同batch形状相对batch64分别改变7/3600和9/3600个输出行，也没有数值
+稳定性优势。因此RTX 3090共享模式继续推荐batch64，不再扩大batch扫描。
+
+任务28阶段结论：保留R与K的历史接口语义；把当前R9K1称为9条受保护分支是准确的，但
+不能把竞争式K>1也改称同一种分支。共享开关在tiny上将R9 sampling wall降低25.95%，
+指标完全不变，是本任务的主要成果；因TF32下2/9000输出行漂移，继续保持opt-in。相关
+commit为profile `98cbcfb`、forward共享`ccf273a`、K1M2选择`14f9523`。
 
 ## 11. 决策门槛
 
