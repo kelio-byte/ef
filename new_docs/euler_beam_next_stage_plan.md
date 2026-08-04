@@ -1525,6 +1525,72 @@ tiny 的 Top-k。
 不变、只改`euler_beam.py/sample_retro.py`”的严格边界，当前已经接近低风险收益上限；
 下一项建议是先做默认关闭的GPU状态合并原型，而不是重写采样入口。
 
+### 23.3 R1K10M2 的独立效率审计
+
+当前低延迟实验配置为R1K10M2、纯`stochastic`、bonus0.5、TF32 high、batch64。使用当前
+fast branch preparation在tiny前100行、完整100步的profile如下，并与同数据当前R3K3M2
+profile并列：
+
+| 阶段 | R1K10M2 | R3K3M2 |
+|---|---:|---:|
+| sampling wall（profile） | 10.144 s | 12.047 s |
+| model forward + rate | 74.02% | 74.40% |
+| apply edits + token keys | 8.41% | 8.57% |
+| merge + prune | 7.41% | 7.84% |
+| child proposal | 6.59% | 5.89% |
+| step score | 1.26% | 1.07% |
+| branch preparation | 1.04% | 1.05% |
+| 入口/其它未归因 | 1.16% | 1.10% |
+| parent / child evaluations | 58,365 / 116,730 | 69,191 / 138,382 |
+| token / attention padding浪费 | 19.70 / 34.32% | 21.20 / 36.95% |
+
+完整tiny的正常wall为R1K10 89.972秒、R3K3 110.119秒，R1快18.30%。R1的单一全局池会
+合并原本属于不同run的相同状态，所以实际父/子评估更少、序列略短；它的热点结构并未
+改变，forward仍占74%。因此上一节的性价比排序同样适用于R1K10：`sample_retro.py`不是
+瓶颈，GPU key/合并是Beam文件内最有潜力但风险较高的候选，模型forward才有两位数空间。
+
+这组速度不能直接证明R1K10方法优于R3K3：R1每augmentation输出10行，R3输出9行；R1
+使用纯stochastic，R3使用stochastic_noop；K10也没有复用R3的三个virtual seed group。
+它是两个实际运行配置的吞吐对照，不是单因素方法实验。
+
+### 23.4 参数成熟度与完整test准入门槛
+
+历史上真正公平的搜索池实验是R1K9与R3K3，而不是R1K10与R3K3。两者固定总宽度9、输出9、
+M2、100 steps、bonus0.5、stochastic_noop、TF32 high、batch64，并把R3的三个virtual
+seed group原样放进R1全局池。数据为validation reaction 0～199，即`src-val.txt`前4000
+条aug20输入：全部分支接口的seed42结果为R3/R1 Top-1 `64.5/62.5`、Top-2
+`80.5/75.5`、Top-3 `85.0/79.5`、Top-10 `90.5/89.0`，wall `482.18/324.39`秒。
+早期winner-only口径又用seed42/43成对复验，均确认R1快约32～33%，但R1的Top-2、Oracle
+和尾部有效性更弱。现有证据支持二者形成Pareto取舍，而不是一个配置全面支配另一个。
+
+参数不能称为全局最优，只能分级描述：
+
+- R3K3M2：M2、TF32、batch64、noop和多run保护均有实验支持，是当前最成熟的准确率配置；
+  bonus0.5和100 steps仍是局部支持，不是穷举最优。
+- R1K9M2：同预算、两seed validation对照充分支持其“更快但Top-k较弱”的定位，是最公平
+  的低延迟对照；也不能称为全局最优。
+- R1K10M2：M2在test-mini-1001上优于M3，但为保证M2/M3单因素比较使用纯stochastic，
+  bonus0.5沿用而非为K10重新选择，只有seed42，且test-mini target已经被查看。因此它是
+  可用工程配置，不是已经在validation上选出的最优配置，不能继续用test-mini调参。
+
+完整`src-test.txt`为100140行、5007个反应。技术上现在即可运行，但科学上应等配置冻结
+后只做一次最终报告。建议准入流程：
+
+1. 若还要做GPU状态合并等代码优化，只允许保留逐行输出一致的实现；否则先完成或放弃，
+   避免全量后又改变推理代码。
+2. 在未使用过的validation reaction 200～1200（product行`[4000,24020)`，1001个完整
+   aug20反应）做一次确认。主比较预注册为公平的R3K3与R1K9；若必须报告R1K10，也必须
+   事先固定policy，不能看结果后切换。
+3. confirmation只确认方向，不继续调bonus/K/M；随后锁定commit、checkpoint、seed42、
+   scoring和metadata。
+4. 在完整test上顺序运行冻结的两个配置，报告Top-1～10、Oracle、invalid、unique、wall
+   和配对反应差异。完整test决定泛化表现，不再反向修改参数。
+
+按当前tiny吞吐粗略外推，R3K3完整test约3.06小时，R1K10约2.50小时；公平R1K9预计约
+2.0～2.3小时。两个主配置加评分适合一次约5～6小时的隔离长跑。validation-1001确认约
+需1小时。因此不需要等待新训练；完成这一次未见validation确认并冻结代码后，下一轮
+即可安排完整src-test，最好作为过夜实验。
+
 验证：Euler-Beam 与采样 metadata 定向测试为 `36 passed`；排除仓库中既知且与本任务
 无关的 `tests/sampling/test_beam.py` 后，完整回归为 `176 passed, 8 warnings`。实现 commit：
 `f921ee8`。用户的 `old_*.py`、`PDF/` 和既有 `visualize_trajectory.py` 本地修改均保持
