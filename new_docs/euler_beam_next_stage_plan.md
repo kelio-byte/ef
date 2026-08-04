@@ -1356,6 +1356,67 @@ bonus/policy。就准确率与 wall-time 主目标而言 M2 支配 M3；M3 仅�
 - `new_docs/training_code_audit.md`
 - `new_docs/frontier_methods_research.md`
 
+## 22. 任务 21：旧 Euler 性能复核与无损分支准备优化
+
+状态：`[x] 已完成同机公平复核、无损局部优化和反例实验；保留 batch64`
+
+本任务只分析采样性能，不修改训练、checkpoint、数据和历史结果。用户提供的
+`old_sample_retro.py` 实际仍导入当前 `edit_flows.sampling.euler`；提供的 `old_euler.py`
+与当前普通 Euler 主采样路径基本一致，当前文件新增的 event 记录以及 scheduler correction
+下限不影响本实验使用的 cubic/cubic 正常路径。旧评分器与当前评分器都需要 RDKit
+canonicalization；当前评分器额外做布局、哈希和覆盖诊断，但 test-mini 的 28.12 分钟已由
+sampling metadata 单独计时，因此评分器不能解释这段采样耗时。
+
+### 22.1 同机、同输入、同输出数复核
+
+固定 RTX 3090、tiny 的 1000 条 augmentation 输入、100 steps、seed42，并都输出每条输入
+10 个结果：
+
+| 实现 | 配置 | sampling wall | 输出行数 |
+|---|---|---:|---:|
+| 旧 Euler 入口 | `n_samples=10,batch16` | 189.59 s | 10,000 |
+| 修改前 Euler-Beam | `R1K10M2,batch64,high` | 99.16 s | 10,000 |
+| 本任务优化后 Euler-Beam | 同上 | 89.97 s | 10,000 |
+
+因此当前 Euler-Beam 在公平小样本上并没有比旧 Euler 慢：修改前已快 47.7%（约
+1.91 倍），优化后快 52.5%（约 2.11 倍）。原因是 M 只扩展轻量 child proposal，不重复
+Transformer；状态合并后平均活跃父分支也低于 10，而普通 Euler 始终维持 10 条完整轨迹。
+
+test-mini 有 20020 条 augmentation 输入，是 tiny 的 20.02 倍；虽然概念上是 1001 个
+原始反应，模型仍必须分别处理每个反应的 20 个增强表示。M2 的 1687.14 秒采样产生
+200200 行预测，因此“mini 约半小时”首先是数据规模结果。按本次无损提速估算，同配置
+mini 约 25.5 分钟，完整 100140 行 test 约 2.1～2.5 小时；这只是外推，不替代完整实测。
+
+当前机器和用户提供的旧入口无法复现“旧 Euler 在完整 100140 行上 30 多分钟”：tiny
+实测线性外推约 5.27 小时。旧脚本又不记录输入哈希、实际选择范围、采样 wall 和有效 seed，
+所以现有证据不足以唯一还原历史条件；可能差异包括实际输入范围、steps/samples/batch、
+计时范围、运行环境，或当时尚未修正的样本/seed 语义。不能据此认定当前指标被刻意压低。
+
+### 22.2 保留的无损优化
+
+原实现每个 Euler step 先在 GPU 分配 PAD tensor，再用 Python 循环逐分支执行小 slice
+赋值，同时逐个写入时间。正常 Beam 分支来自同一个批量编辑结果，tensor width 一致；
+现在走 uniform-width fast path，用一次 `torch.cat` 构造状态 batch，并一次构造时间 tensor。
+仍保留原 padding fallback，以兼容不规则或外部构造的状态。
+
+100 行 profiling 中，branch preparation 从 1.456 秒降到 0.106 秒（-92.7%），总 wall 从
+11.263 秒降到 10.144 秒（-9.93%）。完整 tiny 中总 wall 从 99.157 秒降到 89.972 秒
+（-9.26%）；修改前后 10000 行预测逐行完全一致，parent/child evaluation、shortfall 统计
+也完全一致。profile 新增 `uniform_width_fast_path_steps`，短测试确认所有正常 step 均命中。
+
+### 22.3 已否决的性能尝试
+
+- 裁剪保留分支末尾 PAD：100 行 attention padding proxy 只下降 1.28%，wall 反而从
+  11.263 增至 12.785 秒；TF32 因矩阵 shape 改变还造成 9/1000 行预测变化，已完整回退。
+- `batch_size=128`：100 行短测看似比 64 快 5.9%，但完整 tiny 为 94.553 秒，反而比
+  batch64 慢 5.1%；峰值 allocated 从 1.50 增至 2.80 GiB，并有 1392/10000 行预测变化。
+  因此保留已验证的 batch64，不根据过短 profile 修改运行默认。
+
+验证：Euler-Beam 与采样 metadata 定向测试为 `36 passed`；排除仓库中既知且与本任务
+无关的 `tests/sampling/test_beam.py` 后，完整回归为 `176 passed, 8 warnings`。实现 commit：
+`f921ee8`。用户的 `old_*.py`、`PDF/` 和既有 `visualize_trajectory.py` 本地修改均保持
+未跟踪/未提交，不纳入本任务。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：

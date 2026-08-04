@@ -170,12 +170,21 @@ R1K10 下 no-op 的收益。
 ## 9. 效率特征
 
 - 随机动作、token sampling、步分数和编辑应用均已 GPU 向量化；
-- 分支状态组 batch、token-key 转 CPU、Python 字典合并和 Top-K 仍在 host 端，但 K/M
-  较小时不是主要 Transformer 成本；
+- 正常分支的 tensor width 一致，状态 batch 使用一次 `torch.cat` 构造；不规则状态才回退
+  到逐分支 padding。该 fast path 在 tiny 的固定 R1K10M2/batch64 实验中保持 10000 行预测
+  完全一致，并把 sampling wall 从 99.16 秒降到 89.97 秒（-9.26%）；
+- token-key 转 CPU、Python 字典合并和 Top-K 仍在 host 端，但 K/M 较小时不是主要
+  Transformer 成本；
 - `matmul_precision=high` 在 RTX 3090 使用 TF32，是日常实验的速度默认；最终严格
   FP32 复核可用 `highest`；
 - `--euler_beam_profile` 会主动同步 CUDA，只应用于短 profiling，不能用它报告正常
   wall time。
+
+不能只根据很短的 profile 增大 batch：R1K10M2 在 100 行上 batch128 看似较快，但完整
+tiny 上 batch128 为 94.55 秒，慢于 batch64 的 89.97 秒，并改变 1392/10000 行预测。
+当前继续保留 batch64。test-mini 的约半小时也不是旧脚本导致的 CPU 串行退化：它包含
+20020 条需要独立前向的 augmentation 输入，是 tiny 的 20.02 倍；同机同输出数下，当前
+Beam 反而比旧 Euler 入口更快。
 
 ## 10. 当前限制
 
