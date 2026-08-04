@@ -167,6 +167,13 @@ matmul_precision=high        # RTX 3090 上启用 TF32
 R1K10 的 M2/M3 公平实验为了只改变 M，使用的是纯 `stochastic`，不能拿来证明
 R1K10 下 no-op 的收益。
 
+后续在未使用的validation reaction 200～399上完成了K10专属policy/bonus筛选。固定
+R1K10M2时，`stochastic, bonus=0.5`的Top-1/3/10为47.0/67.5/78.0；迁移R3的
+`stochastic_noop`得到46.5/67.5/78.5，属于Top-1和Top-10互换；bonus0.0得到
+45.0/67.0/76.5而被支配，bonus1.0得到48.0/68.0/77.5但牺牲尾部且Oracle不变。
+按预注册的多指标规则，R1K10继续推荐纯`stochastic`和bonus0.5，不能把R3的no-op默认
+机械用于K10。
+
 ## 9. 效率特征
 
 - 随机动作、token sampling、步分数和编辑应用均已 GPU 向量化；

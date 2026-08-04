@@ -1593,7 +1593,7 @@ seed group原样放进R1全局池。数据为validation reaction 0～199，即`s
 
 ## 24. 任务 23：R1K10M2 专属validation参数选择
 
-状态：`[~] 已预注册；等待分阶段筛选和独立区间确认`
+状态：`[x] 分阶段validation筛选完成；没有新候选晋级，保留现R1K10基线`
 
 R3K3的bonus/no-op证据不能直接外推到单一K10全局池。本任务只用validation选择R1K10
 参数，不再使用已经看过target的test-mini；不修改训练、checkpoint、模型或评分算法。
@@ -1632,6 +1632,50 @@ hit、Top-1～10、Oracle、invalid、unique、shortfall、父/子评估和wall�
 
 所有采样写入新的`results/task23_r1k10_*`目录，不覆盖历史结果。R1K10确认完成后，才能
 与冻结的R3K3/R1K9一起决定完整test报告名单；完整test只评估，不再调参。
+
+### 24.3 筛选结果
+
+四组均验证为validation reaction 200～399、4000条aug20输入、40000行预测，target
+offset为200；其它参数严格固定。Top-1～10、Oracle和效率如下：
+
+| policy / bonus | Top-1 | Top-2 | Top-3 | Top-5 | Top-10 | Oracle | wall |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| stochastic / 0.0 | 45.0 | 63.5 | 67.0 | 70.5 | 76.5 | 84.0 | 293.03 s |
+| stochastic / 0.5 | 47.0 | 63.5 | 67.5 | 72.5 | 78.0 | 84.0 | 286.20 s |
+| stochastic / 1.0 | 48.0 | 64.5 | 68.0 | 72.0 | 77.5 | 84.0 | 292.14 s |
+| stochastic_noop / 0.5 | 46.5 | 63.5 | 67.5 | 72.0 | 78.5 | 84.0 | 288.09 s |
+
+完整Top-1～10分别为：
+
+- stochastic/0.0：`45.0/63.5/67.0/69.0/70.5/72.0/75.5/76.5/76.5/76.5`；
+- stochastic/0.5：`47.0/63.5/67.5/70.5/72.5/73.0/77.0/77.5/77.5/78.0`；
+- stochastic/1.0：`48.0/64.5/68.0/70.5/72.0/73.5/76.0/77.0/77.5/77.5`；
+- noop/0.5：`46.5/63.5/67.5/70.5/72.0/72.5/76.5/77.0/77.5/78.5`。
+
+policy阶段中，noop相对纯stochastic在bonus0.5下Top-1 `-0.5pp`、Top-3/Oracle不变、
+Top-10 `+0.5pp`，属于互换而非晋级。逐反应Top-1 noop-only/baseline-only为`1/2`，
+Top-3为`1/1`，Top-10为`2/1`，Oracle为`1/1`，均没有稳定方向。因此R3的no-op启发式
+没有证据迁移到K10。
+
+bonus0.0被bonus0.5支配：Top-1/3/10分别低`2.0/0.5/1.5pp`，三项逐反应都没有任何
+bonus0-only命中。bonus1.0相对0.5虽增加Top-1/2/3 `1.0/1.0/0.5pp`，但Top-5/7/8/10
+分别回退`0.5/1.0/0.5/0.5pp`，Oracle不变；Top-1仅`2/0`个反应交换、Top-10为`0/1`，
+不满足“Top-3/Top-10/Oracle至少两项改善”的预注册规则。
+
+四组mean valid/true unique分别为`153.165/31.340`、`152.420/31.650`、
+`151.430/31.730`、`151.915/31.500`；final-slot shortfall均约28.5～28.8%。更高bonus只
+略增unique并降低valid，不能证明化学覆盖更好。wall差异不作为bonus收益，父/子评估均
+约1.62M/3.24M。
+
+结论：在本次预注册的R1K10M2局部搜索空间内，保留`child_policy=stochastic`、
+`changed_state_bonus=0.5`。没有新候选晋级，故按提前停止规则不浪费约一小时在独立
+1001反应区间重复“新参数确认”；原基线已经保留，不需要用confirmation重新批准自己。
+该结论是validation支持的局部推荐，不声称K/M/steps的全局最优。结果目录为：
+
+- `results/task23_r1k10_val200_stochastic_b00/`
+- `results/task23_r1k10_val200_stochastic_b05/`
+- `results/task23_r1k10_val200_stochastic_b10/`
+- `results/task23_r1k10_val200_noop_b05/`
 
 验证：Euler-Beam 与采样 metadata 定向测试为 `36 passed`；排除仓库中既知且与本任务
 无关的 `tests/sampling/test_beam.py` 后，完整回归为 `176 passed, 8 warnings`。实现 commit：
