@@ -2295,11 +2295,11 @@ Top-2、完整Top-1～10和逐反应配对见各目录的`diagnostics.json`；A/
 
 - 预注册commit：`e56021e`
 - 实现commit：`67ae17d`
-- 实验结论commit：`[待填写]`
+- 实验结论commit：`7adf233`
 
 ## 33. 任务 30：Euler-SMC独立新方法
 
-状态：`[ ] 已完成方法说明和分阶段实验占位，尚未实现`
+状态：`[~] 独立synthetic mechanics已实现，尚未接入checkpoint或采样入口`
 
 ### 33.A 方法/改进介绍
 
@@ -2353,35 +2353,54 @@ ESS和重采样框架，可研究何时共享预算、何时必须保护多样�
 R9K1M2与Euler-SMC。指标包括Top-1～10、Oracle、invalid、true unique、ESS曲线、祖先数、
 resampling次数、forward次数和wall。输出目录：`results/task30_euler_smc_<stage>_<run>/`。
 
-### 33.F 实现与正确性测试（占位）
+### 33.F 实现与正确性测试
 
-- 目标/proposal数学定义：`[待填写]`
-- 修改/新增文件：`[待填写]`
-- synthetic测试结果：`[待填写]`
-- bootstrap invariant结果：`[待填写]`
-- seed/batch invariance：`[待填写]`
+- 目标/proposal数学定义：`advance_particles()`接收每个child的
+  `log_target_increment`和`log_proposal_increment`，将其差值加到选定父粒子的归一化
+  log-weight；按ESS阈值触发systematic resampling，并传播`ancestor_ids`。
+- 修改/新增文件：新增`edit_flows/sampling/euler_smc.py`和
+  `tests/sampling/test_euler_smc.py`；没有修改`euler_beam.py`、`sample_retro.py`、
+  checkpoint或训练代码。
+- synthetic测试结果：6项测试通过，覆盖log-sum-exp归一化、ESS、确定性systematic
+  resampling、批次布局独立性、importance ratio和非法输入校验。
+- 回归测试：Task30相关测试及Euler-Beam/入口测试共`58 passed`；完整
+  `tests/sampling`另有17个既有`beam.py` API不匹配失败（测试构造仍传入已移除的
+  `log_u_real`，且一个受控模型序列长度不一致），本次新增文件未触及这些代码，故不把它们
+  误记为SMC通过或失败。
+- bootstrap invariant结果：当target=proposal时增量为0、`ESS=N`、evidence增量为0，
+  在阈值`ESS<N`时不发生resampling，权重保持均匀。
+- seed/batch invariance：每个product/step使用稳定派生seed；同一行在单行和多行batch
+  中的resampling结果一致，且不受无关product行的随机消耗影响。
 
-### 33.G 实验结果（占位）
+### 33.G 实验结果
 
 | stage/config | particle budget | Top-1 | Top-3 | Top-10 | Oracle | mean ESS | ancestors | wall |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| synthetic mechanics | — | — | — | — | — | — | — | — |
-| bootstrap smoke | `[待填]` | — | — | — | — | — | — | — |
-| validation baseline R9 | `[待填]` | — | — | — | — | — | — | — |
-| validation Euler-SMC | `[待填]` | — | — | — | — | — | — | — |
+| synthetic mechanics | 3 | — | — | — | — | invariant pass | genealogy pass | <1s CPU |
+| bootstrap invariant | 4 | — | — | — | — | 4.0 | no resampling | <1s CPU |
+| validation baseline R9 | not run | — | — | — | — | — | — | — |
+| validation Euler-SMC | not run | — | — | — | — | — | — | — |
 
-### 33.H 结果分析与结论（占位）
+真实checkpoint阶段尚未执行；因此本阶段没有Top-k、invalid或wall改进结论。
 
-- mechanics是否满足理论不变量：`[待分析]`
-- 是否出现粒子坍缩/谱系灭绝：`[待分析]`
-- reward是否提供独立于base模型的排序信息：`[待分析]`
-- 固定预算下准确率与wall权衡：`[待分析]`
-- 继续reward twisting、停止或转向训练方法：`[待决定]`
+### 33.H 结果分析与结论
+
+- mechanics是否满足理论不变量：是；log-weight归一化、ESS、target/proposal比值和
+  systematic resampling的单元测试均通过。
+- 是否出现粒子坍缩/谱系灭绝：尚未在真实transition/reward上评估；合成测试只验证了
+  resampling后谱系传播，不把一次抽样误写成坍缩结论。
+- reward是否提供独立于base模型的排序信息：尚未定义或测量。bootstrap设置中
+  target=proposal，不能产生额外排序信息。
+- 固定预算下准确率与wall权衡：尚无真实checkpoint结果；当前实现只建立CPU mechanics，
+  不代表已接入后的推理效率。
+- 继续reward twisting、停止或转向训练方法：先完成Euler transition adapter和小规模
+  smoke，证明proposal/target接口及metadata正确后，再决定是否引入独立reward；在此之前
+  不替换默认Euler-Beam。
 
 ### 33.I Git记录（占位）
 
 - 预注册commit：`e56021e`
-- mechanics实现commit：`[待填写]`
+- mechanics实现commit：`[本次提交后填写]`
 - validation结论commit：`[待填写]`
 
 ## 11. 决策门槛
