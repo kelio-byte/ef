@@ -2417,6 +2417,90 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 - bootstrap rollout commit：`c251843`
 - validation结论commit：`[待填写]`
 
+## 34. 任务 31：独立target/reward选择与Terminal Twisting
+
+状态：`[ ] 已完成候选方案说明和实验占位；等待确定研究目标，尚未接入reward`
+
+### 34.A 方法/改进介绍
+
+Euler-SMC的bootstrap阶段令`target=proposal`，因此权重恒等、ESS不提供额外排序信息。
+下一步可在终点状态`x_1`加入一个不依赖测试Target的独立reward`R(x_1; product)`，定义
+
+```text
+pi(x_1 | product) ∝ q_euler(x_1 | product) * exp(beta * R(x_1; product))
+log_target_increment = log_proposal_increment + beta * ΔR
+```
+
+第一版只做terminal twisting：中间Euler step仍按base proposal推进，最后一步把终点reward
+作为target/proposal比值输入`advance_particles()`。之后若reward有稳定信号，才考虑随时间
+平滑打开的intermediate twisting；不同时引入learned proposal或CFG。
+
+### 34.B 为什么要做
+
+bootstrap已证明SMC mechanics不会凭空改变分布，但也证明没有独立target就不可能凭空提升
+Top-k。terminal reward提供一个可审计的“最终状态质量”来源，理论上可在固定粒子预算下
+提高有效候选质量，ESS则可以诊断reward是否把粒子过早集中到单一模式。
+
+### 34.C 对应当前问题、预期好处与风险
+
+- 独立forward consistency分数：最符合逆合成目标，可能同时提升Top-1和Top-10，但需要
+  一个不共享反向checkpoint的forward模型或可复现实验数据。
+- feasibility/classifier分数：成本居中，可提供反应可行性信号，但必须先确认训练/验证
+  来源和校准，避免把数据集偏差当成目标。
+- RDKit validity/价态/片段约束：无需新模型、效率较高，适合作为弱reward诊断；但“有效
+  SMILES”不等于正确反应，过去invalid下降伴随Top-k下降的结果说明不能直接把它设为默认。
+- 反向模型自身log-prob或共识：只能作为proposal诊断，不能冒充独立reward，否则只是
+  把现有排序重新包装为SMC。
+
+主要风险是`beta`过大导致粒子坍缩、Oracle/Top-10下降和invalid指标虚假改善；reward计算
+也可能成为新的wall瓶颈。因此必须固定总child budget，报告ESS曲线、祖先数、reward分布、
+Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
+
+### 34.D 适配到本项目的具体方案
+
+1. 先确定唯一主reward来源及其训练/验证边界；任何实现都不得读取test target或用test调
+   `beta`。
+2. 定义纯函数`terminal_reward(states, product_context)`，只接受token状态和product，
+   返回每粒子的有限标量；记录reward版本、参数和来源到metadata。
+3. 在`run_euler_smc_bootstrap`之外新增独立terminal-twisting入口，保持proposal、seed、
+   输出布局和现有Euler-Beam不变；仅在最终transition向`advance_particles()`传入
+   `log_target_increment = log_proposal_increment + beta * ΔR`。
+4. 先用synthetic已知target验证importance estimate，再做validation-小段的R9K1M2固定
+   预算对照；若reward使ESS快速降到1附近或Oracle/Top-10下降，停止twisting并记录失败。
+5. 只有terminal reward在不重叠validation区间稳定改善，才研究intermediate twisting；
+   不在同一轮叠加Q temperature、changed-state bonus或新的child policy。
+
+### 34.E 实验预注册（待reward选择后冻结）
+
+- baseline：当前默认Euler-Beam R9K1M2，以及target=proposal的Euler-SMC bootstrap；
+  proposal、n_steps=100、TF32/FP32、batch、seed和总child budget固定。
+- reward候选：只选择34.C中的一个主reward；其余最多作为诊断，不混合成不可解释分数。
+- beta：在validation-A上预注册小集合并在validation-B/C复核；不使用test调参。
+- 指标：Top-1～10、Oracle、invalid、true unique、mean/p10 ESS、resampling次数、祖先
+  多样性、reward分布、forward/reward调用次数、peak memory和wall。
+- 成功门槛：Top-1不明显回退，且Top-3/10或Oracle在不重叠validation上稳定改善，同时
+  ESS不出现系统性坍缩、invalid不以牺牲覆盖为代价下降。
+
+### 34.F 实现与正确性测试（占位）
+
+- 主reward及独立数据边界：`[待选择/填写]`
+- terminal-twisting入口与metadata：`[待实现]`
+- synthetic已知target importance estimate：`[待实现]`
+- validation-A/B/C结果：`[待实验]`
+
+### 34.G 结果表（占位）
+
+| reward/beta | budget | Top-1 | Top-3 | Top-10 | Oracle | invalid | mean ESS | wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| bootstrap target=proposal | `[固定]` | — | — | — | — | — | — | — |
+| terminal reward | `[固定]` | — | — | — | — | — | — | — |
+
+### 34.H Git记录（占位）
+
+- 预注册/候选方案commit：`[待填写]`
+- reward实现commit：`[待填写]`
+- validation结论commit：`[待填写]`
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
