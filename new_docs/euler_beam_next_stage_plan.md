@@ -2027,6 +2027,35 @@ R9每step重复父状态，研究“共享相同state forward但保留独立line
 再增加M2选择来源诊断，并在validation研究child/final candidate的校准排序。停止继续
 增加R/K/M或从test-mini扫描bonus。
 
+## 30. 任务 28：R9受保护分支的效率优化
+
+状态：`[~] 正确性边界与分阶段门槛已冻结，先做profile`
+
+用户决定优先优化当前最高准确率`R9K1M2`。概念上可把R9描述为9条受保护的独立分支，
+但不能直接改写成现有K9：R分支互不淘汰，K分支共享状态质量并全局竞争。接口命名可以在
+方法稳定后简化，本任务先保持历史CLI和metadata可复现。
+
+代码复核确认`sample_retro.py`已经把`B_product × R`行一次传入`sample_euler_beam()`，
+每个step也把全部K1状态展平成单次模型batch；R9不是9次串行模型调用。相对R1K9的主要
+wall差异来自R9始终保留9条lineage，而R1会合并并删除状态，使parent evaluations下降
+57%。因此本任务不能通过“把R放进batch”获得虚假加速。
+
+分阶段执行：
+
+1. 默认关闭的profile记录同一product内受保护lineage的逻辑parent行数、唯一parent状态
+   数和理论可共享forward行数；同时记录K1/M2的child相同、bonus决策和seed tie-break
+   次数。profile不得改变任何预测。
+2. 在5反应短集记录R9各阶段wall与共享上限。只有重复parent比例足够，才实现“唯一state
+   forward一次、结果映射回全部lineage”；搜索状态、seed和输出仍保持9条。
+3. 若forward共享上限不足，再评估K1专用dense/GPU选择路径；不为消除少量Python开销大
+   范围重写通用K分支实现。
+4. 所有优化先要求单元测试和真实checkpoint短集prediction SHA逐行一致，再运行完整tiny
+   性能。TF32因batch形状可能改变末位数值；若无法逐行一致，必须作为opt-in数值变更另行
+   决策，不能静默替换R9默认。
+
+本任务不改变R/K/M、bonus、policy、checkpoint、数据、评分或历史结果；新实验写入独立
+目录。首个实现commit只允许增加诊断，不宣称加速。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
