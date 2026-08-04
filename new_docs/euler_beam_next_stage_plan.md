@@ -1717,6 +1717,80 @@ Top-1/2/3/10/Oracle `64.5/80.5/85.0/90.5/94.5`，reaction 200～399则为
 `results/task23_r3k3_val200_reference/`，预测与metadata已通过评分脚本的布局、输入哈希和
 target offset校验。
 
+## 25. 任务 24：test-mini-1001 最终工程选型
+
+状态：`[x] 两个最佳配置的mini-1001比较完成；后续默认冻结为R3K3`
+
+目标是在严格的test-mini-1001（20020条aug20输入、1001个完整反应）上，用两个方法各自
+已经由validation支持的最佳参数做一次工程选型。该子集来自test且已有结果被查看，因此
+只能用于后续工程路线定型，不能再表述为完全未见测试集；选定后不再根据mini target调整
+K/M/R、policy、bonus、steps或聚合方式，完整test只作冻结评估。
+
+固定候选：
+
+| 候选 | K/M/R | child policy | bonus | 每个aug输出 |
+|---|---|---|---:|---:|
+| R3K3 accuracy | 3/2/3 | stochastic_noop | 0.5 | 9 |
+| R1K10 speed | 10/2/1 | stochastic | 0.5 | 10 |
+
+两者都使用checkpoint step600000、100 steps、cubic、full probability、batch64、CUDA、
+seed42、TF32 high、legacy aggregation与Top-1～10 diagnostics。两者输出宽度9/10不同，
+因此这是“各自最佳参数”的实际方法比较，不声称是控制总宽度的单因素消融；公平机制证据
+仍以历史R3K3/R1K9实验为准。
+
+选择规则在补跑R3前冻结：Top-1为主指标并检查逐反应配对命中；若Top-1没有清晰方向，
+再依次看Top-3、Top-10和Oracle。若准确率互有胜负、没有稳定覆盖优势，则选择wall更低的
+R1K10；若R3在主指标和覆盖指标上形成一致优势，则选择R3K3。invalid、unique、shortfall
+和显存作为正确性/效率诊断，不用单一辅助指标推翻整体Top-k方向。
+
+现有R1结果`results/task19_testmini_r1k10_m2/`的metadata已确认输入为严格
+`src-test-mini-1001.txt`、20020行、SHA-256
+`6650a97484fbd64e9fa0992050c4a7a6c1221f8007417318e2c3b0395397d27c`，配置与上表一致，
+采样耗时1687.14秒，无需重复运行。R3写入新目录
+`results/task24_testmini1001_r3k3_best/`，不会覆盖历史结果。
+
+### 25.1 准确率与配对结果
+
+R3 metadata验证为`1001 reactions × 20 augmentations × beam9 = 180180`行，输入哈希与
+R1完全相同；prediction SHA-256为
+`68f8ae53c62f91302bfc14f735e4c566b729d3c0a8d39efd66eddcf197e18a89`。两组Top-k为：
+
+| 配置 | Top-1 | Top-2 | Top-3 | Top-4 | Top-5 | Top-6 | Top-7 | Top-8 | Top-9 | Top-10 | Oracle |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| R1K10 | 52.547 | 67.033 | 71.628 | 75.225 | 76.523 | 78.022 | 79.221 | 80.420 | 80.819 | 81.618 | 87.213 |
+| R3K3 | 55.145 | 68.332 | 74.026 | 77.223 | 78.821 | 80.619 | 81.618 | 82.817 | 83.516 | 84.515 | 89.311 |
+| R3-R1 (pp) | +2.598 | +1.299 | +2.398 | +1.998 | +2.298 | +2.597 | +2.397 | +2.397 | +2.697 | +2.897 | +2.098 |
+
+逐反应R3-only/R1-only为Top-1 `47/21`（双侧exact McNemar `p=0.00219`）、Top-2
+`34/21`（`p=0.105`）、Top-3 `43/19`（`p=0.00316`）、Top-10 `53/24`
+（`p=0.00126`）、Oracle `38/17`（`p=0.00646`）。除Top-2外，主报告节点均形成一致且
+显著的R3优势；不是tiny上少数反应交换造成的偶然排序。
+
+### 25.2 效率与最终选择
+
+| 指标 | R1K10 | R3K3 | R3相对R1 |
+|---|---:|---:|---:|
+| sampling wall | 1687.14 s | 2071.54 s | +22.78% |
+| input throughput | 11.87/s | 9.66/s | -18.55% |
+| peak CUDA allocated | 1,970,680,320 B | 1,892,043,776 B | -3.99% |
+| final-slot shortfall | 29.009% | 14.524% | -14.485 pp |
+| mean valid / available slots | 149.132/200 (74.566%) | 143.043/180 (79.468%) | +4.902 pp |
+| mean true unique/reaction | 30.301 | 24.031 | -6.270 |
+
+R1因每个augmentation输出10条而非9条，绝对unique更多，但R3用更少输出取得更高Top-k和
+Oracle，且有效槽位比例更高。R3慢384.40秒、约22.78%，显存占用没有增加。按照预先冻结
+的规则，准确率主指标与覆盖指标的一致收益足以支付该时间开销，因此后续默认方法确定为：
+
+```text
+R3K3M2, n_runs=3, n_branches=3, n_children=2,
+stochastic_noop, changed_state_bonus=0.5,
+n_steps=100, batch_size=64, full_probability, TF32 high, seed=42
+```
+
+R1K10M2不再与默认方法并列纠结，只保留为明确的速度优先备选：当约23%的wall节省比
+2～3pp Top-k更重要时使用。后续算法改进、完整test主报告和trajectory默认围绕冻结的
+R3K3推进；完整test不再根据target回头调整这些参数。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
