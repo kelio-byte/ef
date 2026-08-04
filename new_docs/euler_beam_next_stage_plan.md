@@ -2194,7 +2194,7 @@ commit为profile `98cbcfb`、forward共享`ccf273a`、K1M2选择`14f9523`。
 
 ## 32. 任务 29：Q sharpening推理改进
 
-状态：`[~] 方法说明和接口实现完成，等待validation-A消融`
+状态：`[x] 接口实现、T=1兼容、validation-A/B/C消融完成；默认仍为T=1.0`
 
 ### 32.A 方法/改进介绍
 
@@ -2259,30 +2259,42 @@ invalid、让正确高概率token更早出现、提高Top-1/3；额外wall近似
 - T=1 prediction SHA：`62eaf2e0cf4fca7f2d5bb15ab02e1b08f73aa5677c0b9459303205abccef6d95`，
   与既有隐式T=1共享版smoke逐字节一致。
 - 正确性异常及处理：T=1显式/隐式输出对照、温度log-prob归一化和`q_temperature<=0`
-  参数校验已覆盖；真实checkpoint结果待回填。
+  参数校验已覆盖；A/B/C真实checkpoint实验均完成，metadata记录了q_temperature。
 
-### 32.G 实验结果（占位）
+### 32.G 实验结果
 
 | split | T | Top-1 | Top-3 | Top-5 | Top-10 | Oracle | invalid/slots | true unique | wall |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| validation-A | 1.0 | — | — | — | — | — | — | — | — |
-| validation-A | 0.9 | — | — | — | — | — | — | — | — |
-| validation-A | 0.8 | — | — | — | — | — | — | — | — |
-| validation-B | 候选温度 | — | — | — | — | — | — | — | — |
+| validation-A (50) | 1.0 | 74 | 92 | 96 | 96 | 98 | 18.8% | 27.40 | 105.338s |
+| validation-A (50) | 0.9 | 72 | 94 | 96 | 96 | 98 | 19.3% | 26.94 | 105.858s |
+| validation-A (50) | 0.8 | 74 | 94 | 96 | 96 | 98 | 18.1% | 26.36 | 105.460s |
+| validation-B (50) | 1.0 | 62 | 84 | 88 | 96 | 98 | 9.4% | 18.84 | 100.408s |
+| validation-B (50) | 0.9 | 62 | 86 | 90 | 96 | 98 | 8.8% | 18.58 | 99.469s |
+| validation-B (50) | 0.8 | 60 | 86 | 88 | 98 | 98 | 8.5% | 17.96 | 99.890s |
+| validation-C (200) | 1.0 | 50.0 | 74.5 | 81.5 | 86.0 | 91.5 | 13.675% | 26.315 | 395.965s |
+| validation-C (200) | 0.9 | 51.0 | 74.0 | 81.5 | 86.0 | 91.0 | 13.425% | 25.775 | 386.366s |
 
-逐反应配对、prediction SHA、完整diagnostics路径：`[待填写]`
+Top-2、完整Top-1～10和逐反应配对见各目录的`diagnostics.json`；A/B/C目录分别为
+`results/task29_qtemp_valA_t{1,09,08}/`、`results/task29_qtemp_valB_t{1,09,08}/`和
+`results/task29_qtemp_valC200_t{1,09}/`。
 
-### 32.H 结果分析与结论（占位）
+### 32.H 结果分析与结论
 
-- proposal质量是否改善：`[待分析]`
-- 多样性/覆盖是否受损：`[待分析]`
-- 收益是否能在不重叠validation复现：`[待分析]`
-- 是否替换默认T=1、停止或继续top-k/top-p：`[待决定]`
+- proposal质量是否改善：A/B中T=0.9的Top-3分别比T=1高2个百分点，Top-5在B高2个
+  百分点；invalid略降，但true unique也下降。C200中Top-3反而低0.5个百分点，Oracle
+  低0.5个百分点，说明proposal集中化收益不稳定。
+- 多样性/覆盖是否受损：T=0.8的true unique在A/B降至26.36/17.96，尽管B的Top-10高
+  2个百分点；T=0.9在三段均略降true unique，不能把invalid下降解释为全面质量提升。
+- 收益是否能在不重叠validation复现：A/B的Top-3方向一致，但更大不重叠C200没有复现；
+  T=1 vs T=0.9在C的Top-1/3/10逐反应only差为2/4、2/1、2/2，未形成稳定优势。
+- 是否替换默认T=1、停止或继续top-k/top-p：按预注册门槛停止本轮temperature改进，
+  默认保持T=1.0；不在test上继续调温度，也不立即叠加top-k/top-p。若未来有更大validation
+  或新的proposal证据，可重新建立独立任务。
 
 ### 32.I Git记录（占位）
 
 - 预注册commit：`e56021e`
-- 实现commit：`[待填写]`
+- 实现commit：`67ae17d`
 - 实验结论commit：`[待填写]`
 
 ## 33. 任务 30：Euler-SMC独立新方法

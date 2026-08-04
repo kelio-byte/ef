@@ -588,7 +588,8 @@ def main():
               f"n_children={args.n_children}, n_runs={args.n_runs}, "
               f"outputs_per_product={outputs_per_product}, "
               f"matmul_precision={args.euler_beam_matmul_precision}, "
-              f"child_policy={args.euler_beam_child_policy}")
+              f"child_policy={args.euler_beam_child_policy}, "
+              f"q_temperature={args.euler_beam_q_temperature}")
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
