@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 
 import torch
 from torch import Tensor
@@ -202,6 +202,16 @@ class EulerTransitionResult:
     actions: dict
 
 
+@dataclass
+class EulerSMCBootstrapResult:
+    """Diagnostics from an isolated target=proposal Euler-SMC rollout."""
+
+    particles: SMCParticleSet
+    ess_history: List[float]
+    resampling_steps: List[int]
+    log_evidence: float
+
+
 @torch.inference_mode()
 def euler_transition_step(
     model,
@@ -356,6 +366,129 @@ def euler_transition_step(
         log_proposal_increment=log_proposal,
         step_size=step_size[:, 0],
         actions=actions,
+    )
+
+
+@torch.inference_mode()
+def run_euler_smc_bootstrap(
+    model,
+    initial_states: Tensor,
+    scheduler: KappaScheduler,
+    *,
+    n_steps: int,
+    n_particles: Optional[int] = None,
+    base_seed: int = 0,
+    product_index: int = 0,
+    max_seq_len: int = 512,
+    pad_token: int = PAD_TOKEN,
+    use_rate_reparam: bool = False,
+    clamp_kappa: bool = False,
+    clamp_max: float = 50.0,
+    time_input: str = "t",
+    train_scheduler: Optional[KappaScheduler] = None,
+    ess_threshold: Optional[float] = None,
+    q_temperature: float = 1.0,
+) -> EulerSMCBootstrapResult:
+    """Run an isolated multi-step bootstrap SMC population.
+
+    ``target=proposal`` is intentional: this function validates time/seed/
+    state plumbing and ESS diagnostics, but cannot improve model accuracy.  A
+    future production sampler must replace the equal target increment with an
+    independently justified reward or twisted target before being exposed in
+    ``sample_retro.py``.
+    """
+    if n_steps < 1:
+        raise ValueError(f"n_steps must be >= 1, got {n_steps}")
+    if base_seed < 0 or product_index < 0:
+        raise ValueError("base_seed and product_index must be >= 0")
+    if n_particles is not None and n_particles < 1:
+        raise ValueError("n_particles must be >= 1 when provided")
+    if initial_states.ndim != 2 or initial_states.shape[0] < 1:
+        raise ValueError("initial_states must be a non-empty 2-D tensor")
+    if n_particles is not None and initial_states.shape[0] != n_particles:
+        raise ValueError(
+            "initial_states row count must equal n_particles when provided"
+        )
+
+    particles = SMCParticleSet.initial(initial_states)
+    n_particles = particles.n_particles
+    current_seeds = torch.tensor(
+        [
+            _mix_seed(base_seed, product_index, particle_index)
+            for particle_index in range(n_particles)
+        ],
+        dtype=torch.long,
+        device=particles.states.device,
+    )
+    current_t = 0.0
+    ess_history: List[float] = []
+    resampling_steps: List[int] = []
+    log_evidence = 0.0
+
+    for step in range(n_steps):
+        draw_seeds = torch.tensor(
+            [
+                _mix_seed(int(seed), product_index, step)
+                for seed in current_seeds.detach().cpu().tolist()
+            ],
+            dtype=torch.long,
+            device=particles.states.device,
+        )
+        transition = euler_transition_step(
+            model,
+            particles.states,
+            scheduler,
+            step=step,
+            n_steps=n_steps,
+            seeds=draw_seeds,
+            t=current_t,
+            max_seq_len=max_seq_len,
+            pad_token=pad_token,
+            use_rate_reparam=use_rate_reparam,
+            clamp_kappa=clamp_kappa,
+            clamp_max=clamp_max,
+            time_input=time_input,
+            train_scheduler=train_scheduler,
+            q_temperature=q_temperature,
+        )
+        parent_indices = torch.arange(
+            n_particles, dtype=torch.long, device=particles.states.device,
+        )
+        resample_seed = _mix_seed(base_seed, product_index, step)
+        step_result = advance_particles(
+            particles,
+            transition.next_states,
+            parent_indices,
+            log_target_increment=transition.log_proposal_increment,
+            log_proposal_increment=transition.log_proposal_increment,
+            ess_threshold=ess_threshold,
+            resample_seed=resample_seed if ess_threshold is not None else None,
+        )
+        particles = step_result.particles
+        ess_history.append(step_result.ess_before_resampling)
+        if step_result.resampled:
+            resampling_steps.append(step)
+            current_seeds = current_seeds.index_select(
+                0, step_result.resample_indices,
+            )
+        log_evidence += step_result.log_evidence_increment
+
+        step_size = float(transition.step_size[0].item())
+        if not torch.allclose(
+            transition.step_size,
+            transition.step_size[0].expand_as(transition.step_size),
+            atol=1e-6,
+        ):
+            raise RuntimeError(
+                "bootstrap rollout requires one shared time step per product"
+            )
+        current_t = min(1.0, current_t + step_size)
+
+    return EulerSMCBootstrapResult(
+        particles=particles,
+        ess_history=ess_history,
+        resampling_steps=resampling_steps,
+        log_evidence=log_evidence,
     )
 
 

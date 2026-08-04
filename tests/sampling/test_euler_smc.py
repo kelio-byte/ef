@@ -9,6 +9,7 @@ from edit_flows.sampling.euler_smc import (
     euler_transition_step,
     effective_sample_size,
     normalize_log_weights,
+    run_euler_smc_bootstrap,
     systematic_resample,
     systematic_resample_batch,
 )
@@ -234,3 +235,58 @@ def test_euler_transition_rejects_unmatched_linear_probability():
             seeds=[1],
             event_prob_mode="linear",
         )
+
+
+def test_bootstrap_rollout_keeps_uniform_weights_and_time_schedule():
+    model = _TransitionModel()
+    states = torch.tensor([
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+    ])
+    result = run_euler_smc_bootstrap(
+        model,
+        states,
+        LinearScheduler(),
+        n_steps=4,
+        base_seed=123,
+        product_index=7,
+        max_seq_len=16,
+        ess_threshold=3.5,
+    )
+
+    assert result.ess_history == pytest.approx([4.0] * 4)
+    assert result.resampling_steps == []
+    assert result.log_evidence == pytest.approx(0.0, abs=1e-6)
+    assert torch.allclose(
+        result.particles.log_weights,
+        torch.full((4,), -math.log(4)),
+    )
+    assert torch.equal(
+        result.particles.ancestor_ids, torch.arange(4, dtype=torch.long),
+    )
+
+
+def test_bootstrap_rollout_can_force_diagnostic_resampling():
+    model = _TransitionModel()
+    states = torch.tensor([
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+    ])
+    result = run_euler_smc_bootstrap(
+        model,
+        states,
+        LinearScheduler(),
+        n_steps=2,
+        base_seed=1,
+        max_seq_len=16,
+        ess_threshold=3.1,
+    )
+
+    assert result.resampling_steps == [0, 1]
+    assert torch.allclose(
+        result.particles.log_weights,
+        torch.full((3,), -math.log(3)),
+    )
