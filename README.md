@@ -149,8 +149,11 @@ float32_matmul_precision=high (RTX 3090 TF32)
 
 mini-1001来自test且已用于工程选型，因此这些结果不等同于未见完整USPTO-50K测试集
 结论。相同mini上R3K3的Top-1/3/10为55.145/74.026/84.515%，采样2071.54秒；它是
-平衡准确率和速度的备选。R1K10更快但准确率更低。详细实验历史见
-[`new_docs/euler_beam_optimization_plan.md`](new_docs/euler_beam_optimization_plan.md)。
+平衡准确率和速度的备选。R1K9更快但准确率更低。当前机制结论、与纯 Euler 的严格口径
+及下一步优先级见
+[`new_docs/euler_beam_current_situation.md`](new_docs/euler_beam_current_situation.md)，
+详细实验历史见
+[`new_docs/euler_beam_next_stage_plan.md`](new_docs/euler_beam_next_stage_plan.md)。
 
 ## 4. 环境与安装
 
