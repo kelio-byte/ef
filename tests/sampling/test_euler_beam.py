@@ -306,6 +306,44 @@ def test_profile_sample_group_size_must_divide_batch():
         )
 
 
+def test_identical_forward_sharing_preserves_independent_lineage_output():
+    model = _StochasticModel()
+    product = torch.tensor([BOS_TOKEN, 4, 5, 6, PAD_TOKEN])
+    x_0 = product.unsqueeze(0).repeat(3, 1)
+    common = dict(
+        scheduler=LinearScheduler(),
+        n_branches=1,
+        n_children=2,
+        n_steps=4,
+        max_seq_len=32,
+        sample_seeds=[11, 22, 33],
+        changed_state_bonus=0.5,
+        profile_sample_group_size=3,
+    )
+    baseline_stats = {}
+    baseline = sample_euler_beam(
+        model, x_0, sampling_stats=baseline_stats, **common,
+    )
+    shared_stats = {}
+    shared = sample_euler_beam(
+        model,
+        x_0,
+        share_identical_forwards=True,
+        sampling_stats=shared_stats,
+        **common,
+    )
+
+    assert torch.equal(shared, baseline)
+    assert baseline_stats["shared_model_parent_rows"] == 0
+    assert shared_stats["shared_model_parent_rows"] > 0
+    assert shared_stats["model_forward_parent_rows"] < (
+        baseline_stats["model_forward_parent_rows"]
+    )
+    assert shared_stats["parent_branch_evaluations"] == (
+        baseline_stats["parent_branch_evaluations"]
+    )
+
+
 def test_sample_euler_beam_rejects_unsupported_origin_mask():
     model = _StochasticModel()
     x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])

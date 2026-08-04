@@ -100,6 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="stochastic_noop",
     )
     sampling.add_argument("--euler_beam_profile", action="store_true")
+    sampling.add_argument(
+        "--euler_beam_share_identical_forwards", action="store_true",
+    )
 
     edit = parser.add_argument_group("greedy/beam-edit sampling")
     edit.add_argument("--edit_beam_size", type=int, default=5)
@@ -200,6 +203,8 @@ def build_sample_command(args: argparse.Namespace) -> list[str]:
     )
     if args.euler_beam_profile:
         command.append("--euler_beam_profile")
+    if args.euler_beam_share_identical_forwards:
+        command.append("--euler_beam_share_identical_forwards")
     if args.explicit_stop:
         command.append("--explicit_stop")
     return command

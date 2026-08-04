@@ -34,6 +34,7 @@ def _euler_beam_args(tmp_path):
         euler_beam_changed_state_bonus=0.5,
         euler_beam_matmul_precision="high",
         euler_beam_child_policy="stochastic_noop",
+        euler_beam_share_identical_forwards=False,
         batch_size=64,
         device="cuda",
     )
@@ -124,6 +125,7 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
         "changed_state_bonus": 0.5,
         "matmul_precision": "high",
         "child_policy": "stochastic_noop",
+        "share_identical_forwards": False,
         "seed_scope": "stable product/run streams",
     }
     assert metadata["input"]["product_count"] == 2

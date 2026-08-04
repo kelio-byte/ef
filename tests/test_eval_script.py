@@ -52,7 +52,7 @@ def test_derive_score_layout_rejects_misalignment(metadata, message):
 def test_sample_command_carries_current_euler_beam_settings():
     args = _args(
         "--n_branches", "5", "--n_children", "3", "--n_runs", "2",
-        "--max_products", "200",
+        "--max_products", "200", "--euler_beam_share_identical_forwards",
     )
     command = eval_script.build_sample_command(args)
     rendered = " ".join(command)
@@ -61,6 +61,7 @@ def test_sample_command_carries_current_euler_beam_settings():
     assert "--n_runs 2" in rendered
     assert "--euler_beam_n_return" not in rendered
     assert "--max_products 200" in rendered
+    assert "--euler_beam_share_identical_forwards" in rendered
 
 
 def test_score_command_defaults_to_top10_diagnostics():

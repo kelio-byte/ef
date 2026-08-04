@@ -37,7 +37,9 @@ from edit_flows.utils.tokens import BOS_TOKEN, PAD_TOKEN
 class _BranchState:
     """单条分支的轻量可变状态。"""
 
-    __slots__ = ("x_t", "weight", "path_log_p", "log_mass", "t", "seed")
+    __slots__ = (
+        "x_t", "weight", "path_log_p", "log_mass", "t", "seed", "state_key",
+    )
 
     def __init__(
         self,
@@ -47,6 +49,7 @@ class _BranchState:
         log_mass: float = 0.0,  # Monte Carlo 估计的状态概率质量
         t: float = 0.0,      # 当前连续时间
         seed: int = 0,       # 随机种子
+        state_key: Optional[Tuple[int, ...]] = None,
     ):
         self.x_t = x_t
         self.weight = weight
@@ -54,6 +57,7 @@ class _BranchState:
         self.log_mass = log_mass
         self.t = t
         self.seed = seed
+        self.state_key = state_key
 
     def clone(self) -> _BranchState:
         return _BranchState(
@@ -63,6 +67,7 @@ class _BranchState:
             log_mass=self.log_mass,
             t=self.t,
             seed=self.seed,
+            state_key=self.state_key,
         )
 
 
@@ -478,6 +483,33 @@ def _record_protected_parent_profile(
     )
 
 
+def _shared_forward_row_map(
+    flat: List[Tuple[int, int, _BranchState]],
+    sample_group_size: int,
+) -> Tuple[List[int], List[int]]:
+    """Map logical lineages to one deterministic forward per exact state."""
+    unique_rows: List[int] = []
+    inverse_rows: List[int] = []
+    seen: Dict[Tuple[int, float, Tuple[int, ...]], int] = {}
+    for row, (sample_index, _, branch) in enumerate(flat):
+        if branch.state_key is None:
+            raise RuntimeError(
+                "share_identical_forwards requires tracked branch state keys"
+            )
+        signature = (
+            sample_index // sample_group_size,
+            branch.t,
+            branch.state_key,
+        )
+        unique_position = seen.get(signature)
+        if unique_position is None:
+            unique_position = len(unique_rows)
+            seen[signature] = unique_position
+            unique_rows.append(row)
+        inverse_rows.append(unique_position)
+    return unique_rows, inverse_rows
+
+
 # ---------------------------------------------------------------------------
 # 公开 API
 # ---------------------------------------------------------------------------
@@ -512,6 +544,7 @@ def sample_euler_beam(
     vocab_size: Optional[int] = None, # 未使用, 预留
     profile: Optional[Dict[str, object]] = None,
     profile_sample_group_size: int = 1,
+    share_identical_forwards: bool = False,
     initial_branch_seeds: Optional[List[List[int]]] = None,
     sampling_stats: Optional[Dict[str, int]] = None,
 ) -> Tensor:
@@ -529,6 +562,8 @@ def sample_euler_beam(
         child_policy: `stochastic` 或 M=2 的启发式 `stochastic_noop`。
         profile_sample_group_size: 仅用于显式profile；相邻多少个sample
             属于同一product的受保护lineage组。
+        share_identical_forwards: 对同一product内相同时间、相同token状态
+            只执行一次确定性模型前向，再映射回独立seed lineage。
 
     Returns:
         x_final: (B * n_branches, L_out) 每条样本的全部排名分支，按样本优先
@@ -627,6 +662,7 @@ def sample_euler_beam(
                 log_mass=(-math.log(n_branches) if n_children > 1 else 0.0),
                 t=0.0,
                 seed=branch_seed,
+                state_key=origin_keys[b],
             ))
         all_branches.append(branches)
 
@@ -680,21 +716,50 @@ def sample_euler_beam(
             profile_sample_group_size,
         )
 
-        # 3. 单次模型前向 (所有分支共享)
+        # 3. 单次模型前向。可选地只计算product内完全相同的parent状态一次，
+        # 然后映射回逻辑lineage；随机动作仍按各自seed独立生成。
         section_started = _profile_start(profile, device)
-        x_pad_mask = x_batch == pad_token
+        inverse_forward_indices = None
+        if share_identical_forwards:
+            unique_rows, inverse_rows = _shared_forward_row_map(
+                flat, profile_sample_group_size,
+            )
+            unique_indices = torch.tensor(
+                unique_rows, dtype=torch.long, device=device,
+            )
+            inverse_forward_indices = torch.tensor(
+                inverse_rows, dtype=torch.long, device=device,
+            )
+            x_model = x_batch.index_select(0, unique_indices)
+            t_model_input = t_vals.index_select(0, unique_indices)
+        else:
+            x_model = x_batch
+            t_model_input = t_vals
+        physical_forward_rows = x_model.shape[0]
+        for stats in (profile, sampling_stats):
+            if stats is not None:
+                stats["model_forward_parent_rows"] = (
+                    int(stats.get("model_forward_parent_rows", 0))
+                    + physical_forward_rows
+                )
+                stats["shared_model_parent_rows"] = (
+                    int(stats.get("shared_model_parent_rows", 0))
+                    + N - physical_forward_rows
+                )
+
+        x_pad_mask = x_model == pad_token
         t_model = _compute_model_time(
-            t_vals, scheduler, time_input, train_scheduler,
+            t_model_input, scheduler, time_input, train_scheduler,
         )
         log_rates, log_ins_probs, log_sub_probs = model(
-            x_batch, t_model, x_pad_mask,
+            x_model, t_model, x_pad_mask,
         )
 
         # 4. 速率修正 (与 sample_euler 完全一致)
         if not use_rate_reparam and train_scheduler is not None and \
            scheduler.name != train_scheduler.name:
             k_sample = get_rate_scale(
-                t_vals, scheduler,
+                t_model_input, scheduler,
                 clamp_kappa=clamp_kappa, clamp_max=clamp_max,
             )
             k_train = get_rate_scale(
@@ -707,10 +772,20 @@ def sample_euler_beam(
             log_rates = log_rates + log_correction
 
         log_rates_eff = apply_rate_parameterization(
-            log_rates, t_vals, scheduler,
+            log_rates, t_model_input, scheduler,
             use_rate_reparam=use_rate_reparam,
             clamp_kappa=clamp_kappa, clamp_max=clamp_max,
         )
+        if inverse_forward_indices is not None:
+            log_rates_eff = log_rates_eff.index_select(
+                0, inverse_forward_indices,
+            )
+            log_ins_probs = log_ins_probs.index_select(
+                0, inverse_forward_indices,
+            )
+            log_sub_probs = log_sub_probs.index_select(
+                0, inverse_forward_indices,
+            )
         if profile is not None:
             profile["model_forward_calls"] = (
                 int(profile.get("model_forward_calls", 0))
@@ -812,6 +887,7 @@ def sample_euler_beam(
                 ),
                 t=s.t + adapt_h_values[i],
                 seed=child_seed_values[i],
+                state_key=next_keys[i],
             ))
             new_keys[b].append(next_keys[i])
 
@@ -892,6 +968,7 @@ def sample_euler_beam(
                     path_log_p=parent.path_log_p,
                     t=parent.t,
                     seed=parent.seed + 10000 + len(all_branches[b]),
+                    state_key=parent.state_key,
                 ))
         _profile_finish(
             profile, "merge_and_prune_seconds", section_started, device,

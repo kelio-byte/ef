@@ -266,6 +266,9 @@ def _build_sampling_metadata(
             "changed_state_bonus": args.euler_beam_changed_state_bonus,
             "matmul_precision": args.euler_beam_matmul_precision,
             "child_policy": args.euler_beam_child_policy,
+            "share_identical_forwards": (
+                args.euler_beam_share_identical_forwards
+            ),
             "seed_scope": (
                 "grouped virtual-run/branch streams"
                 if args.euler_beam_initial_seed_groups is not None
@@ -387,6 +390,15 @@ def main():
         help=(
             "Synchronize CUDA between Euler-Beam stages and record a "
             "timing breakdown; use only for short profiling runs"
+        ),
+    )
+    parser.add_argument(
+        "--euler_beam_share_identical_forwards",
+        action="store_true",
+        default=False,
+        help=(
+            "Share deterministic model forwards for exact duplicate states "
+            "inside each product's protected run group"
         ),
     )
     parser.add_argument("--beam_size", type=int, default=5,
@@ -645,6 +657,9 @@ def main():
                     child_policy=args.euler_beam_child_policy,
                     profile=euler_beam_profile,
                     profile_sample_group_size=args.n_runs,
+                    share_identical_forwards=(
+                        args.euler_beam_share_identical_forwards
+                    ),
                     initial_branch_seeds=initial_branch_seeds,
                     sampling_stats=euler_beam_stats,
                 )

@@ -2078,6 +2078,39 @@ wall差异来自R9始终保留9条lineage，而R1会合并并删除状态，使p
 改变局部child选择。真实checkpoint短集若不能逐字节复现，或wall没有实际下降，则不启用
 为默认路径。
 
+### 30.2 相同状态forward共享原型
+
+已增加默认关闭的`--euler_beam_share_identical_forwards`。实现为每步按
+`(product group, t, token state)`去重模型输入，模型输出再映射回原来的逻辑parent行；
+child seed、随机动作、局部M2选择、lineage数量和最终输出槽位均不合并。metadata记录开关，
+runtime同时记录逻辑parent、实际model-forward parent和共享行数。
+
+单元与入口测试共47项通过。真实checkpoint的5反应短集在TF32 high下预测逐字节一致，
+wall由14.189秒降到12.107秒（14.67%）。随后使用完整tiny（1000条augmentation输入、
+50个反应）成对验证：
+
+| tiny指标 | 原R9K1M2 | forward共享 | 变化 |
+|---|---:|---:|---:|
+| sampling wall | 154.025s | 114.058s | -25.95% |
+| 逻辑parent行 | 900,000 | 900,000 | 0 |
+| 实际model parent行 | 900,000 | 558,907 | -37.90% |
+| peak CUDA allocated | 1,681,829,888 B | 1,553,148,416 B | -7.65% |
+| 不同预测行 | 0/9,000 | 2/9,000 | 0.022% |
+
+两版tiny的Top-1～10（60/70/80/84/84/84/84/84/84/84）、Oracle 98%、invalid、
+valid/unique和全部coverage diagnostics完全相同。基线输出SHA-256为
+`542f2a8582547b30752c3c6df28ebf454f4d4673b6c79e78f2b79397d12c2d48`，共享版为
+`9748b25877b1595f39670fa09aebc133db513dad36eaabb97d1a42e3129daeb6`。
+
+进一步对包含两处差异的input区间`[200,300)`使用`highest` FP32复测，两版输出SHA均为
+`653ddd740c64f37f244bfce60d2c4e3d2d7180aaec95885195367416193bb5c1`，逐字节一致；wall
+由17.662秒降至13.436秒（23.93%）。由此确认tiny的两行差异来自TF32在不同GEMM形状下
+的数值漂移，而非跨product共享或seed lineage错误。
+
+阶段决定：该功能以opt-in效率模式提交。3090/TF32下它有稳定的大幅收益且tiny指标不变，
+但因未满足TF32逐字节门槛，暂不静默改为默认；`highest`下可视为逐字节等价优化。下一步
+继续实现K1M2的等价快速选择，之后再决定是否组合进入推荐命令。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：

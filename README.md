@@ -264,6 +264,12 @@ python 'scripts/score_#global#.py' \
 branch-rank-major、run-minor：先列出每个 run 的第一名，再列出每个 run 的第二名，以此
 类推。推荐优先使用 `eval.py`，由 metadata 自动推导该值，避免手工配置不一致。
 
+R9K1M2还可显式添加`--euler_beam_share_identical_forwards`，让同一product的受保护run
+在状态尚未发散时共享确定性模型前向，但仍保持各自seed和child选择。RTX 3090/TF32的
+tiny测试中该模式缩短sampling wall约25.95%，Top-1～10及coverage指标不变；由于改变
+矩阵形状会带来极少量TF32数值漂移（2/9000输出行），目前保持opt-in。使用
+`--euler_beam_matmul_precision highest`时，已测区间与非共享路径逐字节一致。
+
 只要指定 `--output_dir`，采样器还会在同目录写入
 `sampling_metadata.json`，记录 checkpoint、输入文件及哈希、采样器配置、有效步数、
 seed 语义、输出行数与哈希、运行时间、CUDA 峰值显存和 Git 状态。`predictions.txt`
