@@ -2022,10 +2022,9 @@ R1输出SHA-256为`90f037f5df66932a798e24092823a509b6da79ff1a387ed8c4bce2727062a
 准确率。R9K1M2继续作为准确率配置，R3K3M2为平衡配置，R1K9M2为速度配置。详细机制、
 变量表和下一步优先级见`new_docs/euler_beam_current_situation.md`。
 
-下一步按证据顺序执行：先修普通Euler稳定seed并建立严格validation基线；然后profile
-R9每step重复父状态，研究“共享相同state forward但保留独立lineage”的逐行等价提速；
-再增加M2选择来源诊断，并在validation研究child/final candidate的校准排序。停止继续
-增加R/K/M或从test-mini扫描bonus。
+后续用户明确普通Euler暂不进入当前主线。R9重复父状态profile和forward共享已经完成；
+下一阶段直接研究可复用当前checkpoint的前沿推理改进，再逐步进入独立新sampler。停止
+继续增加R/K/M或从test-mini扫描bonus。
 
 ## 30. 任务 28：R9受保护分支的效率优化
 
@@ -2158,6 +2157,216 @@ batch128/256相对64分别慢5.94%/8.87%，峰值allocated增长80.3%/162.8%，�
 不能把竞争式K>1也改称同一种分支。共享开关在tiny上将R9 sampling wall降低25.95%，
 指标完全不变，是本任务的主要成果；因TF32下2/9000输出行漂移，继续保持opt-in。相关
 commit为profile `98cbcfb`、forward共享`ccf273a`、K1M2选择`14f9523`。
+
+## 31. 后续方法与改进的强制记录格式
+
+从本节开始，无论是新增sampler、论文方法适配，还是现有Euler-Beam的局部改进，都必须
+先在本文建立对应条目，再修改代码。每个条目必须依次包含以下内容，不能只写参数和结果：
+
+1. **方法/改进介绍**：说明方法本身做什么、作用在哪一层、是否改变目标分布、proposal、
+   搜索、排序或仅改变计算实现，并区分论文原方法与本项目实际采用的版本。
+2. **为什么要做**：使用已有代码诊断或实验数据说明动机，禁止只因“论文更新”就接入。
+3. **对应当前什么问题及预期好处**：明确它试图改善Top-1、Top-k、Oracle、invalid、
+   diversity、wall、显存还是方法正确性；同时记录可能损害的指标和适用边界。
+4. **如何适配本任务**：写清作用位置、公式/状态、接口、metadata、seed、输出布局、与现有
+   R/K/M/child policy的关系，以及哪些逻辑保持不变。需要新checkpoint、reward或训练时
+   必须显式注明，不能伪装成纯推理开关。
+5. **实验预注册与结果占位符**：在执行前冻结数据、baseline、变量、指标、正确性门槛、
+   停止条件和输出目录；预留代码修改、测试、结果表、分析、结论、commit字段。实验后回到
+   同一位置填写，不能只在聊天或终端输出中保留结论。
+
+统一模板如下：
+
+```text
+### 方法名称
+状态：[待研究/待实现/实验中/完成/停止]
+
+#### A. 方法/改进介绍
+#### B. 为什么要做
+#### C. 对应当前问题、预期好处与风险
+#### D. 适配到本项目的具体方案
+#### E. 实验预注册
+#### F. 实现与正确性测试（占位）
+#### G. 实验结果（占位）
+#### H. 结果分析与结论（占位）
+#### I. Git记录（占位）
+```
+
+## 32. 任务 29：Q sharpening推理改进
+
+状态：`[ ] 已完成方法说明和实验占位，尚未实现`
+
+### 32.A 方法/改进介绍
+
+Q sharpening作用于模型给出的insert/substitute token条件分布`Q_ins`、`Q_sub`。温度版本
+把token log-probability变换为：
+
+```text
+log Q_T(token) = log_softmax(log Q(token) / T)
+```
+
+`T=1`为当前实现；`T<1`提高高概率token的相对权重。它不改变insert/substitute/delete的
+event rate，也不改变某个位置是否发生编辑，只改变编辑触发后抽到哪个insert/substitute
+token。该方向来自Edit Flows原论文的推理策略，属于复用当前checkpoint的proposal改进，
+不是新训练模型，也不是最终候选reranker。
+
+### 32.B 为什么要做
+
+当前R9K1M2 profile显示，90,000个child pair中81.97%产生相同状态；真正不同的pair里多数
+由seed平局而非具有预测力的value决定。已有trajectory分析还观察到错误insert token、
+反复修正和invalid SMILES。继续增加R或M只会扩大同一proposal的采样预算，未直接改善
+token proposal质量。Q temperature几乎不增加计算量，适合先验证模型分布是否过平。
+
+### 32.C 对应当前问题、预期好处与风险
+
+试图应对的问题：错误token造成的无效编辑、低质量分支和Top-k噪声。可能收益是降低
+invalid、让正确高概率token更早出现、提高Top-1/3；额外wall近似为零。主要风险是分布
+过尖，使9条受保护分支趋同，true unique、Top-10或Oracle下降。因此不能只用Top-1选择
+温度，也不能直接在test-mini扫描。
+
+### 32.D 适配到本项目的具体方案
+
+1. 在`euler_beam.py`的模型输出之后、child token采样和step log-prob计分之前，对
+   `log_ins_probs`和`log_sub_probs`统一应用温度；rate head保持原值。
+2. 新增显式参数`q_temperature`及CLI
+   `--euler_beam_q_temperature`，要求大于0，默认1.0。
+3. `T=1.0`必须不增加额外变换或保证prediction SHA逐字节兼容；非1温度必须使用变换后
+   的log-prob进行token采样及proposal/path概率记录，不能“按新分布采样、按旧分布计分”。
+4. 参数贯通`sample_retro.py`、`eval.py`、sampling metadata和命令打印；不修改checkpoint、
+   R/K/M、rate、seed、输出行数、augmentation聚合或评分器。
+5. 第一阶段只实现temperature，不同时加入top-k/top-p，避免无法归因。
+
+### 32.E 实验预注册
+
+- 数据：`[待填写：validation筛选区间A]`用于首轮，`[待填写：不重叠validation区间B]`
+  用于方向复核；不使用test选择温度。
+- 固定baseline：R9K1M2、100 steps、batch64、TF32 high、seed42、bonus0.5、
+  stochastic_noop、forward共享。
+- 单变量：`T ∈ {1.0, 0.9, 0.8}`；第一轮不扫描top-k/top-p。
+- 指标：Top-1～10、Oracle、invalid/slots、true unique、rank availability、wall、峰值显存；
+  对Top-1/3/10/Oracle做逐反应配对。
+- 正确性门槛：T=1与现baseline输出SHA一致；metadata和eval命令测试通过；相同seed可复现。
+- 继续门槛：Top-1不出现明确回退，且Top-3/10、invalid或候选可用性至少一项在A/B方向
+  一致改善。若只提高Top-1却降低Top-10/Oracle，记录为集中化权衡，不替换默认配置。
+- 输出目录：`results/task29_qtemp_<split>_t<temperature>/`。
+
+### 32.F 实现与正确性测试（占位）
+
+- 修改文件：`[待填写]`
+- 单元/集成测试：`[待填写]`
+- T=1 prediction SHA：`[待填写]`
+- 正确性异常及处理：`[待填写]`
+
+### 32.G 实验结果（占位）
+
+| split | T | Top-1 | Top-3 | Top-5 | Top-10 | Oracle | invalid/slots | true unique | wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| validation-A | 1.0 | — | — | — | — | — | — | — | — |
+| validation-A | 0.9 | — | — | — | — | — | — | — | — |
+| validation-A | 0.8 | — | — | — | — | — | — | — | — |
+| validation-B | 候选温度 | — | — | — | — | — | — | — | — |
+
+逐反应配对、prediction SHA、完整diagnostics路径：`[待填写]`
+
+### 32.H 结果分析与结论（占位）
+
+- proposal质量是否改善：`[待分析]`
+- 多样性/覆盖是否受损：`[待分析]`
+- 收益是否能在不重叠validation复现：`[待分析]`
+- 是否替换默认T=1、停止或继续top-k/top-p：`[待决定]`
+
+### 32.I Git记录（占位）
+
+- 预注册commit：`[待填写]`
+- 实现commit：`[待填写]`
+- 实验结论commit：`[待填写]`
+
+## 33. 任务 30：Euler-SMC独立新方法
+
+状态：`[ ] 已完成方法说明和分阶段实验占位，尚未实现`
+
+### 33.A 方法/改进介绍
+
+Sequential Monte Carlo用一组带权粒子近似逐时间目标分布。每一步从proposal生成child，
+使用目标/提议概率比更新log-weight，根据ESS判断是否重采样，并保留ancestor lineage。
+它与当前Euler-Beam的“多分支、多child、剪枝”外观相似，但当前方法采用确定性Top-K、
+启发式changed-state bonus和碰撞mass，不具备完整importance correction或ESS语义。新方法
+必须作为独立sampler实现，不能只把Euler-Beam改名为SMC。
+
+### 33.B 为什么要做
+
+R1K9说明跨lineage确定性竞争会过早删除正确低质量模式；R9K1保留独立lineage提高准确率，
+但固定保留所有粒子成本高。与此同时，当前K1M2在不同child间经常由seed或bonus决定，
+没有估计“这个状态未来能否形成正确reactant”的分数。SMC提供明确的proposal、weight、
+ESS和重采样框架，可研究何时共享预算、何时必须保护多样性，而不是继续扫描R/K/M。
+
+### 33.C 对应当前问题、预期好处与风险
+
+它试图解决启发式child选择、固定粒子预算和竞争性路径灭绝问题。潜在好处是相同计算预算
+下更合理地分配粒子、在高ESS时避免无效重采样、在低ESS时恢复有效探索，并提供可诊断的
+权重/祖先轨迹。主要风险是：若没有独立的化学reward，bootstrap target与proposal相同，
+理论上权重应接近一致，不能凭空带来准确率；不正确的importance ratio反而会造成更严重
+的粒子坍缩。接入forward reward还会显著增加推理成本并引入额外模型依赖。
+
+### 33.D 适配到本项目的具体方案
+
+1. 新建独立`euler_smc.py`及sampler入口，保留`euler_beam.py`和历史结果不变。
+2. 粒子状态至少记录tokens、t、seed、log proposal、log target/weight、ancestor id和
+   resampling次数；相同state的模型forward仍可共享，但粒子身份不能合并。
+3. 第一阶段proposal完全复用Euler transition，target也设为同一base transition；此时
+   importance increment应接近0，用于验证mechanics，而不是追求准确率。
+4. 实现normalized log-weight、ESS和systematic resampling；seed必须按product/particle/
+   step稳定，batch切分不得改变逻辑随机流。
+5. terminal/twisted reward只能来自train/validation构建的独立forward consistency、
+   feasibility或明确化学约束；严禁使用测试Target。changed-state bonus不能直接当成理论
+   reward。
+6. 输出布局、metadata和Top-1～10评分保持兼容；新增ESS、祖先多样性和额外forward wall。
+
+### 33.E 实验预注册
+
+阶段1仅验证mechanics：
+
+- synthetic离散CTMC：已知目标分布和proposal，检查importance estimate、ESS、systematic
+  resampling频率和ancestor传播。
+- bootstrap invariant：target=proposal时权重增量应接近0；固定seed下开关无必要
+  resampling不应改变边际结果。
+- 小型真实checkpoint smoke：只检查shape、seed、metadata、invalid数值和wall，不宣称
+  Top-k提升。
+
+阶段2只有在阶段1通过且独立reward定义完成后，才在validation比较固定总child budget的
+R9K1M2与Euler-SMC。指标包括Top-1～10、Oracle、invalid、true unique、ESS曲线、祖先数、
+resampling次数、forward次数和wall。输出目录：`results/task30_euler_smc_<stage>_<run>/`。
+
+### 33.F 实现与正确性测试（占位）
+
+- 目标/proposal数学定义：`[待填写]`
+- 修改/新增文件：`[待填写]`
+- synthetic测试结果：`[待填写]`
+- bootstrap invariant结果：`[待填写]`
+- seed/batch invariance：`[待填写]`
+
+### 33.G 实验结果（占位）
+
+| stage/config | particle budget | Top-1 | Top-3 | Top-10 | Oracle | mean ESS | ancestors | wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| synthetic mechanics | — | — | — | — | — | — | — | — |
+| bootstrap smoke | `[待填]` | — | — | — | — | — | — | — |
+| validation baseline R9 | `[待填]` | — | — | — | — | — | — | — |
+| validation Euler-SMC | `[待填]` | — | — | — | — | — | — | — |
+
+### 33.H 结果分析与结论（占位）
+
+- mechanics是否满足理论不变量：`[待分析]`
+- 是否出现粒子坍缩/谱系灭绝：`[待分析]`
+- reward是否提供独立于base模型的排序信息：`[待分析]`
+- 固定预算下准确率与wall权衡：`[待分析]`
+- 继续reward twisting、停止或转向训练方法：`[待决定]`
+
+### 33.I Git记录（占位）
+
+- 预注册commit：`[待填写]`
+- mechanics实现commit：`[待填写]`
+- validation结论commit：`[待填写]`
 
 ## 11. 决策门槛
 
