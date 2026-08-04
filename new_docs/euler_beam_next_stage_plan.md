@@ -2111,6 +2111,25 @@ valid/unique和全部coverage diagnostics完全相同。基线输出SHA-256为
 但因未满足TF32逐字节门槛，暂不静默改为默认；`highest`下可视为逐字节等价优化。下一步
 继续实现K1M2的等价快速选择，之后再决定是否组合进入推荐命令。
 
+### 30.3 K1M2等价快速选择
+
+profile中merge/prune约占短集wall的6.8%。当前K1M2仍为每个sample创建dict、执行通用状态
+合并并对最多两个元素排序；但K=1时只需在两个child中选一个。下一小步只为
+`n_branches=1, n_children=2, full_probability`增加专用选择器，严格复现以下规则：相同
+状态做logaddexp并保留较小seed代表；不同状态仍按changed-state bonus、log mass、seed
+依次比较。其他K/M/score mode继续走原逻辑。
+
+门槛：helper与通用实现属性等价、现有测试全通过、真实checkpoint预测SHA一致；性能先用
+5反应组合共享模式成对测量，收益若低于正常计时噪声则保留清晰实现但不宣称额外提速，
+不为该路径扩大重写范围。
+
+实现和测试已完成。新增专用选择器仅处理K1M2/full-probability，三类helper逐属性对照加上
+全套相关测试共50项通过。真实checkpoint组合共享模式的pre/post预测SHA均为
+`62eaf2e0cf4fca7f2d5bb15ab02e1b08f73aa5677c0b9459303205abccef6d95`。一次非同步短测
+wall从11.875秒到11.396秒，但该4.04%差异可能包含GPU波动；同步profile中merge/prune
+从1.018秒降到0.945秒（该阶段-7.17%，总wall绝对约-0.073秒），其他阶段存在更大的计时
+波动。因此结论只记为小幅等价优化，不宣称稳定4%端到端提速，也不继续扩大K1剪枝重写。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：

@@ -437,6 +437,52 @@ def test_state_merge_uses_logsumexp_mass_not_path_probability():
     assert ranked[0].weight == 2.0
 
 
+@pytest.mark.parametrize(
+    ("keys", "masses", "paths", "seeds", "bonus"),
+    [
+        (((4,), (4,)), (-1.0, -2.0), (-5.0, -3.0), (8, 2), 0.5),
+        (((4,), (5,)), (-1.0, -1.0), (-5.0, -3.0), (8, 2), 0.5),
+        (((5,), (6,)), (-1.0, -1.0), (-5.0, -3.0), (8, 2), 0.5),
+    ],
+)
+def test_k1_m2_fast_selection_matches_general_merge(
+    keys, masses, paths, seeds, bonus,
+):
+    from edit_flows.sampling.euler_beam import (
+        _merge_state_candidates,
+        _select_k1_m2_children,
+    )
+
+    def build():
+        return [
+            _BranchState(
+                torch.tensor([[BOS_TOKEN, key[0]]]),
+                log_mass=mass,
+                path_log_p=path,
+                seed=seed,
+                state_key=key,
+            )
+            for key, mass, path, seed in zip(keys, masses, paths, seeds)
+        ]
+
+    general_candidates = build()
+    expected = _merge_state_candidates(
+        list(zip(general_candidates, keys)),
+        n_branches=1,
+        origin_key=(4,),
+        changed_state_bonus=bonus,
+    )[0]
+    actual = _select_k1_m2_children(
+        build(), list(keys), origin_key=(4,), changed_state_bonus=bonus,
+    )
+
+    assert torch.equal(actual.x_t, expected.x_t)
+    for attribute in (
+        "weight", "path_log_p", "log_mass", "t", "seed", "state_key",
+    ):
+        assert getattr(actual, attribute) == getattr(expected, attribute)
+
+
 def test_state_merge_is_order_independent():
     from edit_flows.sampling.euler_beam import _merge_state_candidates
 

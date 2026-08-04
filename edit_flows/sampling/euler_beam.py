@@ -157,6 +157,43 @@ def _merge_state_candidates(
     return [branch for _, branch in ranked_items[:n_branches]]
 
 
+def _select_k1_m2_children(
+    candidates: List[_BranchState],
+    keys: List[Tuple[int, ...]],
+    origin_key: Tuple[int, ...],
+    changed_state_bonus: float,
+) -> _BranchState:
+    """Exact two-child specialization of merge-and-Top-1 selection."""
+    if len(candidates) != 2 or len(keys) != 2:
+        raise ValueError("K1M2 selection requires exactly two children")
+    first, second = candidates
+    first_key, second_key = keys
+    if first_key == second_key:
+        combined_mass = _logaddexp_float(first.log_mass, second.log_mass)
+        best_path_log_p = max(first.path_log_p, second.path_log_p)
+        if second.seed < first.seed:
+            second.log_mass = combined_mass
+            second.weight += first.weight
+            second.path_log_p = best_path_log_p
+            return second
+        first.log_mass = combined_mass
+        first.weight += second.weight
+        first.path_log_p = best_path_log_p
+        return first
+
+    def rank(branch: _BranchState, key: Tuple[int, ...]):
+        return (
+            branch.log_mass
+            + changed_state_bonus * float(key != origin_key),
+            branch.log_mass,
+            -float(branch.seed),
+        )
+
+    if rank(second, second_key) > rank(first, first_key):
+        return second
+    return first
+
+
 def _token_keys_batch(
     x_t: Tensor, pad_token: int, bos_token: int,
 ) -> List[Tuple[int, ...]]:
@@ -926,13 +963,21 @@ def sample_euler_beam(
                         profile["k1_noop_anchor_pairs"] = (
                             int(profile.get("k1_noop_anchor_pairs", 0)) + 1
                         )
-                paired = list(zip(candidates, new_keys[b]))
-                all_branches[b] = _merge_state_candidates(
-                    paired,
-                    n_branches,
-                    origin_key=origin_keys[b],
-                    changed_state_bonus=changed_state_bonus,
-                )
+                if n_branches == 1 and n_children == 2:
+                    all_branches[b] = [_select_k1_m2_children(
+                        candidates,
+                        new_keys[b],
+                        origin_keys[b],
+                        changed_state_bonus,
+                    )]
+                else:
+                    paired = list(zip(candidates, new_keys[b]))
+                    all_branches[b] = _merge_state_candidates(
+                        paired,
+                        n_branches,
+                        origin_key=origin_keys[b],
+                        changed_state_bonus=changed_state_bonus,
+                    )
                 continue
 
             # 7a. 合并相同 token 序列的分支
