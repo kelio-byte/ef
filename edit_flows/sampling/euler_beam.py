@@ -591,15 +591,29 @@ def sample_euler_beam(
             break
 
         N = len(flat)
-        max_L = max(s.x_t.shape[1] for _, _, s in flat)
+        branch_tensors = [s.x_t for _, _, s in flat]
+        branch_widths = [tensor.shape[1] for tensor in branch_tensors]
+        max_L = max(branch_widths)
 
         # 2. 构建批量 tensor (单次 GPU 传输)
-        x_batch = torch.full((N, max_L), pad_token, dtype=torch.long, device=device)
-        t_vals = torch.zeros(N, 1, device=device)
-        for i, (_, _, s) in enumerate(flat):
-            L = s.x_t.shape[1]
-            x_batch[i, :L] = s.x_t
-            t_vals[i, 0] = s.t
+        # Normal Euler-Beam states originate from one batched edit result and
+        # therefore share a width.  Concatenating them avoids N small GPU slice
+        # assignments.  Keep the padded fallback for external/irregular states.
+        if all(width == max_L for width in branch_widths):
+            x_batch = torch.cat(branch_tensors, dim=0)
+            if profile is not None:
+                profile["uniform_width_fast_path_steps"] = (
+                    int(profile.get("uniform_width_fast_path_steps", 0)) + 1
+                )
+        else:
+            x_batch = torch.full(
+                (N, max_L), pad_token, dtype=torch.long, device=device,
+            )
+            for i, tensor in enumerate(branch_tensors):
+                x_batch[i, :tensor.shape[1]] = tensor
+        t_vals = torch.tensor(
+            [s.t for _, _, s in flat], dtype=torch.float, device=device,
+        ).unsqueeze(-1)
         _profile_finish(
             profile, "prepare_branches_seconds", section_started, device,
         )

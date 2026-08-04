@@ -227,6 +227,7 @@ def test_optional_profile_records_stages_without_changing_output():
     assert torch.equal(actual, expected)
     assert profile["steps"] == 3
     assert profile["model_forward_calls"] == 3
+    assert profile["uniform_width_fast_path_steps"] == 3
     assert profile["parent_branch_evaluations"] > 0
     assert profile["child_candidate_evaluations"] >= 2
     assert profile["actual_token_count"] > 0
