@@ -1375,20 +1375,23 @@ sampling metadata 单独计时，因此评分器不能解释这段采样耗时�
 | 实现 | 配置 | sampling wall | 输出行数 |
 |---|---|---:|---:|
 | 旧 Euler 入口 | `n_samples=10,batch16` | 189.59 s | 10,000 |
+| 当前 `sample_retro.py` + 当前 `euler.py` | `n_samples=10,batch16` | 185.77 s | 10,000 |
 | 修改前 Euler-Beam | `R1K10M2,batch64,high` | 99.16 s | 10,000 |
 | 本任务优化后 Euler-Beam | 同上 | 89.97 s | 10,000 |
 
-因此当前 Euler-Beam 在公平小样本上并没有比旧 Euler 慢：修改前已快 47.7%（约
-1.91 倍），优化后快 52.5%（约 2.11 倍）。原因是 M 只扩展轻量 child proposal，不重复
-Transformer；状态合并后平均活跃父分支也低于 10，而普通 Euler 始终维持 10 条完整轨迹。
+当前入口直接调用当前 `edit_flows/sampling/euler.py` 的复核与旧入口相差仅 2.0%，证明上一轮
+没有因误调用 `old_euler.py` 而夸大时间。因此当前 Euler-Beam 在公平小样本上并没有比旧
+Euler 慢：修改前已快 47.7%，优化后相对当前 Euler 快 51.6%（约 2.06 倍）。原因是 M 只
+扩展轻量 child proposal，不重复 Transformer；状态合并后平均活跃父分支也低于 10，而
+普通 Euler 始终维持 10 条完整轨迹。
 
 test-mini 有 20020 条 augmentation 输入，是 tiny 的 20.02 倍；虽然概念上是 1001 个
 原始反应，模型仍必须分别处理每个反应的 20 个增强表示。M2 的 1687.14 秒采样产生
 200200 行预测，因此“mini 约半小时”首先是数据规模结果。按本次无损提速估算，同配置
 mini 约 25.5 分钟，完整 100140 行 test 约 2.1～2.5 小时；这只是外推，不替代完整实测。
 
-当前机器和用户提供的旧入口无法复现“旧 Euler 在完整 100140 行上 30 多分钟”：tiny
-实测线性外推约 5.27 小时。旧脚本又不记录输入哈希、实际选择范围、采样 wall 和有效 seed，
+当前机器和当前 `euler.py` 无法复现“旧 Euler 在完整 100140 行上 30 多分钟”：tiny
+实测线性外推约 5.17 小时。旧脚本又不记录输入哈希、实际选择范围、采样 wall 和有效 seed，
 所以现有证据不足以唯一还原历史条件；可能差异包括实际输入范围、steps/samples/batch、
 计时范围、运行环境，或当时尚未修正的样本/seed 语义。不能据此认定当前指标被刻意压低。
 
@@ -1411,6 +1414,33 @@ mini 约 25.5 分钟，完整 100140 行 test 约 2.1～2.5 小时；这只是�
 - `batch_size=128`：100 行短测看似比 64 快 5.9%，但完整 tiny 为 94.553 秒，反而比
   batch64 慢 5.1%；峰值 allocated 从 1.50 增至 2.80 GiB，并有 1392/10000 行预测变化。
   因此保留已验证的 batch64，不根据过短 profile 修改运行默认。
+
+### 22.4 当前 Euler 的 batch 与 TF32 复核
+
+普通 Euler 的脚本默认 batch32；用户此前对比命令明确传入 batch16。由于 `_make_batch()`
+会把每个 product 复制 `n_samples=10` 次，模型实际 batch 分别约为 160/320/640/1280。
+当前 `euler.py` 在完整 tiny、batch16 上实测 185.77 秒；同一入口在完整 test 文件的前
+200 行进行 batch 扫描：
+
+| matmul | product batch | sampling wall | peak allocated | peak reserved |
+|---|---:|---:|---:|---:|
+| FP32 `highest` | 16 | 36.32 s | 0.46 GiB | 4.06 GiB |
+| FP32 `highest` | 32 | 38.32 s | 0.73 GiB | 8.85 GiB |
+| FP32 `highest` | 64 | 36.97 s | 1.27 GiB | 18.31 GiB |
+| FP32 `highest` | 128 | 36.43 s | 2.26 GiB | 22.98 GiB |
+| TF32 override | 16 | 27.00 s | 0.46 GiB | 4.32 GiB |
+| TF32 override | 64 | 25.66 s | 1.21 GiB | 17.90 GiB |
+| TF32 override | 128 | 25.08 s | 2.26 GiB | 22.82 GiB |
+
+严格 FP32 下扩大 batch 没有实际吞吐收益，只增加显存。TF32 可把短测加速约 25～31%，
+但 batch128 相对 batch64 只再快 2.3%，显存余量很小；即便按最快短测外推，完整 100140
+行仍约 3.5 小时，不能解释历史 30～40 分钟。
+
+当前代码只为 Euler-Beam 设置 `matmul_precision=high`，普通 Euler 保持 PyTorch 2.7 默认
+`highest`。更重要的是，普通 Euler metadata 显示 `seed_applied_to_sampler=False`：命令行
+`--seed` 当前没有应用到普通 Euler。以上独立进程的预测不能用于严格逐行或准确率配对。
+在决定给普通 Euler 启用 TF32 前，应先单独修复其 seed、再在同 seed 上做 FP32/TF32
+准确率复核；当前不因短吞吐实验修改默认精度或 batch。Euler-Beam 的推荐 batch64 不变。
 
 验证：Euler-Beam 与采样 metadata 定向测试为 `36 passed`；排除仓库中既知且与本任务
 无关的 `tests/sampling/test_beam.py` 后，完整回归为 `176 passed, 8 warnings`。实现 commit：
