@@ -125,11 +125,11 @@ Euler-Beam 支持两种 child policy：
 - 不包含 `origin_embedding` 权重；
 - 当前采样优化不依赖 origin mask。
 
-截至 2026-08-01，在 50 个原始反应、20 倍测试增强的 tiny benchmark 上，当前推荐
-研究配置为：
+截至 2026-08-04，在 1001 个原始反应、20 倍测试增强的 mini-1001 工程 benchmark 上，
+当前最高准确率配置为：
 
 ```text
-K=3, M=2, R=3, n_steps=100
+K=1, M=2, R=9, n_steps=100
 score_mode=full_probability
 changed_state_bonus=0.5
 child_policy=stochastic_noop
@@ -140,15 +140,16 @@ float32_matmul_precision=high (RTX 3090 TF32)
 
 | 指标 | 当前推荐配置 |
 |---|---:|
-| 采样时间 | 约 122.6 秒 |
-| Top-1 | 60% |
-| Top-2 | 64% |
-| Top-3 | 70% |
-| Invalid SMILES（rank 1/2/3） | 12.5% / 14.5% / 13.4% |
+| 采样时间 | 3059.83 秒 |
+| Top-1 | 57.043% |
+| Top-2 | 71.528% |
+| Top-3 | 78.122% |
+| Top-10 | 86.114% |
+| Oracle | 91.808% |
 
-这些结果仅用于固定 tiny benchmark 上的版本比较，不等同于完整 USPTO-50K 测试集
-结论。历史恢复版本曾得到 58%/68%/76%，但它采用旧 seed 和旧路径评分语义，不能与
-当前结果作严格的单变量比较。详细实验历史见
+mini-1001来自test且已用于工程选型，因此这些结果不等同于未见完整USPTO-50K测试集
+结论。相同mini上R3K3的Top-1/3/10为55.145/74.026/84.515%，采样2071.54秒；它是
+平衡准确率和速度的备选。R1K10更快但准确率更低。详细实验历史见
 [`new_docs/euler_beam_optimization_plan.md`](new_docs/euler_beam_optimization_plan.md)。
 
 ## 4. 环境与安装
@@ -219,7 +220,7 @@ python scripts/eval.py \
     --targets "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test-tiny.txt" \
     --output_dir results/bench_beam/ \
     --sampler euler_beam \
-    --n_branches 3 --n_children 2 --n_runs 3 \
+    --n_branches 1 --n_children 2 --n_runs 9 \
     --n_steps 100 --batch_size 64 --device cuda --seed 42
 ```
 
@@ -233,9 +234,9 @@ python scripts/sample_retro.py \
     --checkpoint checkpoint_step600000.pt \
     --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt" \
     --sampler euler_beam \
-    --n_branches 3 \
+    --n_branches 1 \
     --n_children 2 \
-    --n_runs 3 \
+    --n_runs 9 \
     --n_steps 100 \
     --batch_size 64 \
     --device cuda \

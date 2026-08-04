@@ -1719,7 +1719,7 @@ target offset校验。
 
 ## 25. 任务 24：test-mini-1001 最终工程选型
 
-状态：`[x] 两个最佳配置的mini-1001比较完成；后续默认冻结为R3K3`
+状态：`[x] R3相对R1的选型完成；其默认地位随后被任务25的R9结果取代`
 
 目标是在严格的test-mini-1001（20020条aug20输入、1001个完整反应）上，用两个方法各自
 已经由validation支持的最佳参数做一次工程选型。该子集来自test且已有结果被查看，因此
@@ -1787,9 +1787,105 @@ stochastic_noop, changed_state_bonus=0.5,
 n_steps=100, batch_size=64, full_probability, TF32 high, seed=42
 ```
 
-R1K10M2不再与默认方法并列纠结，只保留为明确的速度优先备选：当约23%的wall节省比
-2～3pp Top-k更重要时使用。后续算法改进、完整test主报告和trajectory默认围绕冻结的
-R3K3推进；完整test不再根据target回头调整这些参数。
+R1K10M2不再与R3并列纠结，只保留为明确的速度优先备选：当约23%的wall节省比2～3pp
+Top-k更重要时使用。这里的R3默认结论是R1/R3二者比较阶段的决策；随后用户要求的最后
+一个R9结构challenger在任务25满足预注册替代规则，因此当前默认以任务25为准。
+
+## 26. 任务 25：R9K1 独立轨迹结构消融
+
+状态：`[x] 完整mini-1001采样、评分和配对完成；准确率默认冻结为R9K1`
+
+用户要求在默认方法冻结前补充R9K1。该实验固定总输出宽度9，并与R3K3共用M2、
+stochastic_noop、bonus0.5、100 steps、full probability、batch64、TF32 high、seed42和
+legacy aggregation，只把`R=3,K=3`改为`R=9,K=1`。因此它回答独立轨迹和run内分支
+竞争/合并的结构差异；自然run seed布局也随R改变，这是实际R9方法的一部分。
+
+R9K1M2不是普通Euler。每个run每步仍生成两个child并剪到一个，但不同父分支之间不发生
+合并或竞争；除强制no-op步外，等质量的不同child主要通过确定性seed tie-break保留。
+它更接近9条独立的Euler-Beam轨迹，而不是9粒子的共享beam。
+
+完整实验前冻结选择规则：R9只有在Top-1提高，并且Top-3、Top-10、Oracle至少两项同步
+提高且其它主指标无超过1pp回退时，才替代R3；否则保持R3。wall、invalid、unique和
+shortfall用于解释取舍，不从test-mini继续调R9的bonus/policy/M。该实验是最后一个
+test-mini结构challenger，完成后不追加其它R/K组合。
+
+前100条aug20输入（5反应）smoke成功输出900行，metadata验证为`5 × 20 × beam9`，
+K1/M2/noop路径无shape、seed或评分布局错误。smoke准确率因样本极少不参与方法选择；
+结果目录为`results/task25_r9k1_smoke5/`。完整结果写入独立目录
+`results/task25_testmini1001_r9k1/`。
+
+### 26.1 完整结果
+
+R9 metadata验证为`1001 reactions × 20 augmentations × beam9 = 180180`行，prediction
+SHA-256为`8ab60adba5fc3fbe6e2a39dfa90e20668f45678ada09467a772b2fee392656bc`。
+三个已冻结配置的统一结果为：
+
+| 配置 | Top-1 | Top-2 | Top-3 | Top-4 | Top-5 | Top-6 | Top-7 | Top-8 | Top-9 | Top-10 | Oracle |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| R1K10 | 52.547 | 67.033 | 71.628 | 75.225 | 76.523 | 78.022 | 79.221 | 80.420 | 80.819 | 81.618 | 87.213 |
+| R3K3 | 55.145 | 68.332 | 74.026 | 77.223 | 78.821 | 80.619 | 81.618 | 82.817 | 83.516 | 84.515 | 89.311 |
+| R9K1 | 57.043 | 71.528 | 78.122 | 81.319 | 82.617 | 83.816 | 84.815 | 85.115 | 85.814 | 86.114 | 91.808 |
+| R9-R3 (pp) | +1.898 | +3.196 | +4.096 | +4.096 | +3.796 | +3.197 | +3.197 | +2.298 | +2.298 | +1.599 | +2.497 |
+
+R9-only/R3-only逐反应命中为Top-1 `60/41`（双侧exact McNemar `p=0.0728`）、Top-2
+`65/33`（`p=0.00160`）、Top-3 `69/28`（`p=3.80e-5`）、Top-5 `66/28`
+（`p=0.000111`）、Top-10 `45/29`（`p=0.0805`）、Oracle `40/15`
+（`p=0.00102`）。Top-1/10单点没有越过0.05，但没有回退；Top-2/3/5和Oracle均形成
+显著一致优势，满足实验前冻结的替代规则。
+
+### 26.2 效率与机制结论
+
+| 指标 | R1K10 | R3K3 | R9K1 |
+|---|---:|---:|---:|
+| sampling wall | 1687.14 s | 2071.54 s | 3059.83 s |
+| input throughput | 11.87/s | 9.66/s | 6.54/s |
+| peak CUDA allocated | 1,970,680,320 B | 1,892,043,776 B | 2,110,356,992 B |
+| final-slot shortfall | 29.009% | 14.524% | 0.000% |
+| valid candidates / slots | 74.566% | 79.468% | 86.192% |
+| mean true unique/reaction | 30.301 | 24.031 | 25.807 |
+
+R9比R3慢47.71%，原因不是Transformer前向宽度增加：两者活跃轨迹总宽度都是9；而是R9
+把每个product展开为9个独立sample容器，逐sample的Python状态合并/剪枝循环是R3的3倍。
+另一方面，R9没有跨父分支的mass剪枝和最终槽位补齐，valid比例、真实unique、Top-k和
+Oracle都优于R3。这是明确的机制证据：当前启发式mass/bonus竞争会过早丢掉一部分有用的
+独立轨迹，增加run带来的独立性比run内beam合并更有价值。
+
+按照预注册规则，后续最高准确率默认冻结为：
+
+```text
+R9K1M2, n_runs=9, n_branches=1, n_children=2,
+stochastic_noop, changed_state_bonus=0.5,
+n_steps=100, batch_size=64, full_probability, TF32 high, seed=42
+```
+
+R3K3保留为平衡速度配置（wall少32.3%，但Top-1/3/10低1.90/4.10/1.60pp），R1K10保留
+为最快配置。后续正式准确率实验统一使用R9；仅在研究mass合并/beam剪枝本身时使用R3
+作结构参照。本任务至此关闭test-mini上的R/K搜索，不再追加组合。
+
+## 27. 下一阶段：推理低风险改进与训练基础设施
+
+当前checkpoint不因训练审计而失效：主Bregman loss与论文Eq.23一致，权重有限，现有
+预对齐数据完整且没有证据走到损坏的fallback。但下次重训前存在必须修复的问题：首次
+Adam update错误使用默认`lr=1e-3`后才进入Noam；fallback alignment会把PAD当真实token；
+src/tgt用`zip()`会静默截断；resume会重复一步；没有统一seed/RNG state；没有validation
+loop、最佳checkpoint选择或早停。
+
+因此不建议现在直接开新600k训练，也不建议立即大规模实现需要外部reward的Euler-SMC。
+按成本和依赖关系，后续顺序冻结为：
+
+1. 在R9默认上做BOS/特殊token非法事件诊断；只有证据充分才加入采样硬约束。
+2. validation-only完成Q temperature最小消融，首轮只比较`1.0/0.9/0.8`，不同时扫描
+   top-p/top-k；这是可复用当前checkpoint且额外成本近似为零的前沿推理改进。
+3. 独立修复训练基础设施P0/P1并加scheduler、数据、resume和reproducibility测试；只跑
+   synthetic及10k～30k pilot，不直接替换当前checkpoint。
+4. 基础设施通过后，最高价值的新训练单变量是显式product conditioning；完整product
+   作为不可编辑条件保留，再研究CFG。它比继续堆R/K更可能带来模型级提升。
+5. Euler-SMC先只做synthetic mechanics与proposal/weight正确性；在没有独立forward
+   consistency或feasibility reward前，不把启发式bonus包装成理论SMC。
+
+也就是说，立即下一步仍在推理层做低风险、低成本的特殊token诊断和Q sharpening；同时
+训练代码的基础设施修复是任何新checkpoint之前的硬门槛。完成这两层后，再进入显式条件
+模型，而不是在当前Euler-Beam上继续增加分支组合。
 
 ## 11. 决策门槛
 
