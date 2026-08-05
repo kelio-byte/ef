@@ -2327,6 +2327,10 @@ R9K1M2、100 steps、batch64、seed42、TF32 high、shared identical forwards、
 
 状态：`[~] 独立synthetic mechanics已实现，尚未接入checkpoint或采样入口`
 
+前沿论文汇报材料：`new_docs/frontier_inference_scaling_report.md`。该文档区分了论文
+SMC方法、当前Euler-Beam的启发式分支机制、已完成的mechanics/bootstrap验证，以及下一步
+独立terminal reward适配，不把尚未完成的accuracy实验记为已验证收益。
+
 ### 33.A 方法/改进介绍
 
 Sequential Monte Carlo用一组带权粒子近似逐时间目标分布。每一步从proposal生成child，
