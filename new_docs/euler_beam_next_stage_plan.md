@@ -2194,7 +2194,7 @@ commit为profile `98cbcfb`、forward共享`ccf273a`、K1M2选择`14f9523`。
 
 ## 32. 任务 29：Q sharpening推理改进
 
-状态：`[x] 接口实现、T=1兼容、validation-A/B/C消融完成；默认仍为T=1.0`
+状态：`[x] 接口实现、T=1兼容、validation-A/B/C及tiny补充对照完成；默认仍为T=1.0`
 
 ### 32.A 方法/改进介绍
 
@@ -2278,6 +2278,28 @@ Top-2、完整Top-1～10和逐反应配对见各目录的`diagnostics.json`；A/
 `results/task29_qtemp_valA_t{1,09,08}/`、`results/task29_qtemp_valB_t{1,09,08}/`和
 `results/task29_qtemp_valC200_t{1,09}/`。
 
+### 32.G.1 tiny补充对照（post-hoc，不用于选温度）
+
+用户要求把任务29放回历史tiny开发集，与既有方法在同一评分器下做描述性比较。tiny为
+`src-test-tiny.txt`前1000行，即50个完整aug20反应；由于该test子集此前已被反复查看，
+本补充不改变validation结论，也不以tiny target重新选择温度。任务29三组固定
+R9K1M2、100 steps、batch64、seed42、TF32 high、shared identical forwards、
+`stochastic_noop`和`bonus=0.5`，每个product输出9条。
+
+| 方法/温度 | Top-1 | Top-2 | Top-3 | Top-5 | Top-10 | Oracle | rank-1 invalid | true unique | sampling wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 普通Euler（历史N=3） | 54 | 66 | 74 | 76 | 84 | — | 21.3% | — | 81.14s* |
+| 旧R3K3（历史beam=3） | 60 | 64 | 70 | 72 | 80 | 80 | 12.5% | 13.18 | 122.09s |
+| 旧R9K1M2 shared | 60 | 70 | 80 | 84 | 84 | 98 | 22.3% | 31.00 | 114.06s |
+| Q temperature T=1.0 | 60 | 70 | 80 | 84 | 84 | 98 | 22.3% | 31.00 | 113.09s |
+| Q temperature T=0.9 | 60 | 74 | 78 | 80 | 82 | 96 | 21.1% | 30.08 | 110.73s |
+| Q temperature T=0.8 | 58 | 76 | 78 | 82 | 86 | 90 | 21.0% | 29.14 | 113.46s |
+
+`T=1.0`预测SHA为`9748b25877b1595f39670fa09aebc133db513dad36eaabb97d1a42e3129daeb6`，
+与任务28 shared tiny结果逐字节一致。普通Euler的旧文本没有sampling metadata，时间来自历史
+固定基准，且Euler/R3的每条输入输出数少于R9，因此只作背景参考；三组Q温度之间才是严格
+单变量比较。
+
 ### 32.H 结果分析与结论
 
 - proposal质量是否改善：A/B中T=0.9的Top-3分别比T=1高2个百分点，Top-5在B高2个
@@ -2290,6 +2312,9 @@ Top-2、完整Top-1～10和逐反应配对见各目录的`diagnostics.json`；A/
 - 是否替换默认T=1、停止或继续top-k/top-p：按预注册门槛停止本轮temperature改进，
   默认保持T=1.0；不在test上继续调温度，也不立即叠加top-k/top-p。若未来有更大validation
   或新的proposal证据，可重新建立独立任务。
+- tiny补充是否改变结论：不改变。T=0.9在tiny只提高Top-2，Top-3、Top-10和Oracle
+  下降；T=0.8的Top-1和Oracle进一步下降，true unique也随温度变尖而减少。tiny与validation
+  的局部排序不同，进一步说明不能用该test子集挑温度。
 
 ### 32.I Git记录（占位）
 
