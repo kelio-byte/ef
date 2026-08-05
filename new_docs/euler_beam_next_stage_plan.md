@@ -2321,6 +2321,7 @@ R9K1M2、100 steps、batch64、seed42、TF32 high、shared identical forwards、
 - 预注册commit：`e56021e`
 - 实现commit：`67ae17d`
 - 实验结论commit：`7adf233`
+- tiny补充对照commit：`7206878`
 
 ## 33. 任务 30：Euler-SMC独立新方法
 
