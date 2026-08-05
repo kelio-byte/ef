@@ -790,7 +790,7 @@ def main() -> None:
     parser.add_argument("--products_file", type=str, required=True)
     parser.add_argument("--targets_file", type=str, required=True)
     parser.add_argument("--vocab_file", type=str, default=None)
-    parser.add_argument("--output_dir", type=str, default="visualizations/trajectory/")
+    # parser.add_argument("--output_dir", type=str, default="visualizations/trajectory/")
     parser.add_argument("--html", type=_str_to_bool,
                         default=True, help="Generate HTML output (default: True)")
     parser.add_argument(
@@ -825,8 +825,9 @@ def main() -> None:
             "paths; branch-tree recording must be implemented separately."
         )
 
+    output_dir = f"visualizations/trajectory-{args.example_ids}"
     if args.html:
-        os.makedirs(args.output_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True)
     device = torch.device(args.device)
     torch.manual_seed(args.seed)
 
@@ -1042,7 +1043,7 @@ def main() -> None:
             id_label = "_".join(str(i) for i in ids_list[:3]) + f"_x{len(ids_list)}"
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_path = os.path.join(args.output_dir, f"trajectory_{id_label}_{timestamp}.html")
+        out_path = os.path.join(output_dir, f"trajectory_{id_label}_{timestamp}.html")
         with open(out_path, "w") as f:
             f.write("\n".join(html_parts))
         print(f"Wrote {out_path}")

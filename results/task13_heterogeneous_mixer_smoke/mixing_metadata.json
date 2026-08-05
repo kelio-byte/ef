@@ -1,0 +1,54 @@
+{
+  "augmentation": 20,
+  "created_at_utc": "2026-08-01T09:21:45.212770+00:00",
+  "input_beam_size": 3,
+  "input_line_count_per_source": {
+    "L": 40,
+    "N": 60
+  },
+  "layout": "reaction-major, augmentation-major, run-minor",
+  "output_beam_size": 5,
+  "output_line_count": 100,
+  "output_sha256": "5e9ae6f3fe850d5c42ce4595a3479aff09171b5242b1315490bad4336494762b",
+  "reaction_count": 1,
+  "run_sources": [
+    {
+      "label": "N",
+      "run": 1
+    },
+    {
+      "label": "N",
+      "run": 2
+    },
+    {
+      "label": "N",
+      "run": 3
+    },
+    {
+      "label": "L",
+      "run": 1
+    },
+    {
+      "label": "L",
+      "run": 2
+    }
+  ],
+  "source_beam_sizes": {
+    "L": 2,
+    "N": 3
+  },
+  "sources": {
+    "L": {
+      "beam_size": 2,
+      "line_count": 40,
+      "path": "/root/autodl-tmp/edit_flows/results/task13_selection_smoke/predictions.txt",
+      "sha256": "746a10862b77c326112b5b985e10746bb2e8b2b1da9c11371a40328ce5e792ca"
+    },
+    "N": {
+      "beam_size": 3,
+      "line_count": 60,
+      "path": "/root/autodl-tmp/edit_flows/results/task13_selection_smoke_r3/predictions.txt",
+      "sha256": "c77259f0cd855833121a0f7481b7276cd12e60411d3d24e8b85faf1eca74af69"
+    }
+  }
+}

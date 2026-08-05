@@ -1,0 +1,54 @@
+{
+  "augmentation": 20,
+  "created_at_utc": "2026-08-01T09:40:44.546989+00:00",
+  "input_beam_size": 3,
+  "input_line_count_per_source": {
+    "L": 8000,
+    "N": 12000
+  },
+  "layout": "reaction-major, augmentation-major, run-minor",
+  "output_beam_size": 5,
+  "output_line_count": 20000,
+  "output_sha256": "70bd1cc7899e8669edc752a0c613723d8604af51d6af52855a1f854b8f791a22",
+  "reaction_count": 200,
+  "run_sources": [
+    {
+      "label": "N",
+      "run": 1
+    },
+    {
+      "label": "N",
+      "run": 2
+    },
+    {
+      "label": "N",
+      "run": 3
+    },
+    {
+      "label": "L",
+      "run": 1
+    },
+    {
+      "label": "L",
+      "run": 2
+    }
+  ],
+  "source_beam_sizes": {
+    "L": 2,
+    "N": 3
+  },
+  "sources": {
+    "L": {
+      "beam_size": 2,
+      "line_count": 8000,
+      "path": "/root/autodl-tmp/edit_flows/results/task13_holdout200_ll/predictions.txt",
+      "sha256": "502e1406d764373afe14113af05375b89a1c25c7939cd0e481ad44aaa35a8ef4"
+    },
+    "N": {
+      "beam_size": 3,
+      "line_count": 12000,
+      "path": "/root/autodl-tmp/edit_flows/results/task13_holdout200_nnn/predictions.txt",
+      "sha256": "18b2fa7ace6b33dc81649f757852706e5efccd131959fe1f606920c254a0e8b3"
+    }
+  }
+}

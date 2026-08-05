@@ -1,0 +1,92 @@
+<!DOCTYPE html><html><head><meta charset='utf-8'>
+<title>Trajectory Visualization</title>
+<style>
+body{font-family:Menlo,Consolas,monospace;font-size:13px;margin:20px;background:#fafafa}
+h1{border-bottom:2px solid #333;padding-bottom:6px}
+h2{margin:28px 0 4px 0;border-bottom:1px solid #ccc;padding-bottom:4px}
+h3{margin:20px 0 4px 0}
+h4{margin:16px 0 2px 0;font-size:13px;color:#555}
+.meta{font-weight:normal;font-size:12px;color:#555}
+.nav{margin:8px 0 20px 0;line-height:1.8}
+.nav a{margin-right:12px}
+.tbl-wrap{overflow-x:auto;margin:8px 0 24px 0}
+table.vt{border-collapse:collapse;table-layout:auto}
+table.vt td,table.vt th{padding:4px 6px;vertical-align:top;text-align:center;min-width:44px;border:1px solid #ddd}
+th.lbl{min-width:38px;font-size:11px;color:#666;background:#f5f5f5;text-align:right;padding-right:8px}
+.sec-hdr th.sec-label{text-align:left;font-size:11px;font-weight:bold;color:#444;background:#eee;padding:3px 8px}
+.tc{font-weight:600;font-size:13px;background:#fafafa}
+.tc.bos{background:#e8e8e8;color:#999;font-size:11px}
+.tc.oi{border-top:3px solid #2196F3}
+.tc.os{border-top:3px solid #FF9800}
+.tc.od{border-top:3px solid #F44336}
+.tc.oi.bos{border-top:1px solid #ddd}
+.tc.os.bos{border-top:1px solid #ddd}
+.tc.od.bos{border-top:1px solid #ddd}
+/* origin marking for trajectory mode */
+.tc.orig{background:#fafafa}
+.tc.inserted{background:#e8f5e9}
+/* actual-edit markers for trajectory mode */
+.tc.aei{border-bottom:3px solid #4CAF50}
+.tc.aes{border-bottom:3px solid #FF9800}
+.tc.aed{border-bottom:3px solid #F44336}
+.rc{font-size:11px;line-height:1.2;min-width:52px}
+.rv{font-weight:bold;font-size:12px;display:block}
+.tc-tok{font-size:10px;line-height:1.4;background:#fafafa;text-align:left;white-space:nowrap;min-width:52px}
+.tc-tok .tl{font-weight:600;color:#444}
+.tc-tok .tp{color:#888}
+.x0-row td{padding:6px 6px}
+/* actual-edit row */
+.ae-row td{font-size:12px;font-weight:bold;padding:6px 6px}
+.ae-ins{background:#c8e6c9;color:#2e7d32}
+.ae-sub{background:#ffe0b2;color:#e65100}
+.ae-del{background:#ffcdd2;color:#c62828}
+.legend{font-size:11px;color:#666;margin-bottom:20px}
+.legend span{margin-right:16px}
+.legend .sw{display:inline-block;width:14px;height:14px;border:1px solid #ccc;vertical-align:middle;margin-right:4px}
+.legend .sw-rate{display:inline-block;width:40px;height:14px;border:1px solid #ccc;vertical-align:middle;margin:0 2px}
+.oi-sw{border-top:3px solid #2196F3;background:#fff}
+.os-sw{border-top:3px solid #FF9800;background:#fff}
+.od-sw{border-top:3px solid #F44336;background:#fff}
+.aei-sw{border-bottom:3px solid #4CAF50;background:#fff}
+.aes-sw{border-bottom:3px solid #FF9800;background:#fff}
+.aed-sw{border-bottom:3px solid #F44336;background:#fff}
+.event-nav{margin:4px 0 12px 0;font-size:12px}
+.event-nav a{margin-right:8px;padding:2px 6px;border:1px solid #ccc;border-radius:3px;text-decoration:none;color:#333;background:#f5f5f5}
+.event-nav a.correct{background:#c8e6c9;border-color:#a5d6a7}
+.event-nav a.wrong{background:#ffcdd2;border-color:#ef9a9a}
+.event-nav .sep{color:#999;margin:0 4px}
+.correct{color:#2e7d32;font-weight:600}
+.wrong{color:#c62828;font-weight:600}
+.summary-box{background:#f5f5f5;border:1px solid #ddd;padding:8px 12px;margin:8px 0;font-size:12px;border-radius:4px}
+.summary-box b{margin-right:4px}
+.smiles-line{display:flex;align-items:flex-start;margin:2px 0}
+.smiles-label{display:inline-block;min-width:52px;font-weight:600;color:#666;flex-shrink:0}
+.smiles-str{font-family:"Courier New",monospace;font-size:11px;word-break:break-all;line-height:1.5}
+.smiles-meta{margin-top:6px;padding-top:4px;border-top:1px solid #ddd}
+</style></head><body>
+<h1>Trajectory Visualization</h1>
+<p style="color:#888;font-size:13px;margin-top:-10px">Checkpoint: <code>checkpoint_step600000.pt</code></p>
+<div class="legend">
+<b>Oracle edit type (top border on x<sub>t</sub>):</b> 
+<span><span class="sw oi-sw"></span> INS</span>
+<span><span class="sw os-sw"></span> SUB</span>
+<span><span class="sw od-sw"></span> DEL</span>
+&nbsp;&nbsp;&nbsp;<b>Actual edit (bottom border on x<sub>t</sub>):</b> 
+<span><span class="sw aei-sw"></span> INS</span>
+<span><span class="sw aes-sw"></span> SUB</span>
+<span><span class="sw aed-sw"></span> DEL</span>
+&nbsp;&nbsp;&nbsp;<b>Rate magnitude (cell bg):</b> 
+<span class="sw-rate" style="background:linear-gradient(to right,#fff,#ffd0d0,#ff4040,#900);"></span>
+<span>0 → low → med → high</span>
+&nbsp;&nbsp;&nbsp;<b>x<sub>t</sub> origin:</b> 
+<span style="background:#fafafa;padding:2px 6px;border:1px solid #ddd">original</span>
+<span style="background:#e8f5e9;padding:2px 6px;border:1px solid #ddd">inserted</span>
+&nbsp;&nbsp;&nbsp;<b>Actual edit cell:</b> 
+<span style="background:#c8e6c9;padding:2px 6px;border:1px solid #ddd">+INS</span>
+<span style="background:#ffe0b2;padding:2px 6px;border:1px solid #ddd">→SUB</span>
+<span style="background:#ffcdd2;padding:2px 6px;border:1px solid #ddd">DEL</span>
+</div>
+<div class="nav"><b>Jump to example:</b><br>
+<a href="#ex525">Ex#525 ✗</a> <span style="color:#999;font-size:11px">(c 1 2 c c c ( - c 3 n n c ( - c 4 c c c c c 4 ) s  → c 1 2 c c c ( B 3 O C ( C ) ( C ) C ( C ) ( C ) O )</span><br>
+</div>
+</body></html>

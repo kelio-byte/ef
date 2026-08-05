@@ -1,0 +1,1088 @@
+<!DOCTYPE html><html><head><meta charset='utf-8'>
+<title>First-Step Visualization</title>
+<style>
+body{font-family:Menlo,Consolas,monospace;font-size:13px;margin:20px;background:#fafafa}
+h1{border-bottom:2px solid #333;padding-bottom:6px}
+h2{margin:28px 0 4px 0;border-bottom:1px solid #ccc;padding-bottom:4px}
+h3{margin:20px 0 4px 0}
+h4{margin:16px 0 2px 0;font-size:13px;color:#555}
+.meta{font-weight:normal;font-size:12px;color:#555}
+.nav{margin:8px 0 20px 0;line-height:1.8}
+.nav a{margin-right:12px}
+.tbl-wrap{overflow-x:auto;margin:8px 0 24px 0}
+table.vt{border-collapse:collapse;table-layout:auto}
+table.vt td,table.vt th{padding:4px 6px;vertical-align:top;text-align:center;min-width:44px;border:1px solid #ddd}
+th.lbl{min-width:38px;font-size:11px;color:#666;background:#f5f5f5;text-align:right;padding-right:8px}
+.sec-hdr th.sec-label{text-align:left;font-size:11px;font-weight:bold;color:#444;background:#eee;padding:3px 8px}
+.tc{font-weight:600;font-size:13px;background:#fafafa}
+.tc.bos{background:#e8e8e8;color:#999;font-size:11px}
+.tc.oi{border-top:3px solid #2196F3}
+.tc.os{border-top:3px solid #FF9800}
+.tc.od{border-top:3px solid #F44336}
+.tc.oi.bos{border-top:1px solid #ddd}
+.tc.os.bos{border-top:1px solid #ddd}
+.tc.od.bos{border-top:1px solid #ddd}
+/* origin marking for trajectory mode */
+.tc.orig{background:#fafafa}
+.tc.inserted{background:#e8f5e9}
+/* actual-edit markers for trajectory mode */
+.tc.aei{border-bottom:3px solid #4CAF50}
+.tc.aes{border-bottom:3px solid #FF9800}
+.tc.aed{border-bottom:3px solid #F44336}
+.rc{font-size:11px;line-height:1.2;min-width:52px}
+.rv{font-weight:bold;font-size:12px;display:block}
+.tc-tok{font-size:10px;line-height:1.4;background:#fafafa;text-align:left;white-space:nowrap;min-width:52px}
+.tc-tok .tl{font-weight:600;color:#444}
+.tc-tok .tp{color:#888}
+.x0-row td{padding:6px 6px}
+/* actual-edit row */
+.ae-row td{font-size:12px;font-weight:bold;padding:6px 6px}
+.ae-ins{background:#c8e6c9;color:#2e7d32}
+.ae-sub{background:#ffe0b2;color:#e65100}
+.ae-del{background:#ffcdd2;color:#c62828}
+.legend{font-size:11px;color:#666;margin-bottom:20px}
+.legend span{margin-right:16px}
+.legend .sw{display:inline-block;width:14px;height:14px;border:1px solid #ccc;vertical-align:middle;margin-right:4px}
+.legend .sw-rate{display:inline-block;width:40px;height:14px;border:1px solid #ccc;vertical-align:middle;margin:0 2px}
+.oi-sw{border-top:3px solid #2196F3;background:#fff}
+.os-sw{border-top:3px solid #FF9800;background:#fff}
+.od-sw{border-top:3px solid #F44336;background:#fff}
+.aei-sw{border-bottom:3px solid #4CAF50;background:#fff}
+.aes-sw{border-bottom:3px solid #FF9800;background:#fff}
+.aed-sw{border-bottom:3px solid #F44336;background:#fff}
+.event-nav{margin:4px 0 12px 0;font-size:12px}
+.event-nav a{margin-right:8px;padding:2px 6px;border:1px solid #ccc;border-radius:3px;text-decoration:none;color:#333;background:#f5f5f5}
+.event-nav a.correct{background:#c8e6c9;border-color:#a5d6a7}
+.event-nav a.wrong{background:#ffcdd2;border-color:#ef9a9a}
+.event-nav .sep{color:#999;margin:0 4px}
+.correct{color:#2e7d32;font-weight:600}
+.wrong{color:#c62828;font-weight:600}
+.summary-box{background:#f5f5f5;border:1px solid #ddd;padding:8px 12px;margin:8px 0;font-size:12px;border-radius:4px}
+.summary-box b{margin-right:4px}
+.smiles-line{display:flex;align-items:flex-start;margin:2px 0}
+.smiles-label{display:inline-block;min-width:52px;font-weight:600;color:#666;flex-shrink:0}
+.smiles-str{font-family:"Courier New",monospace;font-size:11px;word-break:break-all;line-height:1.5}
+.smiles-meta{margin-top:6px;padding-top:4px;border-top:1px solid #ddd}
+</style></head><body>
+<h1>First-Step Visualization</h1>
+<p style="color:#888;font-size:13px;margin-top:-10px">Checkpoint: <code>checkpoint_step600000.pt</code></p>
+<div class="legend">
+<b>Oracle edit type (top border on x<sub>0</sub>):</b> 
+<span><span class="sw oi-sw"></span> INS</span>
+<span><span class="sw os-sw"></span> SUB</span>
+<span><span class="sw od-sw"></span> DEL</span>
+&nbsp;&nbsp;&nbsp;<b>Rate magnitude (cell bg):</b> 
+<span class="sw-rate" style="background:linear-gradient(to right,#fff,#ffd0d0,#ff4040,#900);"></span>
+<span>0 → low → med → high</span>
+&nbsp;&nbsp;&nbsp;<span style="color:#999">BOS = gray cell</span>
+</div>
+<div class="nav"><b>Jump to:</b><br>
+<a href="#ex0_t0_1">Ex#0 t=0.1</a> <span style="color:#999;font-size:11px">(C C ( C ) ( C ) O C ( = O ) n 1 c 2 c c c ( C ( C  → C C ( C ) ( C ) O C ( = O ) O C ( = O ) O C ( C ) )</span><br>
+</div>
+<div class="ex" id="ex0_t0_1"><h3>Example #0 &nbsp; t=0.1</h3><div class="summary-box"><div class="smiles-line"><span class="smiles-label">Product</span><span class="smiles-str">C C ( C ) ( C ) O C ( = O ) n 1 c 2 c c c ( C ( C ) = O ) c c 2 c c 1</span></div><div class="smiles-line"><span class="smiles-label">Target </span><span class="smiles-str">C C ( C ) ( C ) O C ( = O ) O C ( = O ) O C ( C ) ( C ) C . [nH] 1 c 2 c c c ( C ( C ) = O ) c c 2 c c 1</span></div><div class="smiles-meta"><b>Center-Hit:</b> <span class="correct">Y</span> &nbsp; <b>Full-Correct:</b> <span class="correct">Y</span></div></div><div class="tbl-wrap"><table class="vt"><tr class="x0-row"><th class="lbl">x<sub>0</sub></th><td class="tc bos">BOS</td><td class="tc">C</td><td class="tc">C</td><td class="tc">(</td><td class="tc">C</td><td class="tc">)</td><td class="tc oi">(</td><td class="tc oi">C</td><td class="tc">)</td><td class="tc">O</td><td class="tc">C</td><td class="tc">(</td><td class="tc oi">=</td><td class="tc oi">O</td><td class="tc oi">)</td><td class="tc os">n</td><td class="tc">1</td><td class="tc">c</td><td class="tc">2</td><td class="tc">c</td><td class="tc">c</td><td class="tc">c</td><td class="tc">(</td><td class="tc">C</td><td class="tc">(</td><td class="tc">C</td><td class="tc">)</td><td class="tc">=</td><td class="tc">O</td><td class="tc">)</td><td class="tc">c</td><td class="tc">c</td><td class="tc">2</td><td class="tc">c</td><td class="tc">c</td><td class="tc">1</td></tr><tr class="sec-hdr"><th class="lbl sec-label" colspan="37">ORACLE</th></tr><tr class="ins-row"><th class="lbl">&lambda;<sub>ins</sub></th><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#8d0000;color:#ffffff;"><span class="rv">3.000</span></td><td class="rc" style="background-color:#8d0000;color:#ffffff;"><span class="rv">3.000</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#920000;color:#ffffff;"><span class="rv">2.000</span></td><td class="rc" style="background-color:#850000;color:#ffffff;"><span class="rv">6.000</span></td><td class="rc" style="background-color:#920000;color:#ffffff;"><span class="rv">2.000</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td></tr><tr class="ins-tok-row"><th class="lbl">ins top5</th><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.333</span><br>
+<span class="tl">)</span> <span class="tp">0.333</span><br>
+<span class="tl">C</span> <span class="tp">0.333</span><br>
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.000</span><br>
+</td><td class="tc-tok">
+<span class="tl">=</span> <span class="tp">0.333</span><br>
+<span class="tl">O</span> <span class="tp">0.333</span><br>
+<span class="tl">(</span> <span class="tp">0.333</span><br>
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.000</span><br>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.500</span><br>
+<span class="tl">)</span> <span class="tp">0.500</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">+</span> <span class="tp">0.000</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.500</span><br>
+<span class="tl">(</span> <span class="tp">0.333</span><br>
+<span class="tl">)</span> <span class="tp">0.167</span><br>
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.000</span><br>
+</td><td class="tc-tok">
+<span class="tl">.</span> <span class="tp">0.500</span><br>
+<span class="tl">C</span> <span class="tp">0.500</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">+</span> <span class="tp">0.000</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td></tr><tr class="sub-row"><th class="lbl">&lambda;<sub>sub</sub></th><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#9a0000;color:#ffffff;"><span class="rv">1.000</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.4e-06</span></td></tr><tr class="sub-tok-row"><th class="lbl">sub top5</th><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">[nH]</span> <span class="tp">1.000</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.000</span><br>
+<span class="tl">+</span> <span class="tp">0.000</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td><td class="tc-tok">
+<span class="tl">&lt;BOS&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;PAD&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;GAP&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">c</span> <span class="tp">0.014</span><br>
+<span class="tl">&lt;UNK&gt;</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.932</span>
+</td></tr><tr class="del-row"><th class="lbl">&lambda;<sub>del</sub></th><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td><td class="rc" style="background-color:#fff8f8;color:#000000;"><span class="rv">3.3e-08</span></td></tr><tr class="sec-hdr"><th class="lbl sec-label" colspan="37">MODEL</th></tr><tr class="ins-row"><th class="lbl">&lambda;<sub>ins</sub></th><td class="rc" style="background-color:#ffecec;color:#000000;"><span class="rv">3.3e-07</span></td><td class="rc" style="background-color:#ffecec;color:#000000;"><span class="rv">3.3e-07</span></td><td class="rc" style="background-color:#fff5f5;color:#000000;"><span class="rv">6.2e-08</span></td><td class="rc" style="background-color:#ffe2e2;color:#000000;"><span class="rv">2.3e-06</span></td><td class="rc" style="background-color:#ffe1e1;color:#000000;"><span class="rv">2.7e-06</span></td><td class="rc" style="background-color:#ffe8e8;color:#000000;"><span class="rv">7.1e-07</span></td><td class="rc" style="background-color:#c11a1a;color:#ffffff;"><span class="rv">0.110</span></td><td class="rc" style="background-color:#cb2222;color:#ffffff;"><span class="rv">0.061</span></td><td class="rc" style="background-color:#ffaeae;color:#000000;"><span class="rv">3.0e-05</span></td><td class="rc" style="background-color:#ffb8b8;color:#000000;"><span class="rv">1.9e-05</span></td><td class="rc" style="background-color:#ffe1e1;color:#000000;"><span class="rv">3.0e-06</span></td><td class="rc" style="background-color:#ffc2c2;color:#000000;"><span class="rv">1.3e-05</span></td><td class="rc" style="background-color:#d12525;color:#ffffff;"><span class="rv">0.045</span></td><td class="rc" style="background-color:#ba1616;color:#ffffff;"><span class="rv">0.159</span></td><td class="rc" style="background-color:#ce2323;color:#ffffff;"><span class="rv">0.053</span></td><td class="rc" style="background-color:#ffe7e7;color:#000000;"><span class="rv">9.8e-07</span></td><td class="rc" style="background-color:#ffcfcf;color:#000000;"><span class="rv">6.9e-06</span></td><td class="rc" style="background-color:#ffeaea;color:#000000;"><span class="rv">4.8e-07</span></td><td class="rc" style="background-color:#ffc5c5;color:#000000;"><span class="rv">1.1e-05</span></td><td class="rc" style="background-color:#ffe1e1;color:#000000;"><span class="rv">3.0e-06</span></td><td class="rc" style="background-color:#ffd4d4;color:#000000;"><span class="rv">5.5e-06</span></td><td class="rc" style="background-color:#db2c2c;color:#ffffff;"><span class="rv">0.025</span></td><td class="rc" style="background-color:#e43333;color:#ffffff;"><span class="rv">0.014</span></td><td class="rc" style="background-color:#c61e1e;color:#ffffff;"><span class="rv">0.084</span></td><td class="rc" style="background-color:#ff6767;color:#000000;"><span class="rv">7.0e-04</span></td><td class="rc" style="background-color:#ff9797;color:#000000;"><span class="rv">8.4e-05</span></td><td class="rc" style="background-color:#ffb3b3;color:#000000;"><span class="rv">2.4e-05</span></td><td class="rc" style="background-color:#ffd9d9;color:#000000;"><span class="rv">4.4e-06</span></td><td class="rc" style="background-color:#ffb3b3;color:#000000;"><span class="rv">2.4e-05</span></td><td class="rc" style="background-color:#ffe7e7;color:#000000;"><span class="rv">8.8e-07</span></td><td class="rc" style="background-color:#ffe9e9;color:#000000;"><span class="rv">6.7e-07</span></td><td class="rc" style="background-color:#ffe3e3;color:#000000;"><span class="rv">1.9e-06</span></td><td class="rc" style="background-color:#ffeeee;color:#000000;"><span class="rv">2.2e-07</span></td><td class="rc" style="background-color:#ffeaea;color:#000000;"><span class="rv">4.7e-07</span></td><td class="rc" style="background-color:#ffe7e7;color:#000000;"><span class="rv">8.5e-07</span></td><td class="rc" style="background-color:#ffe4e4;color:#000000;"><span class="rv">1.5e-06</span></td></tr><tr class="ins-tok-row"><th class="lbl">ins top5</th><td class="tc-tok">
+<span class="tl">(</span> <span class="tp">0.436</span><br>
+<span class="tl">C</span> <span class="tp">0.367</span><br>
+<span class="tl">O</span> <span class="tp">0.060</span><br>
+<span class="tl">N</span> <span class="tp">0.058</span><br>
+<span class="tl">=</span> <span class="tp">0.026</span><br>
+<span class="tl">+</span> <span class="tp">0.052</span>
+</td><td class="tc-tok">
+<span class="tl">(</span> <span class="tp">0.512</span><br>
+<span class="tl">O</span> <span class="tp">0.142</span><br>
+<span class="tl">=</span> <span class="tp">0.119</span><br>
+<span class="tl">)</span> <span class="tp">0.077</span><br>
+<span class="tl">C</span> <span class="tp">0.068</span><br>
+<span class="tl">+</span> <span class="tp">0.082</span>
+</td><td class="tc-tok">
+<span class="tl">)</span> <span class="tp">0.295</span><br>
+<span class="tl">O</span> <span class="tp">0.199</span><br>
+<span class="tl">=</span> <span class="tp">0.167</span><br>
+<span class="tl">(</span> <span class="tp">0.133</span><br>
+<span class="tl">C</span> <span class="tp">0.076</span><br>
+<span class="tl">+</span> <span class="tp">0.131</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.515</span><br>
+<span class="tl">)</span> <span class="tp">0.250</span><br>
+<span class="tl">O</span> <span class="tp">0.147</span><br>
+<span class="tl">=</span> <span class="tp">0.069</span><br>
+<span class="tl">(</span> <span class="tp">0.007</span><br>
+<span class="tl">+</span> <span class="tp">0.012</span>
+</td><td class="tc-tok">
+<span class="tl">=</span> <span class="tp">0.359</span><br>
+<span class="tl">O</span> <span class="tp">0.294</span><br>
+<span class="tl">(</span> <span class="tp">0.249</span><br>
+<span class="tl">)</span> <span class="tp">0.065</span><br>
+<span class="tl">C</span> <span class="tp">0.020</span><br>
+<span class="tl">+</span> <span class="tp">0.014</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.445</span><br>
+<span class="tl">C</span> <span class="tp">0.378</span><br>
+<span class="tl">(</span> <span class="tp">0.067</span><br>
+<span class="tl">=</span> <span class="tp">0.048</span><br>
+<span class="tl">)</span> <span class="tp">0.039</span><br>
+<span class="tl">+</span> <span class="tp">0.023</span>
+</td><td class="tc-tok">
+<span class="tl">)</span> <span class="tp">0.389</span><br>
+<span class="tl">C</span> <span class="tp">0.353</span><br>
+<span class="tl">O</span> <span class="tp">0.256</span><br>
+<span class="tl">=</span> <span class="tp">0.001</span><br>
+<span class="tl">N</span> <span class="tp">0.000</span><br>
+<span class="tl">+</span> <span class="tp">0.000</span>
+</td><td class="tc-tok">
+<span class="tl">=</span> <span class="tp">0.351</span><br>
+<span class="tl">O</span> <span class="tp">0.324</span><br>
+<span class="tl">(</span> <span class="tp">0.322</span><br>
+<span class="tl">)</span> <span class="tp">0.002</span><br>
+<span class="tl">C</span> <span class="tp">0.001</span><br>
+<span class="tl">+</span> <span class="tp">0.000</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.841</span><br>
+<span class="tl">C</span> <span class="tp">0.049</span><br>
+<span class="tl">)</span> <span class="tp">0.045</span><br>
+<span class="tl">.</span> <span class="tp">0.034</span><br>
+<span class="tl">=</span> <span class="tp">0.018</span><br>
+<span class="tl">+</span> <span class="tp">0.013</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.808</span><br>
+<span class="tl">)</span> <span class="tp">0.175</span><br>
+<span class="tl">.</span> <span class="tp">0.011</span><br>
+<span class="tl">C</span> <span class="tp">0.003</span><br>
+<span class="tl">=</span> <span class="tp">0.003</span><br>
+<span class="tl">+</span> <span class="tp">0.001</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.512</span><br>
+<span class="tl">)</span> <span class="tp">0.425</span><br>
+<span class="tl">=</span> <span class="tp">0.023</span><br>
+<span class="tl">C</span> <span class="tp">0.015</span><br>
+<span class="tl">.</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.012</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.777</span><br>
+<span class="tl">)</span> <span class="tp">0.169</span><br>
+<span class="tl">C</span> <span class="tp">0.045</span><br>
+<span class="tl">.</span> <span class="tp">0.005</span><br>
+<span class="tl">=</span> <span class="tp">0.001</span><br>
+<span class="tl">+</span> <span class="tp">0.002</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.546</span><br>
+<span class="tl">)</span> <span class="tp">0.453</span><br>
+<span class="tl">C</span> <span class="tp">0.000</span><br>
+<span class="tl">(</span> <span class="tp">0.000</span><br>
+<span class="tl">N</span> <span class="tp">0.000</span><br>
+<span class="tl">+</span> <span class="tp">0.000</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.541</span><br>
+<span class="tl">(</span> <span class="tp">0.324</span><br>
+<span class="tl">)</span> <span class="tp">0.133</span><br>
+<span class="tl">O</span> <span class="tp">0.001</span><br>
+<span class="tl">=</span> <span class="tp">0.000</span><br>
+<span class="tl">+</span> <span class="tp">0.000</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.522</span><br>
+<span class="tl">.</span> <span class="tp">0.477</span><br>
+<span class="tl">(</span> <span class="tp">0.000</span><br>
+<span class="tl">O</span> <span class="tp">0.000</span><br>
+<span class="tl">=</span> <span class="tp">0.000</span><br>
+<span class="tl">+</span> <span class="tp">0.000</span>
+</td><td class="tc-tok">
+<span class="tl">.</span> <span class="tp">0.299</span><br>
+<span class="tl">C</span> <span class="tp">0.248</span><br>
+<span class="tl">)</span> <span class="tp">0.180</span><br>
+<span class="tl">(</span> <span class="tp">0.153</span><br>
+<span class="tl">F</span> <span class="tp">0.026</span><br>
+<span class="tl">+</span> <span class="tp">0.093</span>
+</td><td class="tc-tok">
+<span class="tl">.</span> <span class="tp">0.771</span><br>
+<span class="tl">(</span> <span class="tp">0.093</span><br>
+<span class="tl">C</span> <span class="tp">0.078</span><br>
+<span class="tl">)</span> <span class="tp">0.015</span><br>
+<span class="tl">N</span> <span class="tp">0.014</span><br>
+<span class="tl">+</span> <span class="tp">0.028</span>
+</td><td class="tc-tok">
+<span class="tl">(</span> <span class="tp">0.454</span><br>
+<span class="tl">N</span> <span class="tp">0.203</span><br>
+<span class="tl">C</span> <span class="tp">0.168</span><br>
+<span class="tl">.</span> <span class="tp">0.053</span><br>
+<span class="tl">O</span> <span class="tp">0.043</span><br>
+<span class="tl">+</span> <span class="tp">0.078</span>
+</td><td class="tc-tok">
+<span class="tl">(</span> <span class="tp">0.463</span><br>
+<span class="tl">)</span> <span class="tp">0.137</span><br>
+<span class="tl">O</span> <span class="tp">0.112</span><br>
+<span class="tl">C</span> <span class="tp">0.101</span><br>
+<span class="tl">.</span> <span class="tp">0.034</span><br>
+<span class="tl">+</span> <span class="tp">0.153</span>
+</td><td class="tc-tok">
+<span class="tl">(</span> <span class="tp">0.454</span><br>
+<span class="tl">C</span> <span class="tp">0.131</span><br>
+<span class="tl">1</span> <span class="tp">0.112</span><br>
+<span class="tl">)</span> <span class="tp">0.054</span><br>
+<span class="tl">O</span> <span class="tp">0.052</span><br>
+<span class="tl">+</span> <span class="tp">0.197</span>
+</td><td class="tc-tok">
+<span class="tl">(</span> <span class="tp">0.432</span><br>
+<span class="tl">C</span> <span class="tp">0.185</span><br>
+<span class="tl">1</span> <span class="tp">0.114</span><br>
+<span class="tl">.</span> <span class="tp">0.086</span><br>
+<span class="tl">O</span> <span class="tp">0.039</span><br>
+<span class="tl">+</span> <span class="tp">0.144</span>
+</td><td class="tc-tok">
+<span class="tl">(</span> <span class="tp">0.394</span><br>
+<span class="tl">C</span> <span class="tp">0.334</span><br>
+<span class="tl">.</span> <span class="tp">0.192</span><br>
+<span class="tl">N</span> <span class="tp">0.035</span><br>
+<span class="tl">O</span> <span class="tp">0.032</span><br>
+<span class="tl">+</span> <span class="tp">0.012</span>
+</td><td class="tc-tok">
+<span class="tl">.</span> <span class="tp">0.834</span><br>
+<span class="tl">C</span> <span class="tp">0.094</span><br>
+<span class="tl">O</span> <span class="tp">0.039</span><br>
+<span class="tl">)</span> <span class="tp">0.010</span><br>
+<span class="tl">Br</span> <span class="tp">0.009</span><br>
+<span class="tl">+</span> <span class="tp">0.016</span>
+</td><td class="tc-tok">
+<span class="tl">)</span> <span class="tp">0.359</span><br>
+<span class="tl">(</span> <span class="tp">0.325</span><br>
+<span class="tl">Cl</span> <span class="tp">0.264</span><br>
+<span class="tl">O</span> <span class="tp">0.021</span><br>
+<span class="tl">=</span> <span class="tp">0.018</span><br>
+<span class="tl">+</span> <span class="tp">0.012</span>
+</td><td class="tc-tok">
+<span class="tl">.</span> <span class="tp">0.616</span><br>
+<span class="tl">)</span> <span class="tp">0.164</span><br>
+<span class="tl">C</span> <span class="tp">0.163</span><br>
+<span class="tl">O</span> <span class="tp">0.034</span><br>
+<span class="tl">N</span> <span class="tp">0.017</span><br>
+<span class="tl">+</span> <span class="tp">0.006</span>
+</td><td class="tc-tok">
+<span class="tl">[Mg+]</span> <span class="tp">0.692</span><br>
+<span class="tl">O</span> <span class="tp">0.070</span><br>
+<span class="tl">)</span> <span class="tp">0.068</span><br>
+<span class="tl">I</span> <span class="tp">0.053</span><br>
+<span class="tl">=</span> <span class="tp">0.043</span><br>
+<span class="tl">+</span> <span class="tp">0.074</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.732</span><br>
+<span class="tl">C</span> <span class="tp">0.152</span><br>
+<span class="tl">(</span> <span class="tp">0.071</span><br>
+<span class="tl">.</span> <span class="tp">0.023</span><br>
+<span class="tl">2</span> <span class="tp">0.009</span><br>
+<span class="tl">+</span> <span class="tp">0.012</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.760</span><br>
+<span class="tl">)</span> <span class="tp">0.171</span><br>
+<span class="tl">.</span> <span class="tp">0.034</span><br>
+<span class="tl">N</span> <span class="tp">0.011</span><br>
+<span class="tl">(</span> <span class="tp">0.005</span><br>
+<span class="tl">+</span> <span class="tp">0.019</span>
+</td><td class="tc-tok">
+<span class="tl">2</span> <span class="tp">0.482</span><br>
+<span class="tl">C</span> <span class="tp">0.153</span><br>
+<span class="tl">(</span> <span class="tp">0.127</span><br>
+<span class="tl">)</span> <span class="tp">0.073</span><br>
+<span class="tl">1</span> <span class="tp">0.053</span><br>
+<span class="tl">+</span> <span class="tp">0.111</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.193</span><br>
+<span class="tl">c</span> <span class="tp">0.177</span><br>
+<span class="tl">2</span> <span class="tp">0.155</span><br>
+<span class="tl">1</span> <span class="tp">0.134</span><br>
+<span class="tl">O</span> <span class="tp">0.110</span><br>
+<span class="tl">+</span> <span class="tp">0.230</span>
+</td><td class="tc-tok">
+<span class="tl">2</span> <span class="tp">0.332</span><br>
+<span class="tl">1</span> <span class="tp">0.296</span><br>
+<span class="tl">(</span> <span class="tp">0.061</span><br>
+<span class="tl">C</span> <span class="tp">0.054</span><br>
+<span class="tl">O</span> <span class="tp">0.047</span><br>
+<span class="tl">+</span> <span class="tp">0.210</span>
+</td><td class="tc-tok">
+<span class="tl">1</span> <span class="tp">0.329</span><br>
+<span class="tl">C</span> <span class="tp">0.131</span><br>
+<span class="tl">N</span> <span class="tp">0.109</span><br>
+<span class="tl">(</span> <span class="tp">0.095</span><br>
+<span class="tl">2</span> <span class="tp">0.091</span><br>
+<span class="tl">+</span> <span class="tp">0.245</span>
+</td><td class="tc-tok">
+<span class="tl">)</span> <span class="tp">0.261</span><br>
+<span class="tl">C</span> <span class="tp">0.216</span><br>
+<span class="tl">O</span> <span class="tp">0.094</span><br>
+<span class="tl">c</span> <span class="tp">0.083</span><br>
+<span class="tl">(</span> <span class="tp">0.077</span><br>
+<span class="tl">+</span> <span class="tp">0.270</span>
+</td><td class="tc-tok">
+<span class="tl">1</span> <span class="tp">0.184</span><br>
+<span class="tl">C</span> <span class="tp">0.181</span><br>
+<span class="tl">(</span> <span class="tp">0.135</span><br>
+<span class="tl">)</span> <span class="tp">0.110</span><br>
+<span class="tl">2</span> <span class="tp">0.079</span><br>
+<span class="tl">+</span> <span class="tp">0.312</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.354</span><br>
+<span class="tl">(</span> <span class="tp">0.125</span><br>
+<span class="tl">O</span> <span class="tp">0.121</span><br>
+<span class="tl">)</span> <span class="tp">0.086</span><br>
+<span class="tl">1</span> <span class="tp">0.080</span><br>
+<span class="tl">+</span> <span class="tp">0.234</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.403</span><br>
+<span class="tl">(</span> <span class="tp">0.176</span><br>
+<span class="tl">)</span> <span class="tp">0.165</span><br>
+<span class="tl">O</span> <span class="tp">0.139</span><br>
+<span class="tl">=</span> <span class="tp">0.056</span><br>
+<span class="tl">+</span> <span class="tp">0.061</span>
+</td></tr><tr class="sub-row"><th class="lbl">&lambda;<sub>sub</sub></th><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">2.8e-09</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:#ffe4e4;color:#000000;"><span class="rv">1.5e-06</span></td><td class="rc" style="background-color:#ffe9e9;color:#000000;"><span class="rv">6.2e-07</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">4.2e-09</span></td><td class="rc" style="background-color:#fffdfd;color:#000000;"><span class="rv">1.2e-08</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">2.2e-09</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">6.7e-09</span></td><td class="rc" style="background-color:#ffcfcf;color:#000000;"><span class="rv">6.8e-06</span></td><td class="rc" style="background-color:#ffe1e1;color:#000000;"><span class="rv">3.1e-06</span></td><td class="rc" style="background-color:#ffebeb;color:#000000;"><span class="rv">4.0e-07</span></td><td class="rc" style="background-color:#d72a2a;color:#ffffff;"><span class="rv">0.031</span></td><td class="rc" style="background-color:#fff0f0;color:#000000;"><span class="rv">1.8e-07</span></td><td class="rc" style="background-color:#fffcfc;color:#000000;"><span class="rv">1.6e-08</span></td><td class="rc" style="background-color:#ffe5e5;color:#000000;"><span class="rv">1.3e-06</span></td><td class="rc" style="background-color:#fff5f5;color:#000000;"><span class="rv">6.8e-08</span></td><td class="rc" style="background-color:#fff3f3;color:#000000;"><span class="rv">9.8e-08</span></td><td class="rc" style="background-color:#ffbfbf;color:#000000;"><span class="rv">1.4e-05</span></td><td class="rc" style="background-color:#ffd2d2;color:#000000;"><span class="rv">6.1e-06</span></td><td class="rc" style="background-color:#ffc2c2;color:#000000;"><span class="rv">1.3e-05</span></td><td class="rc" style="background-color:#ffe9e9;color:#000000;"><span class="rv">5.6e-07</span></td><td class="rc" style="background-color:#fff9f9;color:#000000;"><span class="rv">2.7e-08</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">3.1e-09</span></td><td class="rc" style="background-color:#ffeeee;color:#000000;"><span class="rv">2.5e-07</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">7.5e-09</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">5.7e-09</span></td><td class="rc" style="background-color:#fff7f7;color:#000000;"><span class="rv">3.9e-08</span></td><td class="rc" style="background-color:#fff6f6;color:#000000;"><span class="rv">4.9e-08</span></td><td class="rc" style="background-color:#ffecec;color:#000000;"><span class="rv">3.6e-07</span></td><td class="rc" style="background-color:#fff4f4;color:#000000;"><span class="rv">7.5e-08</span></td><td class="rc" style="background-color:#fff2f2;color:#000000;"><span class="rv">1.1e-07</span></td><td class="rc" style="background-color:#fff4f4;color:#000000;"><span class="rv">7.4e-08</span></td></tr><tr class="sub-tok-row"><th class="lbl">sub top5</th><td class="tc-tok">
+<span class="tl">=</span> <span class="tp">0.358</span><br>
+<span class="tl">\</span> <span class="tp">0.180</span><br>
+<span class="tl">c</span> <span class="tp">0.099</span><br>
+<span class="tl">C</span> <span class="tp">0.094</span><br>
+<span class="tl">N</span> <span class="tp">0.069</span><br>
+<span class="tl">+</span> <span class="tp">0.200</span>
+</td><td class="tc-tok">
+<span class="tl">=</span> <span class="tp">0.419</span><br>
+<span class="tl">[C@H]</span> <span class="tp">0.153</span><br>
+<span class="tl">c</span> <span class="tp">0.141</span><br>
+<span class="tl">[C@@H]</span> <span class="tp">0.111</span><br>
+<span class="tl">\</span> <span class="tp">0.057</span><br>
+<span class="tl">+</span> <span class="tp">0.119</span>
+</td><td class="tc-tok">
+<span class="tl">[C@H]</span> <span class="tp">0.491</span><br>
+<span class="tl">[C@@H]</span> <span class="tp">0.404</span><br>
+<span class="tl">[C@@]</span> <span class="tp">0.045</span><br>
+<span class="tl">[C@]</span> <span class="tp">0.025</span><br>
+<span class="tl">c</span> <span class="tp">0.025</span><br>
+<span class="tl">+</span> <span class="tp">0.010</span>
+</td><td class="tc-tok">
+<span class="tl">=</span> <span class="tp">0.377</span><br>
+<span class="tl">\</span> <span class="tp">0.230</span><br>
+<span class="tl">c</span> <span class="tp">0.151</span><br>
+<span class="tl">C</span> <span class="tp">0.084</span><br>
+<span class="tl">[O-]</span> <span class="tp">0.038</span><br>
+<span class="tl">+</span> <span class="tp">0.120</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.353</span><br>
+<span class="tl">c</span> <span class="tp">0.163</span><br>
+<span class="tl">[C@@H]</span> <span class="tp">0.134</span><br>
+<span class="tl">=</span> <span class="tp">0.093</span><br>
+<span class="tl">[C@H]</span> <span class="tp">0.064</span><br>
+<span class="tl">+</span> <span class="tp">0.194</span>
+</td><td class="tc-tok">
+<span class="tl">[C@@]</span> <span class="tp">0.522</span><br>
+<span class="tl">[C@@H]</span> <span class="tp">0.126</span><br>
+<span class="tl">[C@H]</span> <span class="tp">0.072</span><br>
+<span class="tl">[C@]</span> <span class="tp">0.071</span><br>
+<span class="tl">N</span> <span class="tp">0.051</span><br>
+<span class="tl">+</span> <span class="tp">0.158</span>
+</td><td class="tc-tok">
+<span class="tl">.</span> <span class="tp">0.660</span><br>
+<span class="tl">C</span> <span class="tp">0.081</span><br>
+<span class="tl">=</span> <span class="tp">0.059</span><br>
+<span class="tl">c</span> <span class="tp">0.048</span><br>
+<span class="tl">O</span> <span class="tp">0.044</span><br>
+<span class="tl">+</span> <span class="tp">0.108</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.724</span><br>
+<span class="tl">N</span> <span class="tp">0.122</span><br>
+<span class="tl">1</span> <span class="tp">0.072</span><br>
+<span class="tl">=</span> <span class="tp">0.019</span><br>
+<span class="tl">Cl</span> <span class="tp">0.017</span><br>
+<span class="tl">+</span> <span class="tp">0.047</span>
+</td><td class="tc-tok">
+<span class="tl">.</span> <span class="tp">0.580</span><br>
+<span class="tl">N</span> <span class="tp">0.107</span><br>
+<span class="tl">O</span> <span class="tp">0.080</span><br>
+<span class="tl">(</span> <span class="tp">0.068</span><br>
+<span class="tl">C</span> <span class="tp">0.042</span><br>
+<span class="tl">+</span> <span class="tp">0.123</span>
+</td><td class="tc-tok">
+<span class="tl">N</span> <span class="tp">0.623</span><br>
+<span class="tl">.</span> <span class="tp">0.092</span><br>
+<span class="tl">c</span> <span class="tp">0.087</span><br>
+<span class="tl">C</span> <span class="tp">0.067</span><br>
+<span class="tl">(</span> <span class="tp">0.021</span><br>
+<span class="tl">+</span> <span class="tp">0.110</span>
+</td><td class="tc-tok">
+<span class="tl">c</span> <span class="tp">0.288</span><br>
+<span class="tl">F</span> <span class="tp">0.134</span><br>
+<span class="tl">=</span> <span class="tp">0.112</span><br>
+<span class="tl">N</span> <span class="tp">0.105</span><br>
+<span class="tl">[C@@]</span> <span class="tp">0.059</span><br>
+<span class="tl">+</span> <span class="tp">0.301</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.579</span><br>
+<span class="tl">N</span> <span class="tp">0.070</span><br>
+<span class="tl">c</span> <span class="tp">0.066</span><br>
+<span class="tl">)</span> <span class="tp">0.062</span><br>
+<span class="tl">.</span> <span class="tp">0.042</span><br>
+<span class="tl">+</span> <span class="tp">0.181</span>
+</td><td class="tc-tok">
+<span class="tl">.</span> <span class="tp">0.296</span><br>
+<span class="tl">C</span> <span class="tp">0.188</span><br>
+<span class="tl">)</span> <span class="tp">0.164</span><br>
+<span class="tl">O</span> <span class="tp">0.096</span><br>
+<span class="tl">(</span> <span class="tp">0.058</span><br>
+<span class="tl">+</span> <span class="tp">0.197</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.219</span><br>
+<span class="tl">)</span> <span class="tp">0.218</span><br>
+<span class="tl">Cl</span> <span class="tp">0.124</span><br>
+<span class="tl">c</span> <span class="tp">0.102</span><br>
+<span class="tl">C</span> <span class="tp">0.098</span><br>
+<span class="tl">+</span> <span class="tp">0.240</span>
+</td><td class="tc-tok">
+<span class="tl">.</span> <span class="tp">0.905</span><br>
+<span class="tl">O</span> <span class="tp">0.037</span><br>
+<span class="tl">[NH4+]</span> <span class="tp">0.022</span><br>
+<span class="tl">[O-]</span> <span class="tp">0.013</span><br>
+<span class="tl">c</span> <span class="tp">0.006</span><br>
+<span class="tl">+</span> <span class="tp">0.017</span>
+</td><td class="tc-tok">
+<span class="tl">[nH]</span> <span class="tp">1.000</span><br>
+<span class="tl">c</span> <span class="tp">0.000</span><br>
+<span class="tl">O</span> <span class="tp">0.000</span><br>
+<span class="tl">C</span> <span class="tp">0.000</span><br>
+<span class="tl">.</span> <span class="tp">0.000</span><br>
+<span class="tl">+</span> <span class="tp">0.000</span>
+</td><td class="tc-tok">
+<span class="tl">N</span> <span class="tp">0.682</span><br>
+<span class="tl">.</span> <span class="tp">0.130</span><br>
+<span class="tl">[NH4+]</span> <span class="tp">0.081</span><br>
+<span class="tl">2</span> <span class="tp">0.047</span><br>
+<span class="tl">[nH]</span> <span class="tp">0.032</span><br>
+<span class="tl">+</span> <span class="tp">0.028</span>
+</td><td class="tc-tok">
+<span class="tl">I</span> <span class="tp">0.573</span><br>
+<span class="tl">O</span> <span class="tp">0.067</span><br>
+<span class="tl">(</span> <span class="tp">0.066</span><br>
+<span class="tl">=</span> <span class="tp">0.056</span><br>
+<span class="tl">N</span> <span class="tp">0.053</span><br>
+<span class="tl">+</span> <span class="tp">0.185</span>
+</td><td class="tc-tok">
+<span class="tl">1</span> <span class="tp">0.343</span><br>
+<span class="tl">O</span> <span class="tp">0.190</span><br>
+<span class="tl">)</span> <span class="tp">0.166</span><br>
+<span class="tl">=</span> <span class="tp">0.100</span><br>
+<span class="tl">c</span> <span class="tp">0.048</span><br>
+<span class="tl">+</span> <span class="tp">0.152</span>
+</td><td class="tc-tok">
+<span class="tl">)</span> <span class="tp">0.330</span><br>
+<span class="tl">C</span> <span class="tp">0.147</span><br>
+<span class="tl">=</span> <span class="tp">0.106</span><br>
+<span class="tl">O</span> <span class="tp">0.100</span><br>
+<span class="tl">N</span> <span class="tp">0.079</span><br>
+<span class="tl">+</span> <span class="tp">0.237</span>
+</td><td class="tc-tok">
+<span class="tl">)</span> <span class="tp">0.314</span><br>
+<span class="tl">C</span> <span class="tp">0.206</span><br>
+<span class="tl">=</span> <span class="tp">0.118</span><br>
+<span class="tl">O</span> <span class="tp">0.093</span><br>
+<span class="tl">N</span> <span class="tp">0.068</span><br>
+<span class="tl">+</span> <span class="tp">0.201</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.527</span><br>
+<span class="tl">)</span> <span class="tp">0.293</span><br>
+<span class="tl">(</span> <span class="tp">0.065</span><br>
+<span class="tl">=</span> <span class="tp">0.039</span><br>
+<span class="tl">O</span> <span class="tp">0.023</span><br>
+<span class="tl">+</span> <span class="tp">0.052</span>
+</td><td class="tc-tok">
+<span class="tl">=</span> <span class="tp">0.383</span><br>
+<span class="tl">)</span> <span class="tp">0.248</span><br>
+<span class="tl">C</span> <span class="tp">0.136</span><br>
+<span class="tl">2</span> <span class="tp">0.062</span><br>
+<span class="tl">.</span> <span class="tp">0.051</span><br>
+<span class="tl">+</span> <span class="tp">0.120</span>
+</td><td class="tc-tok">
+<span class="tl">[N+]</span> <span class="tp">0.356</span><br>
+<span class="tl">)</span> <span class="tp">0.289</span><br>
+<span class="tl">[C@H]</span> <span class="tp">0.134</span><br>
+<span class="tl">=</span> <span class="tp">0.083</span><br>
+<span class="tl">c</span> <span class="tp">0.070</span><br>
+<span class="tl">+</span> <span class="tp">0.068</span>
+</td><td class="tc-tok">
+<span class="tl">=</span> <span class="tp">0.812</span><br>
+<span class="tl">)</span> <span class="tp">0.080</span><br>
+<span class="tl">C</span> <span class="tp">0.041</span><br>
+<span class="tl">O</span> <span class="tp">0.031</span><br>
+<span class="tl">c</span> <span class="tp">0.012</span><br>
+<span class="tl">+</span> <span class="tp">0.023</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.750</span><br>
+<span class="tl">)</span> <span class="tp">0.090</span><br>
+<span class="tl">c</span> <span class="tp">0.050</span><br>
+<span class="tl">Cl</span> <span class="tp">0.019</span><br>
+<span class="tl">=</span> <span class="tp">0.018</span><br>
+<span class="tl">+</span> <span class="tp">0.073</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.739</span><br>
+<span class="tl">)</span> <span class="tp">0.052</span><br>
+<span class="tl">2</span> <span class="tp">0.042</span><br>
+<span class="tl">c</span> <span class="tp">0.040</span><br>
+<span class="tl">(</span> <span class="tp">0.028</span><br>
+<span class="tl">+</span> <span class="tp">0.099</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.915</span><br>
+<span class="tl">)</span> <span class="tp">0.053</span><br>
+<span class="tl">c</span> <span class="tp">0.019</span><br>
+<span class="tl">(</span> <span class="tp">0.002</span><br>
+<span class="tl">S</span> <span class="tp">0.002</span><br>
+<span class="tl">+</span> <span class="tp">0.009</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.868</span><br>
+<span class="tl">c</span> <span class="tp">0.064</span><br>
+<span class="tl">)</span> <span class="tp">0.029</span><br>
+<span class="tl">2</span> <span class="tp">0.012</span><br>
+<span class="tl">[C@H]</span> <span class="tp">0.006</span><br>
+<span class="tl">+</span> <span class="tp">0.021</span>
+</td><td class="tc-tok">
+<span class="tl">.</span> <span class="tp">0.348</span><br>
+<span class="tl">c</span> <span class="tp">0.225</span><br>
+<span class="tl">O</span> <span class="tp">0.134</span><br>
+<span class="tl">C</span> <span class="tp">0.077</span><br>
+<span class="tl">2</span> <span class="tp">0.071</span><br>
+<span class="tl">+</span> <span class="tp">0.146</span>
+</td><td class="tc-tok">
+<span class="tl">)</span> <span class="tp">0.379</span><br>
+<span class="tl">=</span> <span class="tp">0.216</span><br>
+<span class="tl">O</span> <span class="tp">0.127</span><br>
+<span class="tl">C</span> <span class="tp">0.078</span><br>
+<span class="tl">2</span> <span class="tp">0.048</span><br>
+<span class="tl">+</span> <span class="tp">0.153</span>
+</td><td class="tc-tok">
+<span class="tl">O</span> <span class="tp">0.262</span><br>
+<span class="tl">)</span> <span class="tp">0.260</span><br>
+<span class="tl">=</span> <span class="tp">0.157</span><br>
+<span class="tl">N</span> <span class="tp">0.128</span><br>
+<span class="tl">2</span> <span class="tp">0.086</span><br>
+<span class="tl">+</span> <span class="tp">0.107</span>
+</td><td class="tc-tok">
+<span class="tl">)</span> <span class="tp">0.639</span><br>
+<span class="tl">1</span> <span class="tp">0.171</span><br>
+<span class="tl">c</span> <span class="tp">0.100</span><br>
+<span class="tl">O</span> <span class="tp">0.020</span><br>
+<span class="tl">C</span> <span class="tp">0.018</span><br>
+<span class="tl">+</span> <span class="tp">0.053</span>
+</td><td class="tc-tok">
+<span class="tl">)</span> <span class="tp">0.448</span><br>
+<span class="tl">=</span> <span class="tp">0.154</span><br>
+<span class="tl">N</span> <span class="tp">0.130</span><br>
+<span class="tl">O</span> <span class="tp">0.082</span><br>
+<span class="tl">C</span> <span class="tp">0.071</span><br>
+<span class="tl">+</span> <span class="tp">0.114</span>
+</td><td class="tc-tok">
+<span class="tl">)</span> <span class="tp">0.277</span><br>
+<span class="tl">=</span> <span class="tp">0.248</span><br>
+<span class="tl">O</span> <span class="tp">0.175</span><br>
+<span class="tl">N</span> <span class="tp">0.131</span><br>
+<span class="tl">C</span> <span class="tp">0.068</span><br>
+<span class="tl">+</span> <span class="tp">0.101</span>
+</td><td class="tc-tok">
+<span class="tl">C</span> <span class="tp">0.604</span><br>
+<span class="tl">N</span> <span class="tp">0.140</span><br>
+<span class="tl">O</span> <span class="tp">0.134</span><br>
+<span class="tl">2</span> <span class="tp">0.086</span><br>
+<span class="tl">c</span> <span class="tp">0.011</span><br>
+<span class="tl">+</span> <span class="tp">0.026</span>
+</td></tr><tr class="del-row"><th class="lbl">&lambda;<sub>del</sub></th><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:#ffe6e6;color:#000000;"><span class="rv">1.2e-06</span></td><td class="rc" style="background-color:#fff9f9;color:#000000;"><span class="rv">2.7e-08</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">1.5e-09</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">1.7e-09</span></td><td class="rc" style="background-color:#ffe3e3;color:#000000;"><span class="rv">1.9e-06</span></td><td class="rc" style="background-color:#fff5f5;color:#000000;"><span class="rv">6.6e-08</span></td><td class="rc" style="background-color:#fffefe;color:#000000;"><span class="rv">1.1e-08</span></td><td class="rc" style="background-color:#ffe1e1;color:#000000;"><span class="rv">2.8e-06</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">1.8e-09</span></td><td class="rc" style="background-color:##ffffff;color:#000000;"><span class="rv">0</span></td><td class="rc" style="background-color:#fff7f7;color:#000000;"><span class="rv">4.1e-08</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">7.0e-09</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">9.3e-09</span></td><td class="rc" style="background-color:#ffeded;color:#000000;"><span class="rv">3.1e-07</span></td><td class="rc" style="background-color:#ffe6e6;color:#000000;"><span class="rv">1.2e-06</span></td><td class="rc" style="background-color:#ffe8e8;color:#000000;"><span class="rv">7.5e-07</span></td><td class="rc" style="background-color:#ffebeb;color:#000000;"><span class="rv">4.2e-07</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">7.4e-09</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">6.9e-09</span></td><td class="rc" style="background-color:#ffbcbc;color:#000000;"><span class="rv">1.6e-05</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">1.8e-09</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">4.4e-09</span></td><td class="rc" style="background-color:#fff5f5;color:#000000;"><span class="rv">6.4e-08</span></td><td class="rc" style="background-color:#fffafa;color:#000000;"><span class="rv">2.5e-08</span></td><td class="rc" style="background-color:#fff1f1;color:#000000;"><span class="rv">1.2e-07</span></td><td class="rc" style="background-color:#fff9f9;color:#000000;"><span class="rv">3.1e-08</span></td><td class="rc" style="background-color:#fffdfd;color:#000000;"><span class="rv">1.4e-08</span></td><td class="rc" style="background-color:#ffffff;color:#000000;"><span class="rv">1.9e-09</span></td></tr><tr class="sec-hdr"><th class="lbl sec-label" colspan="37">MODEL ARGMAX (NOT SAMPLED)</th></tr><tr class="ae-row-tr"><th class="lbl">edit</th><td class="ae-row" style="background:#e8e8e8;color:#999">—</td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row ae-ins">+)</td><td class="ae-row ae-ins">+=</td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row ae-ins">+O</td><td class="ae-row ae-ins">+C</td><td class="ae-row ae-ins">+C</td><td class="ae-row ae-sub">→[nH]</td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row ae-ins">+(</td><td class="ae-row ae-ins">+.</td><td class="ae-row ae-ins">+)</td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td><td class="ae-row"></td></tr></table></div></div>
+</body></html>

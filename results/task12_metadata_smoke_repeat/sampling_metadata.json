@@ -1,0 +1,49 @@
+{
+  "augmentation": null,
+  "augmentation_inferred_from": null,
+  "checkpoint": {
+    "mtime_ns": 1785470613084893869,
+    "path": "/root/autodl-tmp/edit_flows/checkpoint_step600000.pt",
+    "size_bytes": 162620771
+  },
+  "created_at_utc": "2026-08-01T09:10:58.890421+00:00",
+  "git": {
+    "commit": "efc1af171eea0dffa94dedbd23bc280dfa4a3d1e",
+    "dirty": true
+  },
+  "input": {
+    "kind": "single_product",
+    "product_count": 1
+  },
+  "layout": "input-product-major, output-minor",
+  "model": {
+    "configured_use_origin_mask": false,
+    "effective_use_origin_mask": false
+  },
+  "output_beam_size": 2,
+  "output_line_count": 2,
+  "output_sha256": "6f46744013a260dbe98238e05b7c45d6d3455967d6039405a365c74eee0adf6b",
+  "product_count": 1,
+  "runtime": {
+    "batch_size": 1,
+    "device": "cuda",
+    "elapsed_seconds": 0.6904469602741301
+  },
+  "sampler": "euler_beam",
+  "sampling": {
+    "changed_state_bonus": 0.5,
+    "child_policy": "stochastic_noop",
+    "matmul_precision": "high",
+    "n_branches": 1,
+    "n_children": 2,
+    "n_runs": 2,
+    "n_steps": 1,
+    "sample_scheduler": "cubic",
+    "score_mode": "full_probability",
+    "seed": 42,
+    "seed_applied_to_sampler": true,
+    "seed_scope": "stable product/run streams",
+    "train_scheduler": "cubic"
+  },
+  "schema_version": 1
+}
