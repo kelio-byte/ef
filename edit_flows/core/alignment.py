@@ -58,15 +58,31 @@ def _align_pair(
 def opt_align_xs_to_zs(
     x_0: Tensor, x_1: Tensor
 ) -> Tuple[Tensor, Tensor]:
-    aligned_pairs = [_align_pair(x_0[b], x_1[b]) for b in range(x_0.shape[0])]
-    z_0 = torch.stack([
-        torch.tensor(pair[0], dtype=x_0.dtype, device=x_0.device)
-        for pair in aligned_pairs
-    ])
-    z_1 = torch.stack([
-        torch.tensor(pair[1], dtype=x_1.dtype, device=x_1.device)
-        for pair in aligned_pairs
-    ])
+    # ``collate_fn`` pads each side of a batch independently.  Strip those
+    # PAD tokens before DP; otherwise padding is treated as a real symbol and
+    # batches with different sequence lengths can produce invalid alignments.
+    aligned_pairs = []
+    for b in range(x_0.shape[0]):
+        len_0 = int((x_0[b] != PAD_TOKEN).sum().item())
+        len_1 = int((x_1[b] != PAD_TOKEN).sum().item())
+        aligned_pairs.append(_align_pair(x_0[b, :len_0], x_1[b, :len_1]))
+
+    max_z_len = max((len(pair[0]) for pair in aligned_pairs), default=0)
+    z_0 = torch.full(
+        (x_0.shape[0], max_z_len), PAD_TOKEN,
+        dtype=x_0.dtype, device=x_0.device,
+    )
+    z_1 = torch.full(
+        (x_1.shape[0], max_z_len), PAD_TOKEN,
+        dtype=x_1.dtype, device=x_1.device,
+    )
+    for b, (aligned_0, aligned_1) in enumerate(aligned_pairs):
+        z_0[b, :len(aligned_0)] = torch.tensor(
+            aligned_0, dtype=x_0.dtype, device=x_0.device,
+        )
+        z_1[b, :len(aligned_1)] = torch.tensor(
+            aligned_1, dtype=x_1.dtype, device=x_1.device,
+        )
     return z_0, z_1
 
 

@@ -1,3 +1,4 @@
+from itertools import zip_longest
 from typing import Dict, List, Tuple
 
 import torch
@@ -24,7 +25,14 @@ class RetroDataset(Dataset):
         unk_id = token2id["<UNK>"]
         self.pairs: List[Tuple[List[int], List[int]]] = []
         with open(src_path) as f_src, open(tgt_path) as f_tgt:
-            for src_line, tgt_line in zip(f_src, f_tgt):
+            for line_no, (src_line, tgt_line) in enumerate(
+                zip_longest(f_src, f_tgt), start=1,
+            ):
+                if src_line is None or tgt_line is None:
+                    raise ValueError(
+                        "source/target line-count mismatch at line "
+                        f"{line_no}: {src_path} vs {tgt_path}"
+                    )
                 src_ids = [token2id.get(t, unk_id) for t in src_line.strip().split()]
                 tgt_ids = [token2id.get(t, unk_id) for t in tgt_line.strip().split()]
                 self.pairs.append((src_ids, tgt_ids))
@@ -41,9 +49,22 @@ class PreAlignedDataset(Dataset):
         unk_id = token2id["<UNK>"]
         self.pairs: List[Tuple[List[int], List[int]]] = []
         with open(z0_path) as f0, open(z1_path) as f1:
-            for z0_line, z1_line in zip(f0, f1):
+            for line_no, (z0_line, z1_line) in enumerate(
+                zip_longest(f0, f1), start=1,
+            ):
+                if z0_line is None or z1_line is None:
+                    raise ValueError(
+                        "aligned source/target line-count mismatch at line "
+                        f"{line_no}: {z0_path} vs {z1_path}"
+                    )
                 z0_ids = [token2id.get(t, unk_id) for t in z0_line.strip().split()]
                 z1_ids = [token2id.get(t, unk_id) for t in z1_line.strip().split()]
+                if len(z0_ids) != len(z1_ids):
+                    raise ValueError(
+                        "aligned pair length mismatch at line "
+                        f"{line_no}: {len(z0_ids)} != {len(z1_ids)} "
+                        f"({z0_path} vs {z1_path})"
+                    )
                 self.pairs.append((z0_ids, z1_ids))
 
     def __len__(self) -> int:

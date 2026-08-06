@@ -1,10 +1,18 @@
-# Edit Flows 训练代码审计
+# Edit Flows 训练代码审计（基础修复状态）
 
-> 日期：2026-08-03。范围仅包括代码、当前 checkpoint、现有训练数据和本地
+> 初始审计日期：2026-08-03。范围仅包括代码、当前 checkpoint、现有训练数据和本地
 > `PDF/2025--Edit Flows Flow Matching with Edit Operations.pdf` 的只读核对。本轮没有
-> 修改训练代码、数据或 checkpoint。
+> 修改训练代码、数据或 checkpoint。2026-08-06 已完成审计中“训练基础设施”阶段，
+> 具体改动和测试见 [`training_tensorboard_and_fixes.md`](training_tensorboard_and_fixes.md)。
 
 ## 1. 结论摘要
+
+### 2026-08-06 状态更新
+
+Noam 第一次 update、数据 fail-fast、PAD alignment、RNG/checkpoint resume、validation
+和 TensorBoard 已在新脚本路径中修复。`configs/retro.yaml` 和旧 checkpoint 仍保持冻结；
+后续新训练应使用 `configs/retro_v2.yaml`。本文件下面的“明确代码问题”保留原始审计证据，
+其当前修复状态以新文档的阶段清单为准。
 
 当前训练不是“loss 主公式写错、checkpoint 完全不可用”的状态。`bregman_loss()` 与论文
 Eq.23 的两个核心项一致：对所有可执行编辑率求和，并对通向目标对齐状态的编辑率施加

@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 from edit_flows.core.coupling import Coupling
-from edit_flows.core.rate_scale import apply_rate_parameterization
+from edit_flows.core.rate_scale import apply_rate_parameterization, get_rate_scale
 from edit_flows.core.scheduler import KappaScheduler
 from edit_flows.core.z_space import rm_gap_tokens, make_ut_mask_from_z, sample_cond_zt, project_mask_z_to_x
 from edit_flows.training.loss import bregman_loss
@@ -73,17 +73,20 @@ def prepare_batch(
     return batch
 
 
-def train_step(
+def _forward_loss_and_metrics(
     model,
     batch_data: dict,
     scheduler: KappaScheduler,
-    optimizer: torch.optim.Optimizer,
-    max_grad_norm: float = 1.0,
     use_rate_reparam: bool = False,
     clamp_kappa: bool = False,
     clamp_max: float = 50.0,
     time_input: str = "t",
-) -> dict:
+) -> tuple[Tensor, dict]:
+    """Run one forward pass and compute loss/rate diagnostics.
+
+    Keeping this path shared by training and validation prevents TensorBoard
+    validation curves from silently using a different objective than training.
+    """
     if time_input not in {"t", "kappa"}:
         raise ValueError(f"Unsupported time_input: {time_input}")
 
@@ -126,12 +129,6 @@ def train_step(
         clamp_max=clamp_max,
     )
 
-    optimizer.zero_grad()
-    loss.backward()
-    if max_grad_norm > 0.0:
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
-    optimizer.step()
-
     with torch.no_grad():
         log_rates_eff = apply_rate_parameterization(
             log_rates, t, scheduler, use_rate_reparam=use_rate_reparam,
@@ -149,10 +146,71 @@ def train_step(
         )
         u_tot = torch.exp(log_ux_cat_eff).sum(dim=(1, 2)).mean()
 
-    return {
-        "loss": loss.item(),
+    return loss, {
         "u_tot": u_tot.item(),
         "u_ins": u_ins.item(),
         "u_del": u_del.item(),
         "u_sub": u_sub.item(),
+        # These aliases make the TensorBoard names explicit: each lambda is
+        # the batch-mean sum of the corresponding per-position edit rate.
+        "lambda_total": u_tot.item(),
+        "lambda_ins": u_ins.item(),
+        "lambda_del": u_del.item(),
+        "lambda_sub": u_sub.item(),
+        "t_mean": t.mean().item(),
+        "kappa_mean": scheduler(t).mean().item(),
+        "rate_scale_mean": get_rate_scale(
+            t, scheduler, clamp_max=clamp_max, clamp_kappa=clamp_kappa,
+        ).mean().item(),
+        "rate_scale_max": get_rate_scale(
+            t, scheduler, clamp_max=clamp_max, clamp_kappa=clamp_kappa,
+        ).max().item(),
     }
+
+
+def train_step(
+    model,
+    batch_data: dict,
+    scheduler: KappaScheduler,
+    optimizer: torch.optim.Optimizer,
+    max_grad_norm: float = 1.0,
+    use_rate_reparam: bool = False,
+    clamp_kappa: bool = False,
+    clamp_max: float = 50.0,
+    time_input: str = "t",
+) -> dict:
+    """Run one optimizer update and return scalar diagnostics."""
+    loss, metrics = _forward_loss_and_metrics(
+        model, batch_data, scheduler,
+        use_rate_reparam=use_rate_reparam,
+        clamp_kappa=clamp_kappa,
+        clamp_max=clamp_max,
+        time_input=time_input,
+    )
+    optimizer.zero_grad()
+    loss.backward()
+    if max_grad_norm > 0.0:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+    optimizer.step()
+    return {"loss": loss.item(), **metrics}
+
+
+@torch.no_grad()
+def evaluate_step(
+    model,
+    batch_data: dict,
+    scheduler: KappaScheduler,
+    use_rate_reparam: bool = False,
+    clamp_kappa: bool = False,
+    clamp_max: float = 50.0,
+    time_input: str = "t",
+) -> dict:
+    """Compute training-objective metrics without changing model parameters."""
+    loss, metrics = _forward_loss_and_metrics(
+        model, batch_data, scheduler,
+        use_rate_reparam=use_rate_reparam,
+        clamp_kappa=clamp_kappa,
+        clamp_max=clamp_max,
+        time_input=time_input,
+    )
+    return {"loss": loss.item(), **metrics}

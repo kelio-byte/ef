@@ -43,6 +43,30 @@ class TestOptAlign:
         n_edits = (z_0 != z_1).sum().item()
         assert n_edits == 1
 
+    def test_batch_padding_is_not_aligned_as_a_real_token(self):
+        x_0 = torch.tensor([
+            [BOS_TOKEN, 3, 4, PAD_TOKEN],
+            [BOS_TOKEN, 5, PAD_TOKEN, PAD_TOKEN],
+        ])
+        x_1 = torch.tensor([
+            [BOS_TOKEN, 3, 4, 6],
+            [BOS_TOKEN, 5, 7, PAD_TOKEN],
+        ])
+
+        z_0, z_1 = opt_align_xs_to_zs(x_0, x_1)
+
+        assert z_0.shape == z_1.shape
+        assert torch.equal(
+            (z_0[0] != PAD_TOKEN),
+            torch.tensor([True, True, True, True]),
+        )
+        assert torch.equal(
+            (z_0[1] != PAD_TOKEN),
+            torch.tensor([True, True, True, False]),
+        )
+        assert PAD_TOKEN not in z_0[0].tolist()
+        assert PAD_TOKEN not in z_1[0].tolist()
+
 
 class TestNaiveAlign:
     def test_equal_length_output(self):
