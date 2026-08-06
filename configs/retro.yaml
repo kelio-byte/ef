@@ -1,4 +1,7 @@
 retro:
+  # Frozen legacy baseline: this block matches checkpoint_step600000.pt
+  # field-for-field. Keep it unchanged for historical reproduction; put
+  # future training studies in a separate YAML instead of editing this block.
   # Model (aligned with OpenNMT R-SMILES encoder)
   vocab_size: null            # inferred from vocab file
   hidden_dim: 256
