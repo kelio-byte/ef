@@ -94,7 +94,8 @@ $PY scripts/train_retro.py \
 由于 `--save_dir` 会再拼接数据集名和时间戳，实际输出位于
 `checkpoints/retro_v2_smoke_20k/<dataset-name>/<timestamp>/`。完成后应检查 `train.log`、
 `checkpoint_step20000.pt`、`checkpoint_best.pt`（若 validation loss 有改善）以及 TensorBoard
-event 文件。
+event 文件。终端和 `train.log` 中的每条逻辑日志行都会带本地时间戳，格式为
+`[MM/DD/HH/MM]`，例如 `[08/06/14/09] step ...`。
 
 ### 2.4 从 checkpoint 继续训练
 

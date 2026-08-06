@@ -30,14 +30,36 @@ from edit_flows.core.alignment import (
 
 
 class Tee:
+    """Mirror training output to the terminal and a timestamped log file.
+
+    ``print`` commonly calls ``write`` twice (once for the message and once
+    for the newline), so the timestamp is added at logical line boundaries
+    instead of once per ``write`` call.  The minute-level format is compact
+    and matches the experiment notes: ``[MM/DD/HH/MM]``.
+    """
+
     def __init__(self, filepath: str):
         self.file = open(filepath, "a", buffering=1)
         self.stdout = sys.stdout
         self.stderr = sys.stderr
+        self._line_start = True
 
     def write(self, text: str):
-        self.file.write(text)
-        self.stdout.write(text)
+        if not text:
+            return
+
+        chunks = []
+        for char in text:
+            if self._line_start and char not in "\r\n":
+                chunks.append(f"[{datetime.now():%m/%d/%H/%M}] ")
+                self._line_start = False
+            chunks.append(char)
+            if char in "\r\n":
+                self._line_start = True
+
+        rendered = "".join(chunks)
+        self.file.write(rendered)
+        self.stdout.write(rendered)
 
     def flush(self):
         self.file.flush()

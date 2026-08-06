@@ -1,6 +1,21 @@
+import re
+
 import torch
 
-from scripts.train_retro import EpochRandomSampler, validation_due
+from scripts.train_retro import EpochRandomSampler, Tee, validation_due
+
+
+def test_tee_adds_minute_timestamp_once_per_logical_line(tmp_path):
+    log_path = tmp_path / "train.log"
+    with Tee(str(log_path)) as tee:
+        tee.write("first")
+        tee.write("\nsecond\n")
+
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 2
+    timestamp = r"\[\d{2}/\d{2}/\d{2}/\d{2}\]"
+    assert re.fullmatch(timestamp + r" first", lines[0])
+    assert re.fullmatch(timestamp + r" second", lines[1])
 
 
 def test_validation_due_respects_start_step_and_interval():
