@@ -78,7 +78,25 @@ $PY scripts/train_retro.py \
   --save_dir checkpoints/retro_v2
 ```
 
-### 2.3 从 checkpoint 继续训练
+### 2.3 20k 训练 smoke test（推荐先运行）
+
+`configs/retro_v2_smoke_20k.yaml` 保留历史模型/目标函数设置，但将总步数设为 20000，并在
+5000、10000、15000、20000 step 做 20 个 validation batches。它用于先确认数据加载、Noam
+scheduler、loss、checkpoint、TensorBoard 和 validation 链路都正常，不代表最终模型质量。
+
+```bash
+$PY scripts/train_retro.py \
+  --config configs/retro_v2_smoke_20k.yaml \
+  --device cuda \
+  --save_dir checkpoints/retro_v2_smoke_20k
+```
+
+由于 `--save_dir` 会再拼接数据集名和时间戳，实际输出位于
+`checkpoints/retro_v2_smoke_20k/<dataset-name>/<timestamp>/`。完成后应检查 `train.log`、
+`checkpoint_step20000.pt`、`checkpoint_best.pt`（若 validation loss 有改善）以及 TensorBoard
+event 文件。
+
+### 2.4 从 checkpoint 继续训练
 
 ```bash
 $PY scripts/train_retro.py \
@@ -92,7 +110,7 @@ $PY scripts/train_retro.py \
 的旧文件误当成可无缝 resume 的 checkpoint。训练代码还会保存 `checkpoint_latest.pt` 和按 step
 命名的 checkpoint（具体保留数量由 `--keep_checkpoints`/yaml 决定）。
 
-### 2.4 预计算 alignment（通常只需做一次）
+### 2.5 预计算 alignment（通常只需做一次）
 
 ```bash
 $PY scripts/precompute_alignments.py \
