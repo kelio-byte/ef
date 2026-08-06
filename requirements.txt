@@ -1,0 +1,8 @@
+torch>=2.0                   # 与 pyproject.toml 及当前训练脚本保持一致
+einops>=0.6                  # edit_flows.utils.helpers.rearrange
+rdkit>=2022.9.5              # MolFromSmiles, GetMolFrags 等基础 API
+numpy>=1.25.0,<2.0           # RDKit 2022.9.5 编译自 NumPy 1.x，2.x 不兼容
+tqdm>=4.64.0                 # 进度条
+tensorboard>=2.13.0          # SummaryWriter
+pyyaml>=6.0                  # YAML 配置解析
+pandas

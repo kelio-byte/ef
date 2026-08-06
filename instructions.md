@@ -50,8 +50,8 @@ nvidia-smi                 # 另一个终端确认 GPU 已释放
 
 如果出现显存不足，可先停止实验进程，再把 `alive.py` 中的 `batch_size` 临时调小；不要在正式
 采样或训练时同时运行它，否则会争抢显存和计算资源，造成速度下降甚至 OOM。脚本没有命令行
-参数，batch size 目前需要直接编辑文件。`alive.py` 和 `requirements.txt` 是本地环境文件，不属于
-模型算法代码。
+参数，batch size 目前需要直接编辑文件。`alive.py` 是本地保活脚本；`requirements.txt` 是仓库中的
+依赖清单，可用于在另一台机器重建 Python 环境。
 
 ## 2. 训练
 
@@ -368,5 +368,26 @@ Euler-Beam 对比。若必须复现旧指标，应单独建立输出目录并在
   并用 `nvidia-smi` 查看 GPU 利用率；
 - **想只重新打分**：使用 `eval.py --score_only` 或直接运行 `score_#global#.py`；
 - **想检查命令而不运行**：使用 `eval.py --dry_run` 或各脚本的 `--help`。
+
+## 12. 跨机器迁移（包括 A6000）
+
+当前分支已经跟踪项目代码、配置以及 `datasets/USPTO_50K_PtoR_aug20_#global#` 下的训练/验证/测试
+文件和 pre-aligned 文件；clone 后不需要再次复制这些数据。模型 checkpoint（`.pt`）、`results/`、
+`visualizations/` 和本地 `alive.py` 不属于仓库，需要按需单独传输。
+
+```bash
+git clone -b task18-all-branches-eval \
+  https://github.com/kelio-byte/ef.git
+cd ef
+export PY=/path/to/python
+$PY -m pip install -r requirements.txt
+$PY -m pip install -e .
+$PY -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+```
+
+A6000 使用通用 CUDA 路径，与 3090 可运行同一代码。为了复现实验，首次仍固定
+`batch_size=128`、`num_workers=2` 和 `seed=42`；A6000 的额外显存不应直接改变 batch size。跨机器
+确认流程后，再用短 smoke test 比较 `num_workers=2/4/8` 的实际 step throughput；worker 数量主要消耗
+CPU/RAM，不能仅凭 GPU 显存大小决定。
 
 最后更新：2026-08-06
