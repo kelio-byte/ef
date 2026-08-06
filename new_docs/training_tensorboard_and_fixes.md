@@ -75,11 +75,17 @@ tensorboard:
   enabled: true
   log_dir: tensorboard
   log_interval: 100
-  validation_interval: 10000
-  validation_batches: 100   # null 表示完整 validation split
+  validation_start_step: 100000
+  validation_interval: 20000
+  validation_batches: null   # 完整 validation split
   flush_interval: 500
   flush_secs: 30
 ```
+
+当前推荐的正式训练策略是从 100,000 steps 开始、每 20,000 steps 验证一次。这样在
+600,000-step 训练中约验证 26 次；3090 上完整 validation 每次约 39 秒，总开销约
+17 分钟。短 pilot 可以把 `validation_start_step` 改小，并把 `validation_batches` 改为
+100，以便更快检查曲线。
 
 正式重训前，可以先将 `total_steps` 改成很小的值做 pilot；确认曲线、显存和吞吐正常
 后再恢复 `600000`。这种 pilot 应使用新 checkpoint 目录，不覆盖已有实验结果。
@@ -112,9 +118,9 @@ PYTHONPATH=. python scripts/train_retro.py \
   --device cuda
 ```
 
-如果要完整 validation，而不是配置中的 100 个 batch，将
-`tensorboard.validation_batches` 改成 `null`。频繁 validation 会增加训练时间；pilot
-可保留 10～100 个 batch，正式比较时再固定一个一致的 validation 范围。
+如果只想做快速 pilot，将 `tensorboard.validation_batches` 改为 10～100；正式比较时
+建议保持 `null`，使用完整 validation。`validation_start_step` 可以控制何时开始验证，
+设为 0 表示从第一个满足 interval 的 update 开始。
 
 ## 5. 预期效果与边界
 
@@ -147,5 +153,6 @@ tiny/mini/full test protocol 上比较 Top-1～10、invalid rate、运行时间�
 - [x] 数据行数与 alignment 边界检查
 - [x] validation 与最佳 checkpoint
 - [x] TensorBoard 配置、lambda/loss/schedule 监控
+- [x] validation 延迟到 100k steps，并将 interval 调整为 20k
 - [ ] 用 `retro_v2.yaml` 做正式 10k～30k pilot，并与旧 checkpoint 在固定 protocol 上比较
 - [ ] pilot 通过后再决定是否启动完整 600k 重训

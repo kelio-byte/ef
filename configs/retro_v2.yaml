@@ -46,13 +46,14 @@ retro:
   keep_checkpoints: 10
   save_best_checkpoint: true
 
-  # Validation and TensorBoard.  validation_batches: null evaluates the full
-  # validation split; a positive integer is useful for frequent pilot checks.
+  # Validation and TensorBoard. Validation starts after the early warmup /
+  # fitting phase; validation_batches: null evaluates the full split.
   tensorboard:
     enabled: true
     log_dir: tensorboard
     log_interval: 100
-    validation_interval: 10000
-    validation_batches: 100
+    validation_start_step: 100000
+    validation_interval: 20000
+    validation_batches: null
     flush_interval: 500
     flush_secs: 30

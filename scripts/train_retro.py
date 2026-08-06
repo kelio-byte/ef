@@ -226,6 +226,20 @@ def log_metrics(writer, prefix: str, metrics: dict, step: int) -> None:
             writer.add_scalar(f"{prefix}/lambda/{name}", metrics[key], step)
 
 
+def validation_due(
+    completed_steps: int,
+    validation_start_step: int,
+    validation_interval: int,
+) -> bool:
+    """Return whether validation should run after this optimizer update."""
+    if validation_interval <= 0 or validation_start_step < 0:
+        return False
+    return (
+        completed_steps >= validation_start_step
+        and completed_steps % validation_interval == 0
+    )
+
+
 def evaluate_model(
     model,
     loader,
@@ -368,7 +382,17 @@ def main():
     validation_interval = int(tensorboard_cfg.get(
         "validation_interval", cfg.get("validation_interval", 0),
     ))
-    need_validation = validation_interval > 0
+    validation_start_step = int(tensorboard_cfg.get(
+        "validation_start_step", cfg.get("validation_start_step", 0),
+    ))
+    if validation_interval < 0 or validation_start_step < 0:
+        raise ValueError(
+            "validation_interval and validation_start_step must be non-negative"
+        )
+    need_validation = (
+        validation_interval > 0
+        and validation_start_step <= int(cfg["total_steps"])
+    )
     train_generator = None
     val_generator = None
     if seed is not None:
@@ -638,8 +662,11 @@ def main():
 
                 if (
                     val_loader is not None
-                    and validation_interval > 0
-                    and completed_steps % validation_interval == 0
+                    and validation_due(
+                        completed_steps,
+                        validation_start_step,
+                        validation_interval,
+                    )
                 ):
                     rng_before_val = capture_rng_state(train_generator)
                     val_metrics = evaluate_model(

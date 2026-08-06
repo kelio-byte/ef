@@ -1,6 +1,14 @@
 import torch
 
-from scripts.train_retro import EpochRandomSampler
+from scripts.train_retro import EpochRandomSampler, validation_due
+
+
+def test_validation_due_respects_start_step_and_interval():
+    assert not validation_due(99_999, 100_000, 20_000)
+    assert validation_due(100_000, 100_000, 20_000)
+    assert not validation_due(110_000, 100_000, 20_000)
+    assert validation_due(120_000, 100_000, 20_000)
+    assert not validation_due(120_000, 100_000, 0)
 
 
 def test_epoch_random_sampler_reconstructs_remaining_permutation():
