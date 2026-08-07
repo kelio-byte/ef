@@ -223,6 +223,37 @@ H[d, token_or_gap]
 H = softplus(raw_H) + epsilon
 ```
 
+#### 推荐的第一版 guidance model 架构
+
+第一版不直接改造当前 10 层的 Edit Flows 主模型，而是训练一个独立、较小的
+product-conditioned guidance adapter。这样可以冻结基础 checkpoint，也便于做
+`guidance off/on` 的严格对照。
+
+推荐结构如下：
+
+```text
+product tokens c
+    → product encoder：2 层 Transformer，hidden=256，heads=8，FFN=1024
+    → masked mean/pooling 得到 product context
+
+current tokens x_t + time embedding t + product context
+    → state encoder：4 层 Transformer，hidden=256，heads=8，FFN=1024
+    → 每个当前序列位置的 hidden state
+
+hidden state
+    ├─ insert head：MLP 256 → 256 → V_edit，softplus 得 H_ins
+    ├─ substitute head：MLP 256 → 256 → V_edit，softplus 得 H_sub
+    └─ delete head：MLP 256 → 256 → 1，softplus 得 H_del
+```
+
+其中 `V_edit` 使用当前 Edit Flows 的词表大小，不能使用 Molecule Transformer 的词表。
+插入位置的定义也必须沿用当前 Euler 的位置约定。第一版总参数量预计约 5～10M，远小于
+基础 Edit Flows checkpoint；训练时冻结基础模型，只更新 guidance 参数。
+
+这不是论文固定坐标公式的最终 Z-space 实现，而是可验证的 action-level 近似。只有当
+它通过概率闭合和 synthetic 测试后，才考虑把 product encoder/state encoder 改成更严格
+的 aligned Z-space guidance。
+
 ### 2.4 guidance model 的训练目标
 
 对终点真实 token 对应的 guidance 输出，使用正值 Bregman loss：
@@ -241,6 +272,26 @@ L_h = H - r log(H)
 
 如果有高质量目标样本，可以额外加入 guided posterior 的交叉熵正则；但第一版不加入，
 避免把普通监督学习误判为 DGM 收益。
+
+#### 训练数据量和时间估计
+
+guidance 训练不需要把 800,000 条 augmentation 行全部复制成独立样本。第一版可以对每个
+unique product 生成一个基础 Euler 终点 `y`，保存 `(c, y, reward)`，训练时在线重新采样
+`t` 和 `x_t`。这样同一个终点可以被多个时间点复用，也避免把同一 product 的 augmentation
+随机拆到 train/validation 两侧。
+
+在 RTX 3090 上的保守估计如下；实际时间以阶段 3 的小批量 benchmark 为准：
+
+| 阶段 | 数据规模 | guidance 训练 | 其他主要时间 |
+|---|---:|---:|---:|
+| synthetic smoke | 已知 toy 分布 | 小于 5 分钟 | 小于 5 分钟 |
+| pilot | 约 2,000 products | 10～30 分钟 | 基础采样/RDKit 约 5～20 分钟 |
+| validation 规模 | 约 10,000 products | 30～120 分钟 | 基础采样约 20～90 分钟 |
+| train 规模 | 约 20,000～40,000 unique products | 1～4 小时 | 基础采样约 1～4 小时 |
+
+这些估计不包含旧版 Molecular Transformer 的兼容改造。forward reward 的实际瓶颈可能是
+模型加载和逐候选评分，而不是 guidance 本身，因此必须先用 RDKit reward 完成接口和
+guidance mechanics benchmark。
 
 ### 2.5 DGM 推理 pipeline
 
@@ -587,6 +638,71 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 如果这些材料不完整，先不要把 forward reward 放进主实验。可以先用 RDKit reward 验证
 接口，也可以先训练一个独立、可复现的 forward model，但这应作为单独的模型任务记录。
 
+### 5.4 已上传的 Molecular Transformer checkpoint
+
+你上传的文件是：
+
+```text
+new_checkpoints/MIT_mixed_augm_model_average_20.pt
+大小约 150 MB
+```
+
+它对应官方
+[`pschwllr/MolecularTransformer`](https://github.com/pschwllr/MolecularTransformer)
+项目的 `MIT_mixed_augm` 模型。官方 README 说明该项目使用旧版 OpenNMT-py，典型模型是
+reactants/reagents → product 的 Transformer；官方推理入口是 `translate.py`，预处理使用
+SMILES 正则分词、RDKit canonicalization，并通过 `batch_size`、`max_length` 和 beam 生成
+预测。具体配置和 tokenization 以官方
+[`README`](https://github.com/pschwllr/MolecularTransformer#pre-processing)、
+[`preprocess.py`](https://github.com/pschwllr/MolecularTransformer/blob/master/preprocess.py)
+和 [`translate.py`](https://github.com/pschwllr/MolecularTransformer/blob/master/translate.py)
+为准。
+
+对本地 checkpoint 做了只读检查，发现它包含：
+
+```text
+vocab / optim / model / opt / generator
+```
+
+嵌入配置为：
+
+```text
+encoder/decoder：Transformer，各 4 层
+hidden / word vector：256
+heads：8
+FFN：2048
+dropout：0.1
+shared source/target embeddings：是
+词表输出维度：297
+Noam warmup：8000
+```
+
+checkpoint 本身保存的是旧版 `torchtext.vocab.Vocab` 对象。当前 `/root/autodl-tmp/ef`
+环境没有旧版 `torchtext`，因此直接 `torch.load` 会失败；官方仓库还要求非常老的
+PyTorch 0.4.1 和 `torchtext==0.3.1`。这意味着它**不能直接当作当前项目的 PyTorch 模型
+导入**，后续需要二选一：
+
+1. 建立隔离的旧版 OpenNMT/torchtext 环境，调用官方 `translate.py`；或
+2. 编写兼容加载器，将 checkpoint 的 state dict 和 vocabulary 移植到当前环境。
+
+在没有完成最小 forward smoke 前，不把它直接接入 DGM 主实验。
+
+还需要特别注意：
+
+- Molecular Transformer 词表（约 297 个 token）与当前 Edit Flows 词表不同，不能混用；
+- 当前任务是 product → reactants，而该 checkpoint 的常规方向是 reactants/reagents →
+  product，理论上适合做 forward consistency，但必须用一条已知反应先确认输入方向和
+  输出方向；
+- 如果用 forward likelihood 作为 reward，官方 `translate.py` 主要负责生成，而不是
+  直接返回给定 product 的 teacher-forced log-likelihood，需要额外实现评分接口；
+- 如果使用 beam 生成后只判断是否重建 product，也必须记录 beam size、canonicalization、
+  tokenization 和 reward 版本；
+- Molecular Transformer 的 source tokenization 必须使用它自己的正则和 vocabulary，不能
+  直接套当前 `example.vocab.src`。
+
+因此，这个 checkpoint 很有价值，但它属于阶段 7 的 forward reward 资产，不是阶段 0～6
+的阻塞条件。第一版仍然先用 RDKit reward 和 synthetic target 验证 DGM mechanics。
+
 ---
 
 ## 6. reward 是先实现，还是 baseline 之后再加？
@@ -692,3 +808,29 @@ DGM 实现。
 
 本文完成后，下一步应从阶段 0 和阶段 1 开始，而不是直接下载/训练 forward model 或
 修改当前默认 Euler-Beam。
+
+---
+
+## 10. 可自主推进的范围和必须请你决策的情况
+
+在你休息期间，可以安全自主推进以下工作：
+
+- 检查 Molecular Transformer checkpoint 和官方 tokenization；
+- 编写只读 checkpoint 检查、reward 接口和 synthetic DGM 测试；
+- 使用 validation 子集建立 baseline，不读取 test target；
+- 实现 RDKit validity reward 和缓存；
+- 训练小规模 guidance adapter，记录 loss、reward/H 相关性、ESS 和运行时间；
+- 运行单元测试、smoke test、guidance off/on 对照；
+- 更新本文档和任务规划，并为每个阶段创建范围明确的 Git commit。
+
+以下情况必须暂停并请你决定，不会擅自选择研究目标：
+
+1. validity reward 与 forward-consistency reward 得出相互冲突的主结论，需要决定论文主线；
+2. 需要选择“提高 Top-1”还是“提高 Oracle/Top-10/validity”作为主要优化目标；
+3. Molecular Transformer 旧环境移植失败，必须决定隔离旧环境、移植模型，还是暂时放弃
+   forward reward；
+4. 需要重新训练基础 Edit Flows、训练新的 forward model，或修改已有 checkpoint/数据集；
+5. 某个 reward 造成明显的粒子坍缩，而不同的稳定化方案代表不同研究假设。
+
+除此之外，我会继续按本文档推进，不等待逐步确认；实验结束后如果没有新的 GPU 任务，
+会启动 `alive.py` 保持机器在线，并保留日志、metadata 和 Git 记录。

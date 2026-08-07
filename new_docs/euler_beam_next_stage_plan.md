@@ -2454,6 +2454,11 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 详细的训练 pipeline、推理流程、适配难点、准备清单和阶段门槛见
 [`new_docs/dgm.md`](dgm.md)。当前只完成设计，不把设计文档视为已完成实验。
 
+2026-08-07 进一步检查了用户上传的
+`new_checkpoints/MIT_mixed_augm_model_average_20.pt`：确认它是旧版 OpenNMT/torchtext
+格式的 Molecular Transformer forward checkpoint 候选（约 4 层、hidden 256、FFN 2048、
+8 heads、共享词表），当前阶段不阻塞 DGM；需要在阶段 7 再做隔离加载或移植验证。
+
 ### 34.A 方法/改进介绍
 
 Euler-SMC的bootstrap阶段令`target=proposal`，因此权重恒等、ESS不提供额外排序信息。
