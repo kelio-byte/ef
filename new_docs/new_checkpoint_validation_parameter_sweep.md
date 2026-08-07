@@ -20,7 +20,9 @@ Top-1～10、legacy best-rank aggregation。预测和 diagnostics 暂存于
 
 新 checkpoint 的模型结构、训练目标和主要超参数没有改变：hidden=256、10 层、8 heads、
 FFN=2048、dropout/attention dropout=0.3、batch=128、600k updates、Noam warmup=8000、
-cubic flow scheduler、`use_origin_mask=False`。权重中仍没有 `origin_embedding`。
+cubic flow scheduler、`use_origin_mask=False`。权重中仍没有 `origin_embedding`。其嵌入
+config 实际记录 `num_workers=4`（模板 `retro_v2.yaml` 默认 2），这只改变 DataLoader
+吞吐/预取，不改变模型目标；validation 仍从 100k 开始、每 20k 一次。
 
 会改变模型参数轨迹的改动有两类：
 
