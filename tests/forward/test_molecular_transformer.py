@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from edit_flows.forward import (
+    forward_log_likelihood_reward,
     load_molecular_transformer,
     positive_forward_reward,
     smi_tokenize,
@@ -29,6 +30,17 @@ def test_positive_forward_reward_is_finite_and_monotone() -> None:
     assert torch.isfinite(values).all()
     assert torch.all(values[1:] > values[:-1])
     assert torch.all((values > 0) & (values <= 1))
+
+
+def test_forward_reward_invalid_pair_gets_finite_floor() -> None:
+    class FakeScorer:
+        def score_batch(self, *_args, **_kwargs):
+            raise AssertionError("invalid pair should not reach the model")
+
+    values = forward_log_likelihood_reward(
+        FakeScorer(), ["CC<bad>"], ["CCO"]
+    )
+    assert values.tolist() == [-20.0]
 
 
 @pytest.mark.skipif(

@@ -7,7 +7,11 @@ from collections.abc import MutableMapping, Sequence
 import torch
 from torch import Tensor
 
-from .molecular_transformer import MolecularTransformerScorer, retro_global_to_smiles
+from .molecular_transformer import (
+    MolecularTransformerScorer,
+    retro_global_to_smiles,
+    smi_tokenize,
+)
 
 
 def forward_log_likelihood_reward(
@@ -17,6 +21,7 @@ def forward_log_likelihood_reward(
     *,
     batch_size: int = 64,
     cache: MutableMapping[tuple[str, str], float] | None = None,
+    invalid_score: float = -20.0,
 ) -> Tensor:
     """Score Edit Flows candidates with a frozen forward model.
 
@@ -34,13 +39,26 @@ def forward_log_likelihood_reward(
 
     if len(reactants_global) != len(products_global):
         raise ValueError("reactants_global and products_global must have equal length")
-    normalized = [
-        (retro_global_to_smiles(reactant), retro_global_to_smiles(product))
-        for reactant, product in zip(reactants_global, products_global)
-    ]
-    scores = torch.empty(len(normalized), dtype=torch.float32)
+    if not torch.isfinite(torch.tensor(float(invalid_score))):
+        raise ValueError("invalid_score must be finite")
+    normalized: list[tuple[str, str] | None] = []
+    scores = torch.full(
+        (len(reactants_global),), float(invalid_score), dtype=torch.float32
+    )
     pending: dict[tuple[str, str], list[int]] = {}
-    for index, key in enumerate(normalized):
+    for index, (reactant, product) in enumerate(zip(reactants_global, products_global)):
+        try:
+            key = (retro_global_to_smiles(reactant), retro_global_to_smiles(product))
+            # Validate with the same tokenizer used by the scorer.  This keeps
+            # one malformed terminal state from aborting an entire batch.
+            if not key[0] or not key[1]:
+                raise ValueError("empty normalized SMILES")
+            smi_tokenize(key[0])
+            smi_tokenize(key[1])
+        except (TypeError, ValueError):
+            normalized.append(None)
+            continue
+        normalized.append(key)
         if cache is not None and key in cache:
             scores[index] = float(cache[key])
         else:
