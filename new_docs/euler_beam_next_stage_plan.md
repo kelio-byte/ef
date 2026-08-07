@@ -2449,7 +2449,10 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 
 ## 34. 任务 31：独立target/reward选择与Terminal Twisting
 
-状态：`[ ] 已完成候选方案说明和实验占位；等待确定研究目标，尚未接入reward`
+状态：`[x] 已完成 DGM 方案文档和实施顺序；[ ] 尚未接入 reward/guidance model`
+
+详细的训练 pipeline、推理流程、适配难点、准备清单和阶段门槛见
+[`new_docs/dgm.md`](dgm.md)。当前只完成设计，不把设计文档视为已完成实验。
 
 ### 34.A 方法/改进介绍
 
