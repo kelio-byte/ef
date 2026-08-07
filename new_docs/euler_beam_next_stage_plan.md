@@ -2531,6 +2531,19 @@ Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
 - reward实现commit：`[待填写]`
 - validation结论commit：`[待填写]`
 
+### 34.I 新训练 checkpoint tiny 回归（2026-08-07）
+
+状态：`[x] 新旧 checkpoint 完成同配置 R9K1M2 配对复测`
+
+在 A6000 完成新模型训练后，先在 tiny（50 个完整反应）上冻结 R9K1M2、100 steps、
+seed42、bonus0.5、`stochastic_noop`、TF32 high 和相同状态 forward sharing。新 checkpoint
+相对旧 checkpoint 的 Top-1/2/3/5/10 为 `58/74/78/84/90` 对 `60/70/80/84/84`，Oracle
+为 `92` 对 `98`，采样时间约 `113.49s` 对 `114.72s`。结论是覆盖下降但尾部排序改善，
+tiny 不足以决定替换模型；详细过程、SHA 和结果目录见
+[`new_checkpoint_tiny_evaluation.md`](new_checkpoint_tiny_evaluation.md)。
+
+本次还修复了 PyTorch 2.6+ 的 checkpoint 加载兼容问题，代码 commit 为 `88a0f2e`。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
