@@ -2,8 +2,9 @@
 
 状态：阶段 1 synthetic mechanics 已通过；阶段 2 reward 评估接口已完成；阶段 3 正式
 train/validation guidance 数据已生成并审计通过；阶段 4 action-level guidance 训练和
-held-out 观测已通过最低门槛；阶段 5 ordinary Euler action-level adapter 已实现并通过
-identity smoke，尚未做大规模准确率结论。
+held-out 观测已通过最低门槛；阶段 5 ordinary Euler action-level adapter 已实现，identity
+和 validation-200 off/on 对照均完成。当前实现机制通过，但 validity reward 尚未通过准确率
+收益门槛；下一步转向阶段 7 的 forward reaction reward，默认采样仍关闭 guidance。
 
 本文面向本项目的实际实现，说明如何把
 `Discrete Guidance Matching (DGM)` 适配到当前的 Edit Flows 推理流程。文中把
@@ -694,7 +695,8 @@ python scripts/train_guidance.py \
 
 ### 阶段 5：先接普通 Euler，不接 Beam
 
-在普通 Euler 上做最小 A/B：
+在普通 Euler 上做最小 A/B（这里的 `n_samples=3` 是 3 条独立 Euler 轨迹，不是
+Euler-Beam 的 `R3K3`）：
 
 ```text
 同一 checkpoint
@@ -728,9 +730,21 @@ guidance off vs guidance on
   block）、每 product 两个输出：baseline 与 guidance beta=0 的 prediction SHA 完全相同，
   `cmp` 通过；baseline wall **2.376s**、beta=0 **2.317s**。beta=1 改变 25/40 行，wall
   **2.952s**、peak allocated/reserved **0.297/0.415GB**，输出 40 行且均保留正常格式；
-  该单 reaction block 的 RDKit-valid 为 baseline **25/40 (62.5%)**、beta=1 **24/40
-  (60.0%)**，Top-k 不能在一条 reaction 上解释，暂不据此淘汰 guidance。下一步用未参与
-  training 的 validation 子集做固定预算 off/on 对照。
+ 该单 reaction block 的 RDKit-valid 为 baseline **25/40 (62.5%)**、beta=1 **24/40
+  (60.0%)**，Top-k 不能在一条 reaction 上解释，暂不据此淘汰 guidance。随后在未参与
+ training 的 validation reaction 200–399（200 个完整反应、ordinary Euler 的
+ `n_samples=3`、100 steps、seed=42）完成了固定预算 off/on：
+
+| 配置 | Top-1 | Top-2 | Top-3 | Top-5 | Top-10 | Oracle | invalid@1/2/3 | mean final rank | wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| guidance off | 51.0% | 66.5% | 72.0% | 77.0% | 83.5% | 86.5% | 11.675/11.225/12.425% | 2.474 | 253.0s |
+| validity guidance, β=1 | 51.0% | 64.5% | 71.5% | 78.5% | 83.5% | 86.5% | 11.875/11.875/10.875% | 2.416 | 381.2s |
+
+guided 输出约 **1.51×** baseline wall；Top-1、Top-3、Top-10 和 Oracle 没有提升，Top-2
+下降 2 个百分点，只有 rank tail 和 invalid 分布出现小幅变化。因此 mechanics/metadata/
+identity 门槛通过，但 validity reward 的真实准确率门槛失败，不把它设为默认 guidance，也
+不继续在 Euler-Beam 上叠加这个弱 reward。下一步优先检查阶段 7 的独立 forward reaction
+model：先完成 checkpoint/tokenizer/方向 smoke，再封装 terminal forward reward。
 
 ### 阶段 6：固定预算下接 Euler-Beam / Euler-SMC
 
@@ -790,10 +804,10 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 | 0 | 冻结 baseline | 同 seed predictions SHA 可复现；guidance off 与当前 Euler 完全一致；指标和 metadata 齐全 | 部分已有历史基线，DGM 专用快照待做 |
 | 1 | synthetic DGM | 已知 `q ∝ pR` 的采样频率、后验重加权、ESS/evidence 与理论一致；常数 guidance 不改变 `p` | 代数工具和 19 个测试通过，多步 rollout 待做 |
 | 2 | RDKit validity reward | reward 有限、非负、批量结果可复现且不读取 test target；invalid/ESS 变化可解释 | `[x]` 接口/格式转换/缓存/terminal smoke 通过；validity 仅保留为诊断 reward，未证明准确率提升 |
-| 3 | guidance 数据生成 | 按 product 隔离 train/validation；样本近似基础 `pθ`；保存 product、终点、reward、`t`、alignment、seed | 接口/CPU 测试/真实 5-product smoke 通过；正式大数据生成待做 |
-| 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | action targets/trainer/CPU smoke 完成；等待正式数据 |
-| 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 未开始 |
-| 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 未开始 |
+| 3 | guidance 数据生成 | 按 product 隔离 train/validation；样本近似基础 `pθ`；保存 product、终点、reward、`t`、alignment、seed | 正式 train/validation 生成、审计和 BOS 修复完成 |
+| 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | balanced action-level 训练、held-out 校准和成本测量完成 |
+| 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 机制通过；validation-200 validity reward 未提升 Top-k，默认关闭 |
+| 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 暂缓，等待更有信息量的 forward reward |
 | 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分 | checkpoint 已检查，兼容未做 |
 | 8 | 严格 Z-space DGM | GAP/变长动作映射明确；synthetic 和 identity-limit 测试通过；才可使用 exact DGM 表述 | 未开始 |
 
@@ -1059,12 +1073,13 @@ DGM 实现。
 - [ ] 决定第一版使用 RDKit validity reward。
 - [ ] 确认是否拥有可靠的 forward model 权重和推理接口。
 - [ ] 训练最小 guidance adapter，不修改基础 checkpoint。
-- [ ] 先在普通 Euler 上完成 guidance off/on A/B。
-- [ ] 通过后再接 Euler-Beam/Euler-SMC。
+- [x] 先在普通 Euler 上完成 guidance off/on A/B，并完成 validation-200 对照。
+- [ ] 只有独立 reward 在普通 Euler 上通过准确率门槛后，再接 Euler-Beam/Euler-SMC。
 - [ ] 最后才在 validation 上选择 forward reward 和 `β`，再运行 test。
 
-本文完成后，下一步应从阶段 0 和阶段 1 开始，而不是直接下载/训练 forward model 或
-修改当前默认 Euler-Beam。
+本文当前阶段的下一步是阶段 7：先对已有 Molecular Transformer checkpoint 做隔离的
+加载、tokenization 和方向 smoke，再决定是否实现批量 terminal forward reward；在此之前
+不修改当前默认 Euler-Beam，也不把 validity guidance 打开为默认配置。
 
 ---
 

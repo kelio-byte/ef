@@ -2450,8 +2450,8 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 ## 34. 任务 31：独立target/reward选择与Terminal Twisting
 
 状态：`[-] DGM 阶段 1 mechanics、阶段 2 reward/terminal smoke、阶段 3 guidance 数据和
-阶段 4 action-level training/held-out 校准已完成；validity 未带来覆盖提升，阶段 5 ordinary
-Euler guidance 待接入`
+阶段 4 action-level training/held-out 校准已完成；阶段 5 ordinary Euler 已完成 identity
+与 validation-200 对照，但 validity 未带来 Top-k 覆盖提升；阶段 7 forward reward 待接入`
 
 详细的训练 pipeline、推理流程、适配难点、准备清单和阶段门槛见
 [`new_docs/dgm.md`](dgm.md)。当前只完成设计，不把设计文档视为已完成实验。
@@ -2596,7 +2596,20 @@ Euler guidance off/on。
   新增 guidance checkpoint/beta CLI，并修复普通 Euler seed 未应用的问题。20 行输入、
   100 steps、两输出的 baseline/beta0 prediction SHA 完全相同；beta1 改变 25/40 行，
   wall 2.952s、peak allocated/reserved 0.297/0.415GB。该单 reaction block 的 valid
-  率 62.5%→60.0% 仅作 mechanics 记录，尚无准确率结论；下一步为 validation off/on。
+ 率 62.5%→60.0% 仅作 mechanics 记录。随后在未参与 guidance 训练的 validation reaction
+ 200–399（200 个完整反应、ordinary Euler `n_samples=3`、100 steps、seed=42）完成固定预算
+ off/on：
+
+| 配置 | Top-1 | Top-2 | Top-3 | Top-5 | Top-10 | Oracle | invalid@1/2/3 | mean final rank | wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| guidance off | 51.0% | 66.5% | 72.0% | 77.0% | 83.5% | 86.5% | 11.675/11.225/12.425% | 2.474 | 253.0s |
+| validity guidance, β=1 | 51.0% | 64.5% | 71.5% | 78.5% | 83.5% | 86.5% | 11.875/11.875/10.875% | 2.416 | 381.2s |
+
+因此阶段 5 的接口、seed、identity 和输出一致性门槛通过，但 validity reward 的准确率
+门槛未通过：Top-1/3/10 和 Oracle 持平，Top-2 下降 2 个百分点，推理 wall 约为 baseline
+的 1.51 倍。当前 guidance 默认关闭，不继续把这个弱 reward 接到 Euler-Beam/SMC；下一步
+应优先完成阶段 7 的独立 Molecular Transformer checkpoint/tokenizer/方向 smoke，获得
+更贴近逆合成正确性的 forward reward。
 
 ### 34.G 结果表（占位）
 
@@ -2616,6 +2629,8 @@ Euler guidance off/on。
 - action targets/trainer、BOS sampling invariant 和独立训练入口：`0591957`
 - sparse action balanced loss、pilot/epoch1 训练记录：`3ea5a67`
 - validation/正式 guidance 数据结论 commit：`8eaaeb5`
+- ordinary Euler guidance identity 与 validation-200 对照代码：`2a5a078`
+- validation-200 validity guidance 结论：`[本轮提交后填写]`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）
 
