@@ -2672,6 +2672,9 @@ Euler guidance off/on。
 - ordinary Euler guidance identity 与 validation-200 对照代码：`2a5a078`
 - validation-200 validity guidance 结论：`8bf9c8f`
 - Molecular Transformer 兼容加载、tokenizer、forward reward adapter：`8ae00b9`
+- forward guidance data、pilot/充分训练/β 对照文档：`7514e1e`, `f2a1489`, `39be0dd`, `c9bf3bd`
+- DG-0 Z-space 映射、DG-1 action-weight identity、fixed-coordinate toy：`b22f2d7`, `32aaa0f`, `3553b9e`
+- 可复现 Z-space 审计脚本与最终记录：`f382dd8`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）
 
@@ -2769,7 +2772,8 @@ Record final Top-k and performance validation
 
 代码/数据资产：`7514e1e`（forward guidance data）；pilot checkpoint 和三组采样结果均
 保存在 `/root/autodl-tmp/dgm_guidance_runs/` 外部实验目录，未写入 Git。结果已在本文和
-`new_docs/dgm.md` 中登记；本节结论对应文档提交（待填写）。
+`new_docs/dgm.md` 中登记；pilot/充分训练/低强度复核的文档提交分别为 `f2a1489`、
+`39be0dd`、`c9bf3bd`。
 
 通过项：Molecular Transformer 兼容加载、官方 tokenizer、reactants→product 方向、批量
 缓存、forward reward/H 的可学习性。pilot、2,500-step 充分训练和 β=0.10 低强度复核都未通过在
@@ -2795,7 +2799,8 @@ X-space 插入锚点和 operation channel（`insert: token`、`substitute: token
 只有 **7,676/100,020（7.674%）** 的整行 source→target 对只改变一个坐标。结论是当前
 变长 Edit Flow 不能直接称为论文 exact posterior；下一阶段必须保留 GAP 身份实现固定
 Z-state transition，或明确采用 action-level approximate guidance。该审计只改变独立模块，
-默认 sampler、checkpoint 和历史结果不变。
+默认 sampler、checkpoint 和历史结果不变。代码与测试提交为 `b22f2d7`、`32aaa0f`、
+`3553b9e`；审计脚本和最终文档提交为 `f382dd8`。
 
 同一隔离模块新增 `compose_edit_action_log_weights()`，把基础模型的
 `[rate_ins, rate_sub, rate_del]` 与 token log-prob 组合为
