@@ -519,7 +519,7 @@ reward-only 诊断；reward 只读取采样终点，不读取 target，target �
   global-align 与 RDKit）；输出完全一致；
 - 同一预测文件的评分对照为 Top-1/2/3/10 = **70.0/84.5/90.5/93.5%**，Oracle-any
   **95.5%**。这些是 baseline 诊断值，不是 validity twisting 带来的提升；尚未运行
-  reward-guided sampler，因此不把阶段 2 记为最终通过。
+  reward-guided sampler，因此不把这组数字误称为 reward-guided 提升。
 - 新增 `terminal_twist_target_increment()` 与 `apply_terminal_twist()`：在已有终点粒子上
   只施加 `exp(βR)` 的 target/proposal 比值；synthetic 测试验证指数倾斜、`β=0` identity
   limit、ESS/evidence 以及输入校验均通过。它仍是独立 adapter，不会改变默认
@@ -563,6 +563,38 @@ alignment / mask
 seed
 baseline checkpoint id
 ```
+
+#### 阶段 3 当前实现记录（2026-08-07）
+
+已完成不依赖 GPU 的数据格式和生成器实现：
+
+- `edit_flows/guidance/data.py` 提供 `sample_intermediate_states()`，沿用
+  `opt_align_xs_to_zs → sample_cond_zt → rm_gap_tokens`，输入/输出都显式保留 BOS，返回
+  可直接送入 action-level guidance adapter 的 `x_t`；同时提供记录校验、`.pt` 保存/加载和
+  padding collate；
+- `scripts/generate_guidance_data.py` 只调用普通 Euler，按 `augmentation` 先取每个原始
+  product 的一个代表行，绝不读取 target，也不使用 Euler-Beam；每条记录保存 product、
+  `x_t`、`t`、generated terminal、reward、source/sample/time index、采样和 coupling seed；
+- 默认 reward 是 RDKit validity，tokenized/global-aligned 终点会先 compact + inverse
+  align；metadata 记录 checkpoint、scheduler、n_steps、n_samples、time_samples、seed 和
+  batch RNG 作用域；
+- CPU 单元测试 `14 passed`（含 4 个 data tests），脚本 `--help` 和静态编译通过；尚未
+  启动真实 checkpoint 生成，因此阶段3仍需一个短 CUDA 生成 smoke 后才算通过。
+
+推荐的首次 smoke（运行前先停止 `alive.py`，结束后立即重启）是：
+
+```bash
+python scripts/generate_guidance_data.py \
+  --checkpoint new_checkpoints/checkpoint_step600000.pt \
+  --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/val/src-val.txt" \
+  --output /tmp/dgm_guidance_val5.pt \
+  --augmentation 20 --max_products 5 \
+  --n_steps 20 --n_samples 1 --time_samples 2 \
+  --batch_size 2 --device cuda --seed 42
+```
+
+该 smoke 只验证数据条数、reward 分布、状态长度、seed/metadata 和运行时间，不使用
+validation target 选择超参，也不训练 guidance model。
 
 ### 阶段 4：训练最小 guidance model
 
@@ -662,7 +694,7 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 | 0 | 冻结 baseline | 同 seed predictions SHA 可复现；guidance off 与当前 Euler 完全一致；指标和 metadata 齐全 | 部分已有历史基线，DGM 专用快照待做 |
 | 1 | synthetic DGM | 已知 `q ∝ pR` 的采样频率、后验重加权、ESS/evidence 与理论一致；常数 guidance 不改变 `p` | 代数工具和 19 个测试通过，多步 rollout 待做 |
 | 2 | RDKit validity reward | reward 有限、非负、批量结果可复现且不读取 test target；invalid/ESS 变化可解释 | `[x]` 接口/格式转换/缓存/terminal smoke 通过；validity 仅保留为诊断 reward，未证明准确率提升 |
-| 3 | guidance 数据生成 | 按 product 隔离 train/validation；样本近似基础 `pθ`；保存 product、终点、reward、`t`、alignment、seed | 未开始 |
+| 3 | guidance 数据生成 | 按 product 隔离 train/validation；样本近似基础 `pθ`；保存 product、终点、reward、`t`、alignment、seed | 生成器与 CPU 测试完成；真实 checkpoint smoke 待做 |
 | 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | 模型和 smoke 已完成，训练未开始 |
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 未开始 |
 | 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 未开始 |

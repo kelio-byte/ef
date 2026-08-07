@@ -2552,6 +2552,11 @@ Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
 - synthetic已知target importance estimate：两步 categorical chain 已通过
 - validation-A/B/C结果：`[待实验]`
 
+阶段 3 数据生成器已完成代码和 CPU 回归：`edit_flows/guidance/data.py` 负责 aligned
+`x_t`、记录保存/加载和 collate，`scripts/generate_guidance_data.py` 只使用普通 Euler、
+按 augmentation 选择原始 product、保存 reward/终点/时间/seed；guidance 测试共 14 个通过。
+真实 checkpoint smoke 尚待在停止 `alive.py` 后运行，完成后必须重新启动 `alive.py`。
+
 ### 34.G 结果表（占位）
 
 | reward/beta | budget | Top-1 | Top-3 | Top-10 | Oracle | invalid | mean ESS | wall |
