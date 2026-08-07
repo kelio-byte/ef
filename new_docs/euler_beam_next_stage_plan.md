@@ -2579,6 +2579,12 @@ mean valid/true-unique=`157.376/23.737`，采样 wall=`2029.18s`（约 33 分 49
 mini 只作为冻结配置后的较大规模 test 确认，没有据其 target 反调参；在运行完整 src-test
 前应先决定是否需要旧 checkpoint 的同规模配对，避免无明确比较目标地再消耗约半小时。
 
+旧 checkpoint 的同配置 mini 配对也已完成：Top-1/3/10=`57.043/78.122/86.114`，
+Oracle=`91.808%`，rank-1 invalid=`13.666%`，wall=`2046.70s`。新 checkpoint 相对它为
+`+1.199/−0.200/+0.300` 个百分点、Oracle `−0.300` 个百分点；差异很小，说明当前
+训练修复没有导致 mini 上的明显退化。alive 保持会话已启动（`/root/autodl-tmp/ef/bin/python
+alive.py`），用于实验结束后的机器保活。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
