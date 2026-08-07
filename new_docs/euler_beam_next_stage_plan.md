@@ -2630,7 +2630,7 @@ Euler guidance off/on。
 - sparse action balanced loss、pilot/epoch1 训练记录：`3ea5a67`
 - validation/正式 guidance 数据结论 commit：`8eaaeb5`
 - ordinary Euler guidance identity 与 validation-200 对照代码：`2a5a078`
-- validation-200 validity guidance 结论：`[本轮提交后填写]`
+- validation-200 validity guidance 结论：`8bf9c8f`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）
 
