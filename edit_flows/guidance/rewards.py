@@ -103,11 +103,18 @@ def retro_tokenized_validity_reward(
     """
     try:
         from scripts.preprocessing.global_align import inverse_global_align
-    except ImportError as exc:  # pragma: no cover - package-layout dependent
-        raise RuntimeError(
-            "scripts.preprocessing.global_align is required for "
-            "retro_tokenized_validity_reward"
-        ) from exc
+    except ImportError:
+        # When this function is called from ``python scripts/foo.py``, Python
+        # puts ``scripts/`` (rather than the repository root) on sys.path.
+        # Support that documented invocation as well as library imports from
+        # the repository root without duplicating the alignment code.
+        try:
+            from preprocessing.global_align import inverse_global_align
+        except ImportError as exc:  # pragma: no cover - package-layout dependent
+            raise RuntimeError(
+                "preprocessing.global_align is required for "
+                "retro_tokenized_validity_reward"
+            ) from exc
 
     def normalize(value: str) -> str:
         compact = "".join(value.split())
