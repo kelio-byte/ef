@@ -828,6 +828,7 @@ forward reward 不是常数且可以被 adapter 学到；这只是可学习性�
 | guidance off | 51.0% | 66.5% | 72.0% | 77.0% | 83.5% | 86.5% | 11.675/11.225/12.425% | 2.474 | 253.0 s |
 | forward guidance, β=1.00 | 50.0% | 67.0% | 71.5% | 77.0% | 80.5% | 83.0% | 11.850/11.500/11.775% | 2.271 | 379.2 s |
 | forward guidance, β=0.25 | 52.5% | 65.5% | 71.5% | 78.5% | 82.5% | 85.5% | 11.325/11.825/12.525% | 2.380 | 380.1 s |
+| forward guidance, β=0.10 (充分训练) | 53.0% | 66.0% | 71.5% | 77.0% | 83.0% | 86.0% | 11.975/11.500/12.850% | 2.494 | 380.0 s |
 
 为排除 adapter 欠训练，又保持上述所有采样条件不变，将同一架构训练到 2,500 steps（两遍
 train data）。训练 wall **644.5 s**、峰值显存 allocated/reserved **2.24/5.11 GB**，
@@ -839,14 +840,15 @@ Oracle 分别再降 2.0、1.0、0.5 个百分点；因此“继续训练即可�
 支持。
 
 这里 β=0.25 的 Top-1 比 baseline 高 1.5 个百分点，但 Top-3 低 0.5、Top-10 低 1.0、
-Oracle 低 1.0 个百分点；β=1.0 的 Top-10/Oracle 分别下降 3.0/3.5 个百分点。两种
-guided 运行的 wall 都约为 baseline 的 **1.50 倍**，主要来自每个 Euler step 的 guidance
-forward。50-reaction 预筛中 β=0.25/0.5 的 Top-1 都下降 4 个百分点，也没有形成稳定
-的全局改善信号。
+Oracle 低 1.0 个百分点；β=1.0 的 Top-10/Oracle 分别下降 3.0/3.5 个百分点。充分训练
+adapter 的 β=0.10 将 Top-1 提高 2.0 个百分点，同时 Top-3/Top-10 各低 0.5 个百分点、
+Oracle 低 0.5 个百分点，属于覆盖基本保住但没有长尾改善的结果。所有 guided 运行的 wall
+都约为 baseline 的 **1.50 倍**，主要来自每个 Euler step 的 guidance forward。50-reaction
+预筛中 β=0.25/0.5 的 Top-1 都下降 4 个百分点，也没有形成稳定的全局改善信号。
 
 因此阶段 7 当前只通过了“checkpoint、方向、批量接口和 guidance 可学习性”门槛，尚未
-通过“固定预算下 Top-1 不回退且 Top-3/10 或 Oracle 稳定提升”的准确率门槛。pilot 与充分
-训练两个 adapter 都未通过，说明瓶颈不只是欠训练。该 forward reward 不能进入默认
+通过“固定预算下 Top-1 不回退且 Top-3/10 或 Oracle 稳定提升”的准确率门槛。pilot、充分
+训练和低强度 β=0.10 三组结果都未通过，说明瓶颈不只是欠训练或 β 过强。该 forward reward 不能进入默认
 Euler/Euler-Beam；后续若继续，应转向独立 reward 校准、终点/候选级的受约束使用，或严格
 Z-space 研究，并保留 baseline 与本轮结果作为对照，不能用 test target 选择 β。
 
@@ -866,7 +868,7 @@ X-space 插入锚点和 Edit Flows 的 operation channel（`insert: token`、
 拒绝该 transition。
 
 单元测试覆盖单坐标三类动作、BOS/多坐标拒绝、唯一插入和连续 GAP 非双射，共 **33 passed**
-（forward/guidance 相关测试集合）。全量 `pytest` 为 **262 passed / 17 failed**；失败全部
+（forward/guidance 相关测试集合）。全量 `pytest` 为 **264 passed / 17 failed**；失败全部
 来自既有 `tests/sampling/test_beam.py` 与当前 `EditCandidate(log_u)` API 不一致及其受影响
 的旧 beam controlled-model 用例，本次隔离 DG-0 没有修改 beam 代码，避免把无关修复混入
 DGM 结论。在 validation 的全部 100,020 条预对齐 augmentation

@@ -2483,6 +2483,7 @@ steps、seed42 的固定预算对照中：
 | guidance off | 51.0% | 66.5% | 72.0% | 77.0% | 83.5% | 86.5% | 11.675/11.225/12.425% | 2.474 | 253.0s |
 | forward guidance, β=1.00 | 50.0% | 67.0% | 71.5% | 77.0% | 80.5% | 83.0% | 11.850/11.500/11.775% | 2.271 | 379.2s |
 | forward guidance, β=0.25 | 52.5% | 65.5% | 71.5% | 78.5% | 82.5% | 85.5% | 11.325/11.825/12.525% | 2.380 | 380.1s |
+| forward guidance, β=0.10 (充分训练) | 53.0% | 66.0% | 71.5% | 77.0% | 83.0% | 86.0% | 11.975/11.500/12.850% | 2.494 | 380.0s |
 
 为排除 adapter 欠训练，又保持上述所有采样条件不变，将同一架构训练到 2,500 steps（两遍
 train data）。训练 wall **644.5s**、峰值显存 allocated/reserved **2.24/5.11GB**，
@@ -2493,11 +2494,12 @@ sampling wall **378.8s**。相对于 pilot，Top-1 再升 1.0 个百分点，但
 Oracle 分别再降 2.0、1.0、0.5 个百分点；继续训练没有恢复覆盖。
 
 β=0.25 虽然 Top-1 比 baseline 高 1.5 个百分点，但 Top-3、Top-10、Oracle 分别低
-0.5、1.0、1.0 个百分点；β=1.0 的 Top-10/Oracle 下降 3.0/3.5 个百分点。guided wall
-约为 baseline 的 **1.50×**。因此 forward reward 的“可学习”门槛通过，固定预算准确率
-门槛未通过；不接入默认 Euler-Beam/SMC。pilot 与充分训练两个 adapter 都未通过，后续若
-继续应转向独立 reward 校准、终点/候选级的受约束使用，或严格 Z-space 研究，并在不重叠
-validation 上复核，不使用 test 调 β。
+0.5、1.0、1.0 个百分点；β=1.0 的 Top-10/Oracle 下降 3.0/3.5 个百分点。充分训练
+adapter 的 β=0.10 将 Top-1 提高 2.0 个百分点，但 Top-3/Top-10 各低 0.5、Oracle 低
+0.5 个百分点。guided wall 约为 baseline 的 **1.50×**。因此 forward reward 的“可学习”
+门槛通过，固定预算准确率门槛未通过；不接入默认 Euler-Beam/SMC。pilot、充分训练和
+β=0.10 都未通过，后续应转向独立 reward 校准、终点/候选级的受约束使用，或严格 Z-space
+研究，并在不重叠 validation 上复核，不使用 test 调 β。
 
 同日完成 DGM 的低风险 utility 子阶段：新增正值 guidance、`p × H` 后验重加权、Bregman
 loss 和 RDKit validity reward 接口；新增 guidance 测试 10 个通过，现有相关回归测试 12
@@ -2770,7 +2772,7 @@ Record final Top-k and performance validation
 `new_docs/dgm.md` 中登记；本节结论对应文档提交（待填写）。
 
 通过项：Molecular Transformer 兼容加载、官方 tokenizer、reactants→product 方向、批量
-缓存、forward reward/H 的可学习性。pilot 与 2,500-step 充分训练 adapter 都未通过在
+缓存、forward reward/H 的可学习性。pilot、2,500-step 充分训练和 β=0.10 低强度复核都未通过在
 200 个完整 validation reaction 的固定预算上同时保持覆盖和 Top-3/10/Oracle 的门槛。
 当前默认采样配置不变，forward reward 仅作为后续校准和诊断资产。
 
@@ -2782,7 +2784,7 @@ Record final Top-k and performance validation
 X-space 插入锚点和 operation channel（`insert: token`、`substitute: token+V`、
 `delete: 2V`）。反向映射返回所有可能的 Z 坐标；连续 GAP run 显式标记
 `ambiguous=True`，要求双射时直接拒绝。相关 guidance/forward 测试集合为 **33 passed**。
-全量 `pytest` 为 **262 passed / 17 failed**；失败来自既有 beam 测试使用
+全量 `pytest` 为 **264 passed / 17 failed**；失败来自既有 beam 测试使用
 `EditCandidate(log_u_real)` 而当前 API 为 `log_u`，以及受影响的旧 controlled-model 用例，
 本次不修改无关 beam 代码。
 
