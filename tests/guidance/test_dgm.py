@@ -6,7 +6,10 @@ from edit_flows.guidance.dgm import (
     positive_guidance,
     positive_guidance_bregman_loss,
 )
-from edit_flows.guidance.rewards import rdkit_validity_reward
+from edit_flows.guidance.rewards import (
+    rdkit_validity_reward,
+    retro_tokenized_validity_reward,
+)
 
 
 def test_guided_posterior_matches_reward_tilting():
@@ -47,3 +50,15 @@ def test_bregman_mask_rejects_empty_selection():
 def test_rdkit_validity_reward_does_not_use_targets():
     values = rdkit_validity_reward(["CCO", "not-a-smiles", "", "C.C"])
     torch.testing.assert_close(values, torch.tensor([1.0, 0.0, 0.0, 1.0]))
+
+
+def test_rdkit_validity_reward_reuses_caller_cache():
+    cache = {}
+    values = rdkit_validity_reward(["CCO", "CCO", "not-a-smiles"], cache=cache)
+    torch.testing.assert_close(values, torch.tensor([1.0, 1.0, 0.0]))
+    assert cache == {"CCO": 1.0, "not-a-smiles": 0.0}
+
+
+def test_retro_tokenized_reward_normalizes_alignment_before_rdkit():
+    values = retro_tokenized_validity_reward(["C C O", "c 1 c c c c c 1", "C ("])
+    torch.testing.assert_close(values, torch.tensor([1.0, 1.0, 0.0]))

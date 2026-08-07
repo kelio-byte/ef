@@ -1,6 +1,7 @@
 # DGM 在 Edit Flows / Euler-Beam 中的适配方案
 
-状态：方案设计阶段，尚未接入 reward 或 guidance model。
+状态：阶段 1 synthetic mechanics 已通过；阶段 2 reward 评估接口已完成，terminal
+twisting 和 learned guidance 尚未接入。
 
 本文面向本项目的实际实现，说明如何把
 `Discrete Guidance Matching (DGM)` 适配到当前的 Edit Flows 推理流程。文中把
@@ -471,6 +472,9 @@ resampling 次数和 wall time，不能只看 Top-1。
 - 新增 `edit_flows/guidance/dgm.py`：正值 guidance、`p × H` 后验重加权、正值
   Bregman loss；
 - 新增 `edit_flows/guidance/rewards.py`：不读取 test target 的 RDKit validity reward；
+- 新增 `retro_tokenized_validity_reward()`：先去掉 token 空格并执行 Edit Flows 的
+  inverse global alignment，再交给 RDKit，避免把序列化格式误判为化学非法；支持调用方
+  cache，适配 augmentation 中的重复候选；
 - 新增 5 个 synthetic/接口测试；全部通过；
 - 现有 `euler_smc` 和 Transformer 相关回归测试 12 个全部通过。
 - 第一版 `ProductConditionedGuidance` smoke 已通过：默认配置参数量约 5.26M，随机输入
@@ -499,6 +503,27 @@ terminal_reward(products, reactants) -> finite reward tensor
 - guidance 接口、metadata 和路径概率是否闭合。
 
 这一步可以先使用 terminal twisting，不必立即训练 learned guidance。
+
+#### 阶段 2 当前验证记录（2026-08-07）
+
+已在 validation 的前 200 个原始反应上复用一组已有的 R9K1M2、`n_steps=100` 预测做
+reward-only 诊断；reward 只读取采样终点，不读取 target，target 只在之后的评分步骤用于
+报告指标。预测文件共有 36,000 行（200 reactions × 20 augmentations × 9 candidates）。
+
+- 正确流程是 `retro_tokenized_validity_reward()`：先 compact token，再 inverse global
+  align，最后调用 RDKit；直接对带空格的原始行评分会把表示格式错误计入 invalid，已明确
+  禁止该用法；
+- 36,000 个终点中 31,700 个 RDKit-valid，valid rate 为 **88.06%**；去重后 15,850
+  个 normalized candidates，cache hit rate 为 **55.97%**；
+- 单进程 reward 评估耗时约 **5.89 s**，开启调用方 cache 后约 **2.82 s**（同一进程，含
+  global-align 与 RDKit）；输出完全一致；
+- 同一预测文件的评分对照为 Top-1/2/3/10 = **70.0/84.5/90.5/93.5%**，Oracle-any
+  **95.5%**。这些是 baseline 诊断值，不是 validity twisting 带来的提升；尚未运行
+  reward-guided sampler，因此不把阶段 2 记为最终通过。
+
+结论：reward 接口、表示转换、批量评估与缓存已通过；下一步是实现一个隔离的 terminal
+twisting smoke，并在同一 validation 上比较 proposal/target 权重、ESS、invalid 和
+Top-1～10。若只改变 reward 而没有固定总候选预算，不能把结果解释为 DGM 收益。
 
 ### 阶段 3：生成 guidance 训练数据
 
@@ -625,7 +650,7 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 |---|---|---|---|
 | 0 | 冻结 baseline | 同 seed predictions SHA 可复现；guidance off 与当前 Euler 完全一致；指标和 metadata 齐全 | 部分已有历史基线，DGM 专用快照待做 |
 | 1 | synthetic DGM | 已知 `q ∝ pR` 的采样频率、后验重加权、ESS/evidence 与理论一致；常数 guidance 不改变 `p` | 代数工具和 19 个测试通过，多步 rollout 待做 |
-| 2 | RDKit validity reward | reward 有限、非负、批量结果可复现且不读取 test target；invalid/ESS 变化可解释 | 接口已写，真实 rollout 待做 |
+| 2 | RDKit validity reward | reward 有限、非负、批量结果可复现且不读取 test target；invalid/ESS 变化可解释 | 接口/格式转换/缓存和 validation 基准已完成；terminal rollout 待做 |
 | 3 | guidance 数据生成 | 按 product 隔离 train/validation；样本近似基础 `pθ`；保存 product、终点、reward、`t`、alignment、seed | 未开始 |
 | 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | 模型和 smoke 已完成，训练未开始 |
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 未开始 |

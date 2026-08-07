@@ -2449,7 +2449,8 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 
 ## 34. 任务 31：独立target/reward选择与Terminal Twisting
 
-状态：`[x] 已完成 DGM 方案文档和实施顺序；[ ] 尚未接入 reward/guidance model`
+状态：`[-] DGM 阶段 1 mechanics 与阶段 2 reward 评估接口已完成；terminal twisting 和
+learned guidance 尚未接入`
 
 详细的训练 pipeline、推理流程、适配难点、准备清单和阶段门槛见
 [`new_docs/dgm.md`](dgm.md)。当前只完成设计，不把设计文档视为已完成实验。
@@ -2460,10 +2461,18 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 8 heads、共享词表），当前阶段不阻塞 DGM；需要在阶段 7 再做隔离加载或移植验证。
 
 同日完成 DGM 的低风险 utility 子阶段：新增正值 guidance、`p × H` 后验重加权、Bregman
-loss 和 RDKit validity reward 接口；新增 5 个测试全部通过，现有相关回归测试 12 个通过。
-随后完成已知两步 categorical chain 的 synthetic rollout：terminal `q ∝ pR`、normalizer
-estimate 和 ESS 检查通过。尚未训练 guidance model，也尚未改动 Euler/Euler-Beam 的实际
-采样路径。
+loss 和 RDKit validity reward 接口；新增 guidance 测试 10 个通过，现有相关回归测试 12
+个通过。随后完成已知两步 categorical chain 的 synthetic rollout：terminal `q ∝ pR`、
+normalizer estimate 和 ESS 检查通过。尚未训练 guidance model，也尚未改动 Euler/Euler-Beam
+的实际采样路径。
+
+阶段 2 的表示和效率验证也已完成：在 validation 前 200 个原始反应的已有 R9K1M2 预测上
+评估 36,000 个终点（20 augmentations × 9 candidates），使用
+`retro_tokenized_validity_reward()` 先 compact token、再 inverse global align、最后
+调用 RDKit。31,700/36,000 合法，valid rate **88.06%**；normalized unique 为 15,850，
+cache hit **55.97%**；单进程耗时约 **5.89s**，启用 cache 约 **2.82s**。同文件的 baseline
+Top-1/2/3/10 为 **70.0/84.5/90.5/93.5%**，Oracle-any **95.5%**；这不是 reward-guided
+提升，只是 reward-only 诊断，terminal twisting 仍待实现。
 
 ### 34.A 方法/改进介绍
 
@@ -2525,11 +2534,13 @@ Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
 - 成功门槛：Top-1不明显回退，且Top-3/10或Oracle在不重叠validation上稳定改善，同时
   ESS不出现系统性坍缩、invalid不以牺牲覆盖为代价下降。
 
-### 34.F 实现与正确性测试（占位）
+### 34.F 实现与正确性测试
 
-- 主reward及独立数据边界：`[待选择/填写]`
+- 主reward及独立数据边界：第一版暂定 RDKit validity（不读取 test target）；正式主线仍需
+  validation-A/B 预注册确认
+- reward 表示转换与缓存：`retro_tokenized_validity_reward()` 已实现并通过测试
 - terminal-twisting入口与metadata：`[待实现]`
-- synthetic已知target importance estimate：`[待实现]`
+- synthetic已知target importance estimate：两步 categorical chain 已通过
 - validation-A/B/C结果：`[待实验]`
 
 ### 34.G 结果表（占位）
@@ -2539,10 +2550,10 @@ Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
 | bootstrap target=proposal | `[固定]` | — | — | — | — | — | — | — |
 | terminal reward | `[固定]` | — | — | — | — | — | — | — |
 
-### 34.H Git记录（占位）
+### 34.H Git记录
 
-- 预注册/候选方案commit：`[待填写]`
-- reward实现commit：`[待填写]`
+- 预注册/候选方案commit：`e86754c`, `ebfcbc6`
+- reward实现commit：`[本轮待提交]`
 - validation结论commit：`[待填写]`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）
