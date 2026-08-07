@@ -871,7 +871,8 @@ X-space 插入锚点和 Edit Flows 的 operation channel（`insert: token`、
 （forward/guidance 相关测试集合）。全量 `pytest` 为 **264 passed / 17 failed**；失败全部
 来自既有 `tests/sampling/test_beam.py` 与当前 `EditCandidate(log_u)` API 不一致及其受影响
 的旧 beam controlled-model 用例，本次隔离 DG-0 没有修改 beam 代码，避免把无关修复混入
-DGM 结论。在 validation 的全部 100,020 条预对齐 augmentation
+DGM 结论。审计脚本为 `scripts/audit_zspace_mapping.py`，本次 JSON 保存在
+`/root/autodl-tmp/dgm_guidance_runs/zspace_mapping_val.json`。在 validation 的全部 100,020 条预对齐 augmentation
 行上做只读统计：共 **573,927** 个坐标变化，其中 insert **524,838**、substitute
 **43,949**、delete **5,140**；insert 中 **470,963（89.735%）** 位于连续 GAP run，
 因此静态对齐下没有唯一 X-space 插入逆映射。只有 **7,676/100,020（7.674%）** 的整行
@@ -1173,11 +1174,13 @@ DGM 实现。
 - [ ] 只有独立 reward 在普通 Euler 上通过准确率门槛后，再接 Euler-Beam/Euler-SMC。
 - [ ] 最后才在 validation 上选择 forward reward 和 `β`，再运行 test。
 
-本文当前阶段的下一步是决定是否继续阶段 7 的 learned terminal/action guidance：如果继续，
-只在不重叠 validation-A/B 上训练更充分的 adapter，并固定少量 `temperature/β` 候选；如果
-仍不能同时保住覆盖与排序，则冻结 forward reward 为可复现的诊断资产，转向其他独立 reward
-或严格 Z-space 研究。在准确率门槛通过前不修改当前默认 Euler-Beam，也不把 validity 或
-forward guidance 打开为默认配置。
+截至 2026-08-08，阶段 7 已完成 pilot、2,500-step 充分训练和 β=0.10 低强度复核；三者
+都没有在固定预算下同时改善 Top-1 与 Top-3/10/Oracle。因此 forward reward 现阶段冻结为
+可复现的诊断资产，不再继续无依据地扫描 β，也不接入默认 Euler/Euler-Beam。下一条安全的
+研究路线是： (a) 另定义并独立验证一个 reward，再做 validation-A/B；或 (b) 采用明确标注
+为 approximate 的 canonical-Z/action 方法。DG-0 已证明 exact Z-space 映射存在高比例非
+双射插入，不能在没有新的坐标设计前宣称 exact DGM。在准确率目标和覆盖目标没有新的预先
+取舍前，不再启动更长的 test/full-src-test GPU 实验。
 
 ---
 

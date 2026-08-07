@@ -2788,7 +2788,8 @@ X-space 插入锚点和 operation channel（`insert: token`、`substitute: token
 `EditCandidate(log_u_real)` 而当前 API 为 `log_u`，以及受影响的旧 controlled-model 用例，
 本次不修改无关 beam 代码。
 
-对 validation 全部 100,020 条预对齐 augmentation 行的只读统计：坐标变化 **573,927**，
+审计脚本为 `scripts/audit_zspace_mapping.py`，本次 JSON 保存在
+`/root/autodl-tmp/dgm_guidance_runs/zspace_mapping_val.json`。对 validation 全部 100,020 条预对齐 augmentation 行的只读统计：坐标变化 **573,927**，
 其中 insert **524,838**、substitute **43,949**、delete **5,140**；insert 中
 **470,963（89.735%）** 位于连续 GAP run，静态对齐下不能唯一还原为一个 X-space 插入。
 只有 **7,676/100,020（7.674%）** 的整行 source→target 对只改变一个坐标。结论是当前
