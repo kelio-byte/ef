@@ -156,3 +156,22 @@ tiny/mini/full test protocol 上比较 Top-1～10、invalid rate、运行时间�
 - [x] validation 延迟到 100k steps，并将 interval 调整为 20k
 - [ ] 用 `retro_v2.yaml` 做正式 10k～30k pilot，并与旧 checkpoint 在固定 protocol 上比较
 - [ ] pilot 通过后再决定是否启动完整 600k 重训
+
+## 8. 新 600k checkpoint 的 provenance（2026-08-07）
+
+A6000 上完成的 `new_checkpoints/checkpoint_step600000.pt` 使用 `configs/retro_v2.yaml`
+对应的结构和目标设置。与历史 checkpoint 相比，真正改变训练轨迹的是：
+
+- Noam 学习率在每个 optimizer update 前设置，修复第一次 update 误用 Adam 默认 `1e-3`
+  的顺序问题；
+- seed=42、按 epoch 派生的 deterministic sampler，以及 Python/NumPy/PyTorch/DataLoader
+  RNG 的 checkpoint 保存和恢复。
+
+validation、TensorBoard、时间戳日志、best checkpoint 和数据 fail-fast 是可观测性/恢复性
+改动；本次训练使用预对齐数据，fallback alignment 修复没有证据作用于这次训练。模型结构、
+dropout=0.3、cubic scheduler、Bregman loss、`use_origin_mask=False` 和 600k steps 均未改变。
+因此新模型应作为独立 checkpoint 评估，不能把旧模型参数或旧 tiny 最优采样参数视作自动
+适配。
+
+validation-200 的参数消融和 mini-1001 冻结规则记录在
+[`new_checkpoint_validation_parameter_sweep.md`](new_checkpoint_validation_parameter_sweep.md)。

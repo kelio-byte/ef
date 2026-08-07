@@ -67,8 +67,10 @@ A6000 上重新训练完成了新的 `step=600000` checkpoint。本次先在 tin
 2. 新模型不是所有指标都下降：Top-2 和 Top-6～10 提升，Top-1/3 和 Oracle 下降。
 3. 新模型的目标一旦被覆盖，平均最终排名更靠前（2.37）；但被覆盖的反应数减少，说明
    当前更像是“覆盖模式改变”，而不是简单的全局性能提升或下降。
-4. tiny 只有 50 个完整反应，不能据此决定新 checkpoint 是否替换旧 checkpoint。下一步
-   应在不使用 test target 调参的 validation/mini-1001 协议上做同配置确认。
+4. tiny 只有 50 个完整反应，不能据此决定新 checkpoint 是否替换旧 checkpoint。随后已在
+   validation-200 上完成参数消融，并冻结 R9K1M2/T=1.0 后在 mini-1001 上得到
+   Top-1/3/10=`58.242/77.922/86.414%`、Oracle=`91.508%`；详见
+   [`new_checkpoint_validation_parameter_sweep.md`](new_checkpoint_validation_parameter_sweep.md)。
 5. 采样时间基本不变（约 114 秒）；本次 PyTorch 加载修复没有引入采样开销。
 
 ## 6. 过程中的参数纠正
@@ -79,6 +81,7 @@ A6000 上重新训练完成了新的 `step=600000` checkpoint。本次先在 tin
 
 ## 7. 下一步
 
-在不调整 bonus、policy、R/K/M 或评分规则的前提下，使用新 checkpoint 在 mini-1001 上
-复现同一 R9K1M2 配置；若 validation/mini 仍呈现覆盖下降，再检查训练过程中的 validation
-loss、最佳 checkpoint 与最终 checkpoint，而不是立即修改 Euler-Beam 搜索器。
+validation-200 已完成参数筛选，mini-1001 已按冻结的 R9K1M2 配置完成；不要再使用 mini
+target 调参。若要解释新旧模型差异，应在明确目标后运行旧 checkpoint 的同规模配对，或
+检查训练过程中的 validation loss、最佳 checkpoint 与最终 checkpoint，而不是立即修改
+Euler-Beam 搜索器。

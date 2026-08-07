@@ -2544,6 +2544,41 @@ tiny 不足以决定替换模型；详细过程、SHA 和结果目录见
 
 本次还修复了 PyTorch 2.6+ 的 checkpoint 加载兼容问题，代码 commit 为 `88a0f2e`。
 
+### 34.J 新 checkpoint validation-200 参数消融（2026-08-07）
+
+状态：`[x]` validation-200 完成；`[x]` 冻结 mini-1001 配置；`[x]` mini-1001 完成
+
+新 checkpoint 重新训练前的实质性变化是 Noam 第一次 optimizer update 顺序修复，以及
+固定 seed/epoch permutation/RNG resume；模型结构、loss、dropout、`use_origin_mask=False`
+等保持不变。validation、TensorBoard、日志和 checkpoint 字段是监控/恢复设施，不是新的
+模型目标。详细 provenance、同协议新旧 checkpoint 对比和全部消融表见
+[`new_checkpoint_validation_parameter_sweep.md`](new_checkpoint_validation_parameter_sweep.md)。
+
+在 validation 前 200 个完整反应、固定 9 条候选预算下，新 checkpoint 的关键结果为：
+
+| 配置 | Top-1 | Top-3 | Top-10 | Oracle | rank-1 invalid | wall |
+|---|---:|---:|---:|---:|---:|---:|
+| R9K1M2, no-op, T=1.0, bonus=.5 | 70.0% | 90.5% | 93.5% | 95.5% | 12.10% | 411.64 s |
+| R3K3M2, no-op, T=1.0, bonus=.5 | 62.0% | 83.5% | 89.0% | 94.0% | 5.675% | 335.57 s |
+| R9K1M1, stochastic, T=1.0, bonus=.5 | 69.5% | 88.5% | 92.5% | 96.0% | 11.325% | 319.30 s |
+| R9K1M2, no-op, T=0.9, bonus=.5 | 69.5% | 91.5% | 94.0% | 95.5% | 11.75% | 410.08 s |
+| R1K9M2, stochastic, T=1.0, bonus=.5 | 61.0% | 80.5% | 87.0% | 90.0% | 2.575% | 288.18 s |
+
+bonus=.5 与 .8 的预测逐行一致；`stochastic` 与 `stochastic_noop` 只在 Top-3 有 0.5
+个百分点差异。M=2 的收益主要体现在排序的 Top-3～10，而不是 Oracle 覆盖。基于预先
+冻结的多指标规则，mini-1001 使用 R9K1M2、M=2、T=1.0、bonus=.5、stochastic_noop；
+不根据 mini target 反调参。
+
+mini-1001 已完成 `20020×9=180180` 行预测且无 branch shortfall：Top-1/3/10 为
+`58.242/77.922/86.414`，Oracle=`91.508% (916/1001)`，rank-1 invalid=`12.767%`，
+mean valid/true-unique=`157.376/23.737`，采样 wall=`2029.18s`（约 33 分 49 秒）。
+预测 SHA-256 为
+`3e2db73986cc476e85794d5a1e3704ef9faf449c6d9ce493a43d29345412d5ee`，完整表格和路径见
+[`new_checkpoint_validation_parameter_sweep.md`](new_checkpoint_validation_parameter_sweep.md)。
+
+mini 只作为冻结配置后的较大规模 test 确认，没有据其 target 反调参；在运行完整 src-test
+前应先决定是否需要旧 checkpoint 的同规模配对，避免无明确比较目标地再消耗约半小时。
+
 ## 11. 决策门槛
 
 继续推进无需等待确认，但以下情况必须停止并请用户决定：
