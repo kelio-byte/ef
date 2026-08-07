@@ -106,6 +106,8 @@ def run(args: argparse.Namespace) -> dict:
         )
 
     model = _build_model(args, vocab_size).to(device)
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay,
     )
@@ -183,7 +185,17 @@ def run(args: argparse.Namespace) -> dict:
                 break
         epochs_completed = epoch + 1
 
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
     wall_seconds = time.perf_counter() - started
+    peak_memory_allocated = (
+        int(torch.cuda.max_memory_allocated(device))
+        if device.type == "cuda" else 0
+    )
+    peak_memory_reserved = (
+        int(torch.cuda.max_memory_reserved(device))
+        if device.type == "cuda" else 0
+    )
     checkpoint = {
         "schema_version": 1,
         "model_state_dict": model.state_dict(),
@@ -194,6 +206,8 @@ def run(args: argparse.Namespace) -> dict:
         "global_step": global_step,
         "epochs_completed": epochs_completed,
         "wall_seconds": wall_seconds,
+        "peak_memory_allocated_bytes": peak_memory_allocated,
+        "peak_memory_reserved_bytes": peak_memory_reserved,
         "last_train_metrics": last_train_metrics,
         "last_val_metrics": last_val_metrics,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -208,6 +222,8 @@ def run(args: argparse.Namespace) -> dict:
         "steps": global_step,
         "epochs": epochs_completed,
         "wall_seconds": wall_seconds,
+        "peak_memory_allocated_bytes": peak_memory_allocated,
+        "peak_memory_reserved_bytes": peak_memory_reserved,
         "last_train_loss": last_train_metrics.get("loss"),
         "last_validation_loss": last_val_metrics.get("loss"),
     }
