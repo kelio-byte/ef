@@ -2563,7 +2563,15 @@ model 相关 CPU 回归为 **35 passed**。正式 guidance 训练待阶段 3 数
 按 augmentation 选择原始 product、保存 reward/终点/时间/seed；guidance 测试共 14 个通过。
 真实 checkpoint smoke 已在停止并恢复 `alive.py` 的完整流程中通过：5 个 validation product、
 20 steps、10 条记录、reward positive 4/10、GPU wall 约 4.5s；正式 train/validation
-guidance 数据仍待生成。
+guidance 数据正在生成。首次正式 train 运行在第 120/626 批暴露了 Euler 可能编辑 BOS 的
+边界问题（原始 product index 8019）；已在 ordinary Euler 和 Euler-Beam action sampler
+统一屏蔽位置 0，并用失败批次短复现确认修复后终态全部保留 BOS。该修复只约束训练目标中
+本来就固定的结构 token，不改变普通分子 token 的随机编辑语义。
+
+阶段 4 的 action target/trainer 也已具备：targets/training 相关回归为 **35 passed**，
+alignment mask 改为 CPU 构造后再搬到 GPU；新增独立 `scripts/train_guidance.py`，支持
+AdamW、validation、TensorBoard 和独立 guidance checkpoint。CPU tiny smoke 2 steps 的
+wall 为 **0.186s**，train loss `0.5374→0.5215`、validation loss `0.5129→0.4999`。
 
 ### 34.G 结果表（占位）
 
@@ -2580,7 +2588,7 @@ guidance 数据仍待生成。
 - terminal数学smoke commit：`4d7c838`
 - guidance data generator 与真实 smoke 记录：`71f38f9`, `0e44f0e`；本轮文档结论 commit
   `[待提交]`
-- action targets/trainer：`[本轮待提交]`
+- action targets/trainer、BOS sampling invariant 和独立训练入口：`[本轮待提交]`
 - validation结论commit：`[待填写]`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）

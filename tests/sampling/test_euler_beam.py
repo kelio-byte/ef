@@ -7,6 +7,7 @@ from edit_flows.core.scheduler import LinearScheduler
 from edit_flows.sampling.euler_beam import (
     _BranchState,
     _branch_sort_key,
+    _sample_actions_per_branch,
     _step_log_p,
     sample_euler_beam,
 )
@@ -82,6 +83,26 @@ def test_step_log_p_matches_complete_scalar_implementation():
     )
     actual = _step_log_p(actions, log_rates, log_ins, log_sub, adapt_h)
     assert math.isclose(actual, expected, rel_tol=1e-6, abs_tol=1e-6)
+
+
+def test_beam_never_samples_bos_as_an_edit_position():
+    x_t = torch.tensor([[BOS_TOKEN, 7, PAD_TOKEN]])
+    log_rates = torch.full((1, 3, 3), 20.0)
+    log_probs = torch.log_softmax(torch.zeros(1, 3, 16), dim=-1)
+    actions = _sample_actions_per_branch(
+        torch.tensor([123]),
+        x_t,
+        log_rates,
+        log_probs,
+        log_probs,
+        torch.tensor([[0.1]]),
+        PAD_TOKEN,
+        "poisson",
+        step=0,
+    )
+    assert not bool(actions["ins_mask"][0, 0])
+    assert not bool(actions["sub_mask"][0, 0])
+    assert not bool(actions["del_mask"][0, 0])
 
 
 def test_step_log_p_no_events_includes_survival_probability():

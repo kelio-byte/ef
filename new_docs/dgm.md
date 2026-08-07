@@ -1,7 +1,8 @@
 # DGM 在 Edit Flows / Euler-Beam 中的适配方案
 
-状态：阶段 1 synthetic mechanics 已通过；阶段 2 reward 评估接口已完成，terminal
-twisting 和 learned guidance 尚未接入。
+状态：阶段 1 synthetic mechanics 已通过；阶段 2 reward 评估接口已完成；阶段 3 正式
+train/validation 数据生成正在进行，阶段 4 的 action-level guidance 训练入口和 CPU smoke
+已完成，尚未接入实际推理。
 
 本文面向本项目的实际实现，说明如何把
 `Discrete Guidance Matching (DGM)` 适配到当前的 Edit Flows 推理流程。文中把
@@ -582,6 +583,11 @@ baseline checkpoint id
   checkpoint smoke 已完成：5 个 validation product、20 steps、每条轨迹取 2 个状态，共
   10 条记录，reward positive **4/10**、均值 **0.4**，GPU wall **约 4.5s**；`.pt` 加载、
   padding/collate 和 metadata 检查通过。
+- 正式 train 生成首次运行到第 120/626 批时发现一条终态第 0 列被采样编辑、丢失 BOS。
+  这是采样器的结构性边界问题，不是输入数据损坏：训练耦合始终固定 BOS，而 Euler 原先
+  只屏蔽 PAD。已在普通 Euler 和 Euler-Beam 的 action sampler 中统一屏蔽位置 0，并加入
+  回归测试；失败批次（原始 product index 8019）修复后短复现不再产生非 BOS 终态。这样
+  既保证 guidance 数据格式合法，也避免 DGM 与 baseline 使用不同的序列语义。
 
 推荐的首次 smoke（运行前先停止 `alive.py`，结束后立即重启）是：
 
@@ -632,7 +638,30 @@ insert/substitute/delete 稀疏 action mask，再对选中的 action 使用 `bac
   train/eval step；不修改基础 Edit Flows checkpoint；
 - 新增 targets/training 测试；当前 DGM/SMC/模型相关 CPU 回归共 **35 passed**；
 - 这一步修正了“scalar reward 广播到所有 action”的潜在正确性问题。正式 guidance 训练
-  尚未开始，等待阶段3 train/validation 数据生成完成。
+  尚未开始，等待阶段3 train/validation 数据生成完成；alignment mask 在 CPU 构造后再搬到
+  GPU，避免每个训练 batch 在 GPU 上执行 Python/DP 对齐。
+- 新增 `scripts/train_guidance.py`：独立加载 guidance `.pt`，冻结基础 checkpoint 不参与
+  训练，使用 AdamW、梯度裁剪、validation 截断和 TensorBoard `train/*`、`validation/*`
+  标量，并保存独立 `guidance_final.pt`、`config.json`。在 CPU tiny smoke（2 steps、
+  hidden=16、1+1 层）上运行 **0.186s**，loss `0.5374→0.5215`，validation loss
+  `0.5129→0.4999`；TensorBoard 依赖已在新 `ef` 环境安装，`pip check` 无冲突。
+
+推荐的真实数据训练 smoke（正式数据生成完成后执行）为：
+
+```bash
+source /root/miniconda3/etc/profile.d/conda.sh
+conda activate ef
+unset OMP_NUM_THREADS
+python scripts/train_guidance.py \
+  --train_data /root/autodl-tmp/dgm_guidance_data/train_validity.pt \
+  --val_data /root/autodl-tmp/dgm_guidance_data/val_validity.pt \
+  --output_dir /root/autodl-tmp/dgm_guidance_runs/smoke \
+  --device cuda --batch_size 32 --max_steps 10 --val_interval 5 --val_batches 2
+```
+
+通过阶段 4 的最低门槛是：loss/validation loss 有限、梯度有限、输出权重为正、validation
+可运行且 checkpoint/TensorBoard 可读取；准确率提升要等阶段 5 的 off/on 推理对照，不能
+把训练 loss 下降直接称为 DGM 指标收益。
 
 ### 阶段 5：先接普通 Euler，不接 Beam
 

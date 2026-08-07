@@ -404,6 +404,11 @@ def _sample_actions_per_branch(
     )
 
     non_pad_mask = x_t != pad_token
+    # BOS is a structural sentinel and is never an Euler edit position.  This
+    # must match the ordinary Euler sampler so beam children cannot corrupt
+    # the sequence header either.
+    if non_pad_mask.shape[1] > 0:
+        non_pad_mask[:, 0] = False
     ins_mask &= non_pad_mask
     del_mask &= non_pad_mask
     sub_mask &= non_pad_mask

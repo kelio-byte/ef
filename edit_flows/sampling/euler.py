@@ -55,6 +55,13 @@ def _sample_edit_actions(
     sub_mask = del_sub_mask & ~del_mask
 
     non_pad_mask = ~x_pad_mask
+    # BOS is a structural sentinel, not an editable molecule token.  The
+    # training target keeps it unchanged, so allowing a sampled operation at
+    # column zero can corrupt the sequence header (and later make decoding or
+    # guidance-data construction fail).  Keep the same invariant at sampling
+    # time; the guard also handles empty sequences.
+    if non_pad_mask.shape[1] > 0:
+        non_pad_mask[:, 0] = False
     ins_tokens = torch.full(
         ins_probs.shape[:2], pad_token, dtype=torch.long, device=device,
     )

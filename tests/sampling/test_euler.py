@@ -4,6 +4,7 @@ import torch.nn as nn
 from edit_flows.sampling.euler import (
     _compute_model_time,
     _event_probability,
+    _sample_edit_actions,
     get_adaptive_h,
     sample_euler,
 )
@@ -44,6 +45,22 @@ class TestEventProbability:
 
 
 class TestSampleEuler:
+    def test_bos_is_never_sampled_as_an_edit_position(self):
+        x_t = torch.tensor([[BOS_TOKEN, 7, PAD_TOKEN]])
+        log_rates = torch.full((1, 3, 3), 20.0)
+        log_probs = torch.log_softmax(torch.zeros(1, 3, 16), dim=-1)
+        actions = _sample_edit_actions(
+            x_t,
+            log_rates,
+            log_probs,
+            log_probs,
+            torch.tensor([[0.1]]),
+            pad_token=PAD_TOKEN,
+        )
+        assert not bool(actions["ins_mask"][0, 0])
+        assert not bool(actions["sub_mask"][0, 0])
+        assert not bool(actions["del_mask"][0, 0])
+
     def test_empty_prior_generates(self, dummy_model):
         dummy_model.eval()
         scheduler = CubicScheduler()

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import torch
 from torch import Tensor
 
@@ -27,19 +25,23 @@ def guidance_action_loss(
     missing = sorted(required.difference(batch))
     if missing:
         raise KeyError(f"guidance batch is missing fields: {missing}")
-    product_tokens = batch["product_tokens"]
-    state_tokens = batch["state_tokens"]
+    device = next(model.parameters()).device
+    product_tokens = batch["product_tokens"].to(device=device)
+    state_tokens = batch["state_tokens"].to(device=device)
     terminal_tokens = batch["terminal_tokens"]
-    time_step = batch["time"]
-    reward = batch["reward"]
+    time_step = batch["time"].to(device=device)
+    reward = batch["reward"].to(device=device)
     state_padding = state_tokens == model.pad_token
     product_padding = product_tokens == model.pad_token
     insert_mask, substitute_mask, delete_mask = build_action_target_masks(
-        state_tokens,
-        terminal_tokens,
+        batch["state_tokens"].detach().cpu(),
+        terminal_tokens.detach().cpu(),
         vocab_size=model.vocab_size,
         pad_token=model.pad_token,
     )
+    insert_mask = insert_mask.to(device=device)
+    substitute_mask = substitute_mask.to(device=device)
+    delete_mask = delete_mask.to(device=device)
     target_insert, target_substitute, target_delete = make_action_reward_targets(
         insert_mask,
         substitute_mask,
