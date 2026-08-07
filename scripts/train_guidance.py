@@ -143,6 +143,7 @@ def run(args: argparse.Namespace) -> dict:
                 batch,
                 optimizer,
                 background=args.background,
+                background_loss_weight=args.background_loss_weight,
                 max_grad_norm=args.max_grad_norm,
             )
             global_step += 1
@@ -164,7 +165,10 @@ def run(args: argparse.Namespace) -> dict:
                         break
                     val_batch = _move_batch(val_raw_batch, device)
                     val_metrics = evaluate_guidance_step(
-                        model, val_batch, background=args.background,
+                        model,
+                        val_batch,
+                        background=args.background,
+                        background_loss_weight=args.background_loss_weight,
                     )
                     val_batch_size = val_batch["reward"].shape[0]
                     val_count += val_batch_size
@@ -248,6 +252,7 @@ def main() -> None:
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--background", type=float, default=1e-4)
+    parser.add_argument("--background_loss_weight", type=float, default=0.01)
     parser.add_argument("--model_vocab", type=int, default=None)
     parser.add_argument("--hidden_dim", type=int, default=256)
     parser.add_argument("--product_layers", type=int, default=2)

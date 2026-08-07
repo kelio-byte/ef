@@ -2580,6 +2580,10 @@ wall 为 **0.186s**，train loss `0.5374→0.5215`、validation loss `0.5129→0
 **2.38s**，loss `0.7446→0.2913`、validation loss `0.3445→0.2725`，step-10 selected
 guidance mean train/validation 为 **0.4800/0.4249**，相关为 **-0.371/-0.024**。该 smoke
 只证明训练与观测链路可运行，不足以证明 reward 方向已学到，正式训练需重新评估。
+1,000-step 对照进一步发现 action mask 只覆盖约 0.8% 的坐标：等权背景损失的 selected H
+均值 **0.0064**、selected-only 相关 **0.145**；`background_loss_weight=0.01` 后分别为
+**0.8277**、**0.327**。两次 wall 为 **150.5/155.1s**，峰值 allocated 均约 **1.16GB**；
+raw validation loss 不同量纲，不直接比较，暂保留 balanced 版本。
 
 ### 34.G 结果表（占位）
 

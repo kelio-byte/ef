@@ -36,8 +36,14 @@ def guidance_action_loss(
     batch: dict[str, Tensor],
     *,
     background: float = 1e-4,
+    background_loss_weight: float = 0.01,
 ) -> tuple[Tensor, dict[str, float]]:
     """Compute action-specific positive-guidance loss for one padded batch."""
+    if (
+        background_loss_weight < 0
+        or not torch.isfinite(torch.tensor(background_loss_weight))
+    ):
+        raise ValueError("background_loss_weight must be finite and non-negative")
     required = {
         "product_tokens", "state_tokens", "terminal_tokens", "time", "reward",
     }
@@ -76,14 +82,41 @@ def guidance_action_loss(
         state_padding,
     )
     state_action_mask = (~state_padding).unsqueeze(-1)
-    loss_insert = positive_guidance_bregman_loss(
-        guidance_insert, target_insert, mask=state_action_mask,
+
+    def balanced_loss(
+        guidance: Tensor,
+        target: Tensor,
+        selected_mask: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        valid_mask = state_action_mask.expand_as(guidance)
+        selected_mask = selected_mask & valid_mask
+        background_mask = valid_mask & ~selected_mask
+        pointwise = positive_guidance_bregman_loss(
+            guidance, target, reduction="none",
+        )
+        selected_values = pointwise.masked_select(selected_mask)
+        background_values = pointwise.masked_select(background_mask)
+        selected_loss = (
+            selected_values.mean()
+            if selected_values.numel() else pointwise.new_zeros(())
+        )
+        background_loss = (
+            background_values.mean()
+            if background_values.numel() else pointwise.new_zeros(())
+        )
+        total = selected_loss + background_loss_weight * background_loss
+        if selected_values.numel() == 0:
+            total = background_loss
+        return total, selected_loss, background_loss
+
+    loss_insert, selected_insert_loss, background_insert_loss = balanced_loss(
+        guidance_insert, target_insert, insert_mask,
     )
-    loss_substitute = positive_guidance_bregman_loss(
-        guidance_substitute, target_substitute, mask=state_action_mask,
+    loss_substitute, selected_substitute_loss, background_substitute_loss = balanced_loss(
+        guidance_substitute, target_substitute, substitute_mask,
     )
-    loss_delete = positive_guidance_bregman_loss(
-        guidance_delete, target_delete, mask=state_action_mask,
+    loss_delete, selected_delete_loss, background_delete_loss = balanced_loss(
+        guidance_delete, target_delete, delete_mask,
     )
     loss = (loss_insert + loss_substitute + loss_delete) / 3.0
     with torch.no_grad():
@@ -118,6 +151,13 @@ def guidance_action_loss(
             "loss_insert": float(loss_insert.item()),
             "loss_substitute": float(loss_substitute.item()),
             "loss_delete": float(loss_delete.item()),
+            "loss_insert_selected": float(selected_insert_loss.item()),
+            "loss_substitute_selected": float(selected_substitute_loss.item()),
+            "loss_delete_selected": float(selected_delete_loss.item()),
+            "loss_insert_background": float(background_insert_loss.item()),
+            "loss_substitute_background": float(background_substitute_loss.item()),
+            "loss_delete_background": float(background_delete_loss.item()),
+            "background_loss_weight": float(background_loss_weight),
             "reward_mean": float(reward.float().mean().item()),
             "selected_action_fraction": float(selected.item()),
             "selected_guidance_mean": float(
@@ -138,6 +178,7 @@ def train_guidance_step(
     optimizer: torch.optim.Optimizer,
     *,
     background: float = 1e-4,
+    background_loss_weight: float = 0.01,
     max_grad_norm: float | None = 1.0,
 ) -> dict[str, float]:
     """Run one optimizer step and return scalar diagnostics."""
@@ -145,6 +186,7 @@ def train_guidance_step(
     optimizer.zero_grad(set_to_none=True)
     loss, metrics = guidance_action_loss(
         model, batch, background=background,
+        background_loss_weight=background_loss_weight,
     )
     loss.backward()
     if max_grad_norm is not None:
@@ -162,12 +204,14 @@ def evaluate_guidance_step(
     batch: dict[str, Tensor],
     *,
     background: float = 1e-4,
+    background_loss_weight: float = 0.01,
 ) -> dict[str, float]:
     """Evaluate guidance loss without changing parameters or RNG state."""
     was_training = model.training
     model.eval()
     _, metrics = guidance_action_loss(
         model, batch, background=background,
+        background_loss_weight=background_loss_weight,
     )
     if was_training:
         model.train()

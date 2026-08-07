@@ -656,6 +656,14 @@ insert/substitute/delete 稀疏 action mask，再对选中的 action 使用 `bac
   step-10 selected guidance mean 为 train **0.4800**、validation **0.4249**，相关系数
   分别 **-0.371/-0.024**。由于只有 10 steps 且相关性按 batch 计算，这只是观测链路通过，
   不能据此宣称 guidance 已学到有效 reward 方向；正式训练需在完整 validation 上重新统计。
+- 1,000-step pilot 暴露并验证了 action sparsity 的影响：原等权背景损失的全 validation
+  selected-action H 均值仅 **0.0064**、selected-only reward-H 相关 **0.145**（全体含无
+  selected action 行为 **0.046**）；把背景项降为 `background_loss_weight=0.01` 后，
+  selected H 均值升至 **0.8277**、selected-only 相关升至 **0.327**，H 范围约
+  `8.6e-5..1.328`。两次均为 1,000 steps、同 seed、batch=32，训练 wall **150.5s vs
+  155.1s**，峰值 allocated 均约 **1.16GB**。balanced loss 的 raw validation loss
+  约 **0.801**，不能与等权 loss **0.00417** 直接比较；当前保留 balanced 版本，后续以
+  selected action 校准和真实 guided rollout 判断收益。
 
 推荐的真实数据训练 smoke（正式数据生成完成后执行）为：
 
@@ -667,7 +675,8 @@ python scripts/train_guidance.py \
   --train_data /root/autodl-tmp/dgm_guidance_data/train_validity.pt \
   --val_data /root/autodl-tmp/dgm_guidance_data/val_validity.pt \
   --output_dir /root/autodl-tmp/dgm_guidance_runs/smoke \
-  --device cuda --batch_size 32 --max_steps 10 --val_interval 5 --val_batches 2
+  --device cuda --batch_size 32 --max_steps 10 --val_interval 5 --val_batches 2 \
+  --background_loss_weight 0.01
 ```
 
 通过阶段 4 的最低门槛是：loss/validation loss 有限、梯度有限、输出权重为正、validation
