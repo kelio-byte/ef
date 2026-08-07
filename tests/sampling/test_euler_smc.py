@@ -11,6 +11,7 @@ from edit_flows.sampling.euler_smc import (
     effective_sample_size,
     normalize_log_weights,
     run_euler_smc_bootstrap,
+    run_euler_smc_terminal_twist,
     systematic_resample,
     systematic_resample_batch,
     terminal_twist_target_increment,
@@ -302,6 +303,60 @@ def test_bootstrap_rollout_keeps_uniform_weights_and_time_schedule():
     assert torch.equal(
         result.particles.ancestor_ids, torch.arange(4, dtype=torch.long),
     )
+
+
+def test_terminal_twist_rollout_preserves_proposal_in_identity_limit():
+    model = _TransitionModel()
+    states = torch.tensor([
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+    ])
+
+    def reward_fn(final_states):
+        return final_states[:, 1:].float().sum(dim=1)
+
+    bootstrap = run_euler_smc_bootstrap(
+        model, states, LinearScheduler(), n_steps=4, base_seed=31,
+        product_index=2, max_seq_len=16,
+    )
+    twisted = run_euler_smc_terminal_twist(
+        model, states, LinearScheduler(), terminal_reward_fn=reward_fn,
+        n_steps=4, base_seed=31, product_index=2, max_seq_len=16, beta=0.0,
+    )
+    assert torch.equal(twisted.particles.states, bootstrap.particles.states)
+    assert torch.allclose(
+        twisted.particles.log_weights,
+        bootstrap.particles.log_weights,
+        atol=1e-6,
+    )
+    assert twisted.terminal_ess_before_resampling == pytest.approx(4.0)
+    assert twisted.terminal_resampled is False
+
+
+def test_terminal_twist_rollout_calls_reward_once_and_records_ess():
+    model = _TransitionModel()
+    states = torch.tensor([
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+    ])
+    calls = []
+
+    def reward_fn(final_states):
+        calls.append(final_states.detach().clone())
+        return final_states[:, 1:].float().sum(dim=1)
+
+    result = run_euler_smc_terminal_twist(
+        model, states, LinearScheduler(), terminal_reward_fn=reward_fn,
+        n_steps=2, base_seed=8, max_seq_len=16, beta=0.1,
+        ess_threshold=2.9,
+    )
+    assert len(calls) == 1
+    assert calls[0].shape[0] == 3
+    assert len(result.ess_history) == 2
+    assert result.terminal_ess_before_resampling > 0.0
 
 
 def test_bootstrap_rollout_can_force_diagnostic_resampling():

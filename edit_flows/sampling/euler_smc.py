@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 import torch
 from torch import Tensor
@@ -210,6 +210,19 @@ class EulerSMCBootstrapResult:
     ess_history: List[float]
     resampling_steps: List[int]
     log_evidence: float
+
+
+@dataclass
+class EulerSMCTerminalTwistResult:
+    """Result from a bootstrap proposal followed by one terminal twist."""
+
+    particles: SMCParticleSet
+    ess_history: List[float]
+    resampling_steps: List[int]
+    log_evidence: float
+    terminal_ess_before_resampling: float
+    terminal_resampled: bool
+    terminal_log_evidence_increment: float
 
 
 def terminal_twist_target_increment(
@@ -579,6 +592,81 @@ def run_euler_smc_bootstrap(
         ess_history=ess_history,
         resampling_steps=resampling_steps,
         log_evidence=log_evidence,
+    )
+
+
+@torch.inference_mode()
+def run_euler_smc_terminal_twist(
+    model,
+    initial_states: Tensor,
+    scheduler: KappaScheduler,
+    *,
+    terminal_reward_fn: Callable[[Tensor], Tensor],
+    n_steps: int,
+    n_particles: Optional[int] = None,
+    base_seed: int = 0,
+    product_index: int = 0,
+    max_seq_len: int = 512,
+    pad_token: int = PAD_TOKEN,
+    use_rate_reparam: bool = False,
+    clamp_kappa: bool = False,
+    clamp_max: float = 50.0,
+    time_input: str = "t",
+    train_scheduler: Optional[KappaScheduler] = None,
+    beta: float = 1.0,
+    ess_threshold: Optional[float] = None,
+    q_temperature: float = 1.0,
+) -> EulerSMCTerminalTwistResult:
+    """Run Euler proposal dynamics and twist only the terminal population.
+
+    This isolated entry point intentionally keeps all intermediate transitions
+    equal to the existing bootstrap proposal.  ``terminal_reward_fn`` is
+    called exactly once on the final particle states and must return one finite
+    scalar per particle.  The optional ESS threshold applies only to this final
+    reward reweighting; intermediate bootstrap weights remain uniform because
+    target=proposal there.
+    """
+    bootstrap = run_euler_smc_bootstrap(
+        model,
+        initial_states,
+        scheduler,
+        n_steps=n_steps,
+        n_particles=n_particles,
+        base_seed=base_seed,
+        product_index=product_index,
+        max_seq_len=max_seq_len,
+        pad_token=pad_token,
+        use_rate_reparam=use_rate_reparam,
+        clamp_kappa=clamp_kappa,
+        clamp_max=clamp_max,
+        time_input=time_input,
+        train_scheduler=train_scheduler,
+        ess_threshold=None,
+        q_temperature=q_temperature,
+    )
+    terminal_reward = terminal_reward_fn(bootstrap.particles.states)
+    if not isinstance(terminal_reward, Tensor):
+        raise TypeError("terminal_reward_fn must return a torch.Tensor")
+    terminal_step = apply_terminal_twist(
+        bootstrap.particles,
+        terminal_reward,
+        beta=beta,
+        ess_threshold=ess_threshold,
+        resample_seed=(
+            _mix_seed(base_seed, product_index, n_steps)
+            if ess_threshold is not None else None
+        ),
+    )
+    return EulerSMCTerminalTwistResult(
+        particles=terminal_step.particles,
+        ess_history=bootstrap.ess_history,
+        resampling_steps=bootstrap.resampling_steps,
+        log_evidence=(
+            bootstrap.log_evidence + terminal_step.log_evidence_increment
+        ),
+        terminal_ess_before_resampling=terminal_step.ess_before_resampling,
+        terminal_resampled=terminal_step.resampled,
+        terminal_log_evidence_increment=terminal_step.log_evidence_increment,
     )
 
 
