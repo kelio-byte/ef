@@ -462,7 +462,15 @@ def main():
             args.euler_beam_matmul_precision
         )
 
-    ckpt = torch.load(args.checkpoint, map_location=device)
+    # PyTorch 2.6+ defaults ``weights_only=True`` for ``torch.load``.  Our
+    # trusted training checkpoints intentionally contain the model config and
+    # vocabulary metadata (including NumPy values), so they must be loaded as
+    # the complete checkpoint object.  Keep a fallback for older PyTorch
+    # versions where the ``weights_only`` keyword is unavailable.
+    try:
+        ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    except TypeError:
+        ckpt = torch.load(args.checkpoint, map_location=device)
     cfg = ckpt["config"]
     model_vocab = ckpt.get("model_vocab")
 
