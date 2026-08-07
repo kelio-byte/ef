@@ -2459,6 +2459,10 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 格式的 Molecular Transformer forward checkpoint 候选（约 4 层、hidden 256、FFN 2048、
 8 heads、共享词表），当前阶段不阻塞 DGM；需要在阶段 7 再做隔离加载或移植验证。
 
+同日完成 DGM 的低风险 utility 子阶段：新增正值 guidance、`p × H` 后验重加权、Bregman
+loss 和 RDKit validity reward 接口；新增 5 个测试全部通过，现有相关回归测试 12 个通过。
+尚未训练 guidance model，也尚未改动 Euler/Euler-Beam 的实际采样路径。
+
 ### 34.A 方法/改进介绍
 
 Euler-SMC的bootstrap阶段令`target=proposal`，因此权重恒等、ESS不提供额外排序信息。

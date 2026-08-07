@@ -462,6 +462,19 @@ resampling 次数和 wall time，不能只看 Top-1。
 
 如果 synthetic 不能通过，不进入真实 SMILES 实验。
 
+#### 阶段 1 当前实现记录（2026-08-07）
+
+已完成低风险的代数和 reward 接口子阶段：
+
+- 新增 `edit_flows/guidance/dgm.py`：正值 guidance、`p × H` 后验重加权、正值
+  Bregman loss；
+- 新增 `edit_flows/guidance/rewards.py`：不读取 test target 的 RDKit validity reward；
+- 新增 5 个 synthetic/接口测试；全部通过；
+- 现有 `euler_smc` 和 Transformer 相关回归测试 12 个全部通过。
+
+这还不等于完成 guidance model 训练或真实 Euler 接入。下一步仍需实现已知分布的多步
+synthetic rollout，再进入 validation SMILES。
+
 ### 阶段 2：先接便宜的 validity reward
 
 实现一个纯函数：
