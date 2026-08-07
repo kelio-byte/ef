@@ -2461,7 +2461,9 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 
 同日完成 DGM 的低风险 utility 子阶段：新增正值 guidance、`p × H` 后验重加权、Bregman
 loss 和 RDKit validity reward 接口；新增 5 个测试全部通过，现有相关回归测试 12 个通过。
-尚未训练 guidance model，也尚未改动 Euler/Euler-Beam 的实际采样路径。
+随后完成已知两步 categorical chain 的 synthetic rollout：terminal `q ∝ pR`、normalizer
+estimate 和 ESS 检查通过。尚未训练 guidance model，也尚未改动 Euler/Euler-Beam 的实际
+采样路径。
 
 ### 34.A 方法/改进介绍
 

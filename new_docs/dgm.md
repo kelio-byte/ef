@@ -476,9 +476,11 @@ resampling 次数和 wall time，不能只看 Top-1。
 - 第一版 `ProductConditionedGuidance` smoke 已通过：默认配置参数量约 5.26M，随机输入
   的输出形状为 `H_ins[B,L,V]`、`H_sub[B,L,V]`、`H_del[B,L,1]`，且全部为有限正值；
   guidance 模型 forward/backward 和参数规模测试通过。
+- 新增已知两步 categorical chain 的 synthetic rollout：用精确条件 guidance 恢复已知
+  terminal `q ∝ pR`，并检查 proposal 下的 normalizer estimate 和 ESS；该测试通过。
 
-这还不等于完成 guidance model 训练或真实 Euler 接入。下一步仍需实现已知分布的多步
-synthetic rollout，再进入 validation SMILES。
+这还不等于完成 guidance model 训练或真实 Euler 接入。下一步进入阶段 2 的 validation
+SMILES reward/terminal twisting，同时保留 synthetic 测试作为回归门槛。
 
 ### 阶段 2：先接便宜的 validity reward
 
@@ -632,6 +634,36 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 | 8 | 严格 Z-space DGM | GAP/变长动作映射明确；synthetic 和 identity-limit 测试通过；才可使用 exact DGM 表述 | 未开始 |
 
 任何阶段只达到“代码能运行”而没有达到对应栏的正确性和对照门槛，都不记为通过。
+
+### 各阶段的 Top-k 与效率指标
+
+| 阶段 | 是否计算 Top-1～10 | 主要正确性指标 | 必须记录的效率指标 |
+|---|---|---|---|
+| 0 baseline | 是，作为统一参照 | Top-1～10、Oracle、invalid、unique、target rank | sampling wall、score wall、peak memory、GPU 设置 |
+| 1 synthetic | 否，没有 SMILES target | 理论分布 vs empirical 分布、KL/TV、ESS、evidence | rollout wall、samples/s、内存 |
+| 2 validity reward | 是，在 validation 上 | Top-1～10、Oracle、invalid、reward、ESS | reward wall、调用数、缓存命中率、总 wall |
+| 3 guidance 数据 | 不以 Top-k 为主 | product 隔离、proposal 分布、reward 分布、数据完整性 | 生成 wall、吞吐、磁盘占用、显存 |
+| 4 guidance 训练 | 训练阶段不直接算 Top-k | guidance loss、`H>0`、held-out reward/H 相关性和校准 | train wall、steps/s、samples/s、peak memory |
+| 5 普通 Euler | 是 | guidance off/constant 回归 baseline；guided 分布和 log-prob 一致 | 基础/guidance forward 次数、wall、显存 |
+| 6 Euler-Beam/SMC | 是 | Top-1～10、Oracle、invalid、unique、ESS、resampling、祖先多样性 | reward/guidance 调用数、wall、峰值显存 |
+| 7 forward reward | 是；另测 forward 模型自身 validation 指标 | forward 方向/tokenization 正确；DGM 指标在不重叠 validation 改善 | forward batch wall、调用数、缓存、总 wall |
+| 8 Z-space DGM | 是 | 变长映射、identity-limit、synthetic 和真实 Top-k 正确性 | 每步 forward 数、wall、显存、映射额外开销 |
+
+因此，Top-1～10 不是只有最终 test 才计算：阶段 0、2、5、6、7、8 都会在 validation
+上计算；阶段 1、3、4 的重点是 mechanics、数据和模型训练诊断，不用没有意义的 Top-k
+数字替代它们的专门指标。所有真实 SMILES 阶段都同时记录 wall time、显存和模型调用数。
+
+### `n_steps` 消融
+
+第一版所有 guidance 正确性实验固定 `n_steps=100`。阶段 5 通过后，在相同 checkpoint、
+seed、总候选预算、precision 和 batch 下运行：
+
+```text
+n_steps=50 / 100 / 200
+```
+
+分别比较 Top-1～10、Oracle、invalid、ESS、wall 和 peak memory。只有 50 步在不明显损害
+准确率、覆盖和数值稳定性的情况下，才考虑把默认推理步数从 100 降低。
 
 ---
 
