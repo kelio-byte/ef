@@ -285,13 +285,15 @@ unique product 生成一个基础 Euler 终点 `y`，保存 `(c, y, reward)`，�
 | 阶段 | 数据规模 | guidance 训练 | 其他主要时间 |
 |---|---:|---:|---:|
 | synthetic smoke | 已知 toy 分布 | 小于 5 分钟 | 小于 5 分钟 |
-| pilot | 约 2,000 products | 10～30 分钟 | 基础采样/RDKit 约 5～20 分钟 |
-| validation 规模 | 约 10,000 products | 30～120 分钟 | 基础采样约 20～90 分钟 |
-| train 规模 | 约 20,000～40,000 unique products | 1～4 小时 | 基础采样约 1～4 小时 |
+| pilot | 约 2,000 products | 5～20 分钟 | 基础采样/RDKit 约 5～20 分钟 |
+| validation 规模 | 约 10,000 products | 10～45 分钟 | 基础采样约 20～90 分钟 |
+| train 规模 | 约 20,000～40,000 unique products | 20～90 分钟 | 基础采样约 1～4 小时 |
 
-这些估计不包含旧版 Molecular Transformer 的兼容改造。forward reward 的实际瓶颈可能是
-模型加载和逐候选评分，而不是 guidance 本身，因此必须先用 RDKit reward 完成接口和
-guidance mechanics benchmark。
+这些估计不包含旧版 Molecular Transformer 的兼容改造。初步 benchmark（3090 上仍有
+约 20% `alive.py` 占用）显示，默认第一版模型约 5.26M 参数，batch=64、product/state
+长度约 96/128 时，一次 forward+backward 约 40ms；因此 guidance 模型本身通常不是
+主要瓶颈，基础终点采样、SMILES reward 和 forward reward 才可能占主要时间。正式估计
+仍以阶段 3 的真实长度 benchmark 为准。
 
 ### 2.5 DGM 推理 pipeline
 
@@ -471,6 +473,9 @@ resampling 次数和 wall time，不能只看 Top-1。
 - 新增 `edit_flows/guidance/rewards.py`：不读取 test target 的 RDKit validity reward；
 - 新增 5 个 synthetic/接口测试；全部通过；
 - 现有 `euler_smc` 和 Transformer 相关回归测试 12 个全部通过。
+- 第一版 `ProductConditionedGuidance` smoke 已通过：默认配置参数量约 5.26M，随机输入
+  的输出形状为 `H_ins[B,L,V]`、`H_sub[B,L,V]`、`H_del[B,L,1]`，且全部为有限正值；
+  guidance 模型 forward/backward 和参数规模测试通过。
 
 这还不等于完成 guidance model 训练或真实 Euler 接入。下一步仍需实现已知分布的多步
 synthetic rollout，再进入 validation SMILES。
