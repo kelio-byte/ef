@@ -2773,3 +2773,23 @@ Record final Top-k and performance validation
 缓存、forward reward/H 的可学习性。pilot 与 2,500-step 充分训练 adapter 都未通过在
 200 个完整 validation reaction 的固定预算上同时保持覆盖和 Top-3/10/Oracle 的门槛。
 当前默认采样配置不变，forward reward 仅作为后续校准和诊断资产。
+
+### 34.L Stage 8 / DG-0 Z-space 映射审计（2026-08-08）
+
+在不修改正式 Euler/Euler-Beam 的前提下，新增隔离模块
+`edit_flows/guidance/zspace.py`。它把固定坐标 Z transition 明确分类为
+`GAP→token=insert`、`token→GAP=delete`、`token→token=substitute`，统一处理 BOS/PAD、
+X-space 插入锚点和 operation channel（`insert: token`、`substitute: token+V`、
+`delete: 2V`）。反向映射返回所有可能的 Z 坐标；连续 GAP run 显式标记
+`ambiguous=True`，要求双射时直接拒绝。相关 guidance/forward 测试集合为 **31 passed**。
+全量 `pytest` 为 **262 passed / 17 failed**；失败来自既有 beam 测试使用
+`EditCandidate(log_u_real)` 而当前 API 为 `log_u`，以及受影响的旧 controlled-model 用例，
+本次不修改无关 beam 代码。
+
+对 validation 全部 100,020 条预对齐 augmentation 行的只读统计：坐标变化 **573,927**，
+其中 insert **524,838**、substitute **43,949**、delete **5,140**；insert 中
+**470,963（89.735%）** 位于连续 GAP run，静态对齐下不能唯一还原为一个 X-space 插入。
+只有 **7,676/100,020（7.674%）** 的整行 source→target 对只改变一个坐标。结论是当前
+变长 Edit Flow 不能直接称为论文 exact posterior；下一阶段必须保留 GAP 身份实现固定
+Z-state transition，或明确采用 action-level approximate guidance。该审计只改变独立模块，
+默认 sampler、checkpoint 和历史结果不变。
