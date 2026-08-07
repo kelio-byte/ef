@@ -2575,7 +2575,11 @@ validation **5,001 products / 10,002 records / 182.5s / 87.76% reward-positive**
 targets/training 相关回归为 **35 passed**，
 alignment mask 改为 CPU 构造后再搬到 GPU；新增独立 `scripts/train_guidance.py`，支持
 AdamW、validation、TensorBoard 和独立 guidance checkpoint。CPU tiny smoke 2 steps 的
-wall 为 **0.186s**，train loss `0.5374→0.5215`、validation loss `0.5129→0.4999`。
+wall 为 **0.186s**，train loss `0.5374→0.5215`、validation loss `0.5129→0.4999`。另
+新增 selected-action guidance 均值和 reward Pearson 诊断；真实 CUDA 10-step smoke wall
+**2.38s**，loss `0.7446→0.2913`、validation loss `0.3445→0.2725`，step-10 selected
+guidance mean train/validation 为 **0.4800/0.4249**，相关为 **-0.371/-0.024**。该 smoke
+只证明训练与观测链路可运行，不足以证明 reward 方向已学到，正式训练需重新评估。
 
 ### 34.G 结果表（占位）
 
@@ -2593,7 +2597,7 @@ wall 为 **0.186s**，train loss `0.5374→0.5215`、validation loss `0.5129→0
 - guidance data generator 与真实 smoke 记录：`71f38f9`, `0e44f0e`；本轮文档结论 commit
   `0591957`
 - action targets/trainer、BOS sampling invariant 和独立训练入口：`0591957`
-- validation/正式 guidance 数据结论 commit：`[待提交]`
+- validation/正式 guidance 数据结论 commit：`8eaaeb5`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）
 

@@ -56,6 +56,8 @@ def test_guidance_action_loss_is_finite_and_backpropagates():
     loss, metrics = guidance_action_loss(model, _batch())
     assert torch.isfinite(loss)
     assert metrics["selected_action_fraction"] > 0.0
+    assert torch.isfinite(torch.tensor(metrics["selected_guidance_mean"]))
+    assert torch.isfinite(torch.tensor(metrics["reward_selected_guidance_corr"]))
     loss.backward()
     assert any(
         parameter.grad is not None and torch.isfinite(parameter.grad).all()

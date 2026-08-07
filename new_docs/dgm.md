@@ -651,6 +651,11 @@ insert/substitute/delete 稀疏 action mask，再对选中的 action 使用 `bac
   标量，并保存独立 `guidance_final.pt`、`config.json`。在 CPU tiny smoke（2 steps、
   hidden=16、1+1 层）上运行 **0.186s**，loss `0.5374→0.5215`，validation loss
   `0.5129→0.4999`；TensorBoard 依赖已在新 `ef` 环境安装，`pip check` 无冲突。
+- 新增 selected-action guidance 均值及其与 reward 的 batch Pearson 诊断。真实 CUDA
+  10-step smoke 用时 **2.38s**，loss `0.7446→0.2913`，validation loss `0.3445→0.2725`；
+  step-10 selected guidance mean 为 train **0.4800**、validation **0.4249**，相关系数
+  分别 **-0.371/-0.024**。由于只有 10 steps 且相关性按 batch 计算，这只是观测链路通过，
+  不能据此宣称 guidance 已学到有效 reward 方向；正式训练需在完整 validation 上重新统计。
 
 推荐的真实数据训练 smoke（正式数据生成完成后执行）为：
 

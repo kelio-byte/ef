@@ -12,6 +12,25 @@ from edit_flows.guidance.targets import (
 )
 
 
+def _safe_pearson_correlation(left: Tensor, right: Tensor) -> Tensor:
+    """Return a finite batch Pearson correlation, or zero if undefined."""
+    if left.ndim != 1 or right.ndim != 1 or left.shape != right.shape:
+        raise ValueError("correlation inputs must be equal-shaped rank-1 tensors")
+    if left.numel() < 2:
+        return left.new_zeros(())
+    left_centered = left - left.mean()
+    right_centered = right - right.mean()
+    denominator = torch.sqrt(
+        left_centered.square().sum() * right_centered.square().sum(),
+    )
+    numerator = (left_centered * right_centered).sum()
+    return torch.where(
+        denominator > 1e-12,
+        numerator / denominator,
+        left.new_zeros(()),
+    )
+
+
 def guidance_action_loss(
     model,
     batch: dict[str, Tensor],
@@ -73,6 +92,27 @@ def guidance_action_loss(
             + substitute_mask.any(dim=-1).float().mean()
             + delete_mask.any(dim=-1).float().mean()
         ) / 3.0
+        total_selected = torch.stack([
+            mask.sum(dim=tuple(range(1, mask.ndim)))
+            for mask in (insert_mask, substitute_mask, delete_mask)
+        ]).sum(dim=0)
+        selected_guidance = torch.stack([
+            (guidance * mask.to(dtype=guidance.dtype)).sum(
+                dim=tuple(range(1, guidance.ndim)),
+            )
+            for guidance, mask in (
+                (guidance_insert, insert_mask),
+                (guidance_substitute, substitute_mask),
+                (guidance_delete, delete_mask),
+            )
+        ]).sum(dim=0) / total_selected.clamp_min(1).to(
+            dtype=guidance_insert.dtype,
+        )
+        selected_rows = total_selected > 0
+        corr = _safe_pearson_correlation(
+            reward,
+            selected_guidance,
+        )
         metrics = {
             "loss": float(loss.item()),
             "loss_insert": float(loss_insert.item()),
@@ -80,6 +120,11 @@ def guidance_action_loss(
             "loss_delete": float(loss_delete.item()),
             "reward_mean": float(reward.float().mean().item()),
             "selected_action_fraction": float(selected.item()),
+            "selected_guidance_mean": float(
+                selected_guidance[selected_rows].mean().item()
+                if selected_rows.any() else 0.0
+            ),
+            "reward_selected_guidance_corr": float(corr.item()),
             "guidance_insert_mean": float(guidance_insert.mean().item()),
             "guidance_substitute_mean": float(guidance_substitute.mean().item()),
             "guidance_delete_mean": float(guidance_delete.mean().item()),
