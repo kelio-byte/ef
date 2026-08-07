@@ -45,6 +45,34 @@ class TestEventProbability:
 
 
 class TestSampleEuler:
+    def test_guidance_beta_zero_matches_baseline(self, dummy_model):
+        class ConstantGuidance(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.anchor = nn.Parameter(torch.zeros(()))
+
+            def forward(
+                self, product, state, time, product_padding, state_padding,
+            ):
+                b, l = state.shape
+                h = torch.ones(
+                    b, l, 19, device=state.device,
+                ) + self.anchor * 0
+                return h, h.clone(), h[:, :, :1].clone()
+
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+        guidance = ConstantGuidance()
+        torch.manual_seed(99)
+        baseline, _ = sample_euler(
+            dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
+        )
+        torch.manual_seed(99)
+        guided, _ = sample_euler(
+            dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
+            guidance_model=guidance, guidance_product=x_0, guidance_beta=0.0,
+        )
+        assert torch.equal(baseline, guided)
+
     def test_bos_is_never_sampled_as_an_edit_position(self):
         x_t = torch.tensor([[BOS_TOKEN, 7, PAD_TOKEN]])
         log_rates = torch.full((1, 3, 3), 20.0)

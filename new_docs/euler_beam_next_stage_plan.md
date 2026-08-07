@@ -2591,6 +2591,13 @@ balanced 版本再训练一 epoch（2,500 steps）耗时 **392.7s**，峰值 all
 阶段 4 的训练与 held-out 时间校准门槛通过；Top-k/invalid 尚无结论，下一步是 ordinary
 Euler guidance off/on。
 
+阶段 5 ordinary Euler adapter 已实现并通过 identity smoke：`apply_action_guidance()` 对
+ 每个位置保持原始总 edit rate，`beta=0`/constant-H 与 baseline 完全一致；sample_retro
+  新增 guidance checkpoint/beta CLI，并修复普通 Euler seed 未应用的问题。20 行输入、
+  100 steps、两输出的 baseline/beta0 prediction SHA 完全相同；beta1 改变 25/40 行，
+  wall 2.952s、peak allocated/reserved 0.297/0.415GB。该单 reaction block 的 valid
+  率 62.5%→60.0% 仅作 mechanics 记录，尚无准确率结论；下一步为 validation off/on。
+
 ### 34.G 结果表（占位）
 
 | reward/beta | budget | Top-1 | Top-3 | Top-10 | Oracle | invalid | mean ESS | wall |

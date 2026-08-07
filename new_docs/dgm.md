@@ -2,7 +2,8 @@
 
 状态：阶段 1 synthetic mechanics 已通过；阶段 2 reward 评估接口已完成；阶段 3 正式
 train/validation guidance 数据已生成并审计通过；阶段 4 action-level guidance 训练和
-held-out 观测已通过最低门槛，尚未接入实际推理。
+held-out 观测已通过最低门槛；阶段 5 ordinary Euler action-level adapter 已实现并通过
+identity smoke，尚未做大规模准确率结论。
 
 本文面向本项目的实际实现，说明如何把
 `Discrete Guidance Matching (DGM)` 适配到当前的 Edit Flows 推理流程。文中把
@@ -710,6 +711,26 @@ guidance off vs guidance on
 - 采样概率和记录的 log-prob 是否一致；
 - Poisson event probability 是否仍在合法范围；
 - guidance 是否只改变预期方向，而不是改变序列操作语义。
+
+#### 阶段 5 当前实现与 smoke（2026-08-08）
+
+- 新增 `edit_flows/guidance/sampling.py` 的 `apply_action_guidance()`：把
+  `u=λ·Q·H^β` 分解到 insert/substitute/delete 三类 action，再按每个位置的原始总
+  edit rate 归一化。这样 `β=0` 或 H 为常数时 rates/posteriors 都严格保持 baseline；
+  非常数 H 只改变 action 类型/token 的相对质量，不改变该位置总体编辑强度。纯函数测试
+  覆盖 identity、常数 H、rate 保持和 posterior 归一化。
+- `sample_euler()` 新增可选 `guidance_model/guidance_product/guidance_beta`，
+  `scripts/sample_retro.py` 新增 `--guidance_checkpoint/--guidance_beta`，当前只允许
+  ordinary Euler；guidance checkpoint 的 vocab、配置、SHA 和 beta 写入 sampling metadata。
+- 同时修复 sample_retro 普通 Euler 的 seed 语义：`--seed` 现在实际调用 global torch RNG，
+  metadata 标记 `seed_applied_to_sampler=true`；这使 baseline 与 beta=0 可以做字节级对照。
+- 固定新 checkpoint、seed=42、100 steps、batch=20、20 个输入行（一个 augmentation
+  block）、每 product 两个输出：baseline 与 guidance beta=0 的 prediction SHA 完全相同，
+  `cmp` 通过；baseline wall **2.376s**、beta=0 **2.317s**。beta=1 改变 25/40 行，wall
+  **2.952s**、peak allocated/reserved **0.297/0.415GB**，输出 40 行且均保留正常格式；
+  该单 reaction block 的 RDKit-valid 为 baseline **25/40 (62.5%)**、beta=1 **24/40
+  (60.0%)**，Top-k 不能在一条 reaction 上解释，暂不据此淘汰 guidance。下一步用未参与
+  training 的 validation 子集做固定预算 off/on 对照。
 
 ### 阶段 6：固定预算下接 Euler-Beam / Euler-SMC
 

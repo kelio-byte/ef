@@ -19,6 +19,7 @@ from torch import Tensor
 from tqdm import tqdm
 
 from edit_flows.data.dataset import load_vocab
+from edit_flows.guidance.model import ProductConditionedGuidance
 from edit_flows.models.transformer import EditFlowsTransformer
 from edit_flows.sampling.euler import sample_euler
 from edit_flows.sampling.euler_beam import _mix_child_seed, sample_euler_beam
@@ -34,6 +35,53 @@ def tokenize_smiles(smiles: str, token2id: dict) -> list:
     tokens = smiles.strip().split()
     unk_id = token2id.get("<unk>", UNK_TOKEN)
     return [token2id.get(t, unk_id) for t in tokens]
+
+
+def _apply_sampling_seed(seed: int, device: torch.device) -> None:
+    """Apply the CLI seed to ordinary stochastic samplers as well as CUDA."""
+    if seed < 0:
+        raise ValueError("seed must be non-negative")
+    torch.manual_seed(seed)
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(seed)
+
+
+def _load_guidance_model(
+    checkpoint_path: str,
+    device: torch.device,
+    expected_vocab_size: int,
+) -> ProductConditionedGuidance:
+    """Load an independent action-level guidance adapter checkpoint."""
+    try:
+        checkpoint = torch.load(
+            checkpoint_path, map_location=device, weights_only=False,
+        )
+    except TypeError:  # pragma: no cover - older torch fallback
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+    config = checkpoint.get("config", {})
+    vocab_size = int(config.get("model_vocab", 0))
+    if vocab_size != expected_vocab_size:
+        raise ValueError(
+            "guidance/model vocabulary mismatch: guidance checkpoint has "
+            f"{vocab_size}, base checkpoint has {expected_vocab_size}"
+        )
+    model = ProductConditionedGuidance(
+        vocab_size=vocab_size,
+        hidden_dim=int(config.get("hidden_dim", 256)),
+        product_layers=int(config.get("product_layers", 2)),
+        state_layers=int(config.get("state_layers", 4)),
+        num_heads=int(config.get("num_heads", 8)),
+        dim_feedforward=int(config.get("dim_feedforward", 1024)),
+        max_seq_len=int(config.get("max_seq_len", 256)),
+        dropout=float(config.get("dropout", 0.1)),
+        attention_dropout=float(config.get("attention_dropout", 0.1)),
+        activation=config.get("activation", "relu"),
+        pos_encoding_scale=not bool(config.get("no_pos_encoding_scale", False)),
+        pad_token=PAD_TOKEN,
+    ).to(device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.eval()
+    return model
 
 
 def _ids_to_str(ids: list, id2token: dict) -> str:
@@ -252,7 +300,7 @@ def _build_sampling_metadata(
         "sample_scheduler": sample_scheduler_name,
         "train_scheduler": train_scheduler_name,
         "seed": args.seed,
-        "seed_applied_to_sampler": args.sampler == "euler_beam",
+        "seed_applied_to_sampler": args.sampler in ("euler", "euler_beam"),
     }
     if args.sampler == "euler_beam":
         sampling.update({
@@ -278,8 +326,16 @@ def _build_sampling_metadata(
         })
     else:
         sampling["n_samples"] = args.n_samples
+        if getattr(args, "guidance_checkpoint", None):
+            sampling.update({
+                "guidance_checkpoint": _path_metadata(
+                    args.guidance_checkpoint, include_sha256=True,
+                ),
+                "guidance_beta": args.guidance_beta,
+                "guidance_mode": "action_rate_normalized",
+            })
         sampling["seed_scope"] = (
-            "not applied by sample_retro.py"
+            "global torch RNG"
             if args.sampler == "euler" else "sampler-specific"
         )
 
@@ -341,6 +397,17 @@ def main():
     parser.add_argument("--n_steps", type=int, default=100)
     parser.add_argument("--n_samples", type=int, default=1,
                         help="Number of independent samples per product")
+    parser.add_argument(
+        "--guidance_checkpoint", type=str, default=None,
+        help=(
+            "Optional action-level DGM guidance checkpoint; currently only "
+            "supported with --sampler euler"
+        ),
+    )
+    parser.add_argument(
+        "--guidance_beta", type=float, default=1.0,
+        help="Exponent applied to guidance weights (0 gives baseline identity)",
+    )
     parser.add_argument("--batch_size", type=int, default=32,
                         help="GPU batch size (number of products per batch)")
     parser.add_argument("--output_dir", type=str, default=None,
@@ -455,6 +522,13 @@ def main():
                     "n_branches must be divisible by "
                     "euler_beam_initial_seed_groups"
                 )
+    if args.guidance_checkpoint and args.sampler != "euler":
+        raise ValueError(
+            "--guidance_checkpoint is currently supported only with "
+            "--sampler euler"
+        )
+    if args.guidance_beta < 0 or not torch.isfinite(torch.tensor(args.guidance_beta)):
+        raise ValueError("guidance_beta must be finite and non-negative")
 
     device = torch.device(args.device)
     if args.sampler == "euler_beam" and device.type == "cuda":
@@ -509,6 +583,12 @@ def main():
     ).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
+    guidance_model = None
+    if args.guidance_checkpoint:
+        guidance_model = _load_guidance_model(
+            args.guidance_checkpoint, device, model_vocab,
+        )
+    _apply_sampling_seed(args.seed, device)
 
     if args.scheduler:
         sample_scheduler_name = args.scheduler
@@ -598,6 +678,11 @@ def main():
               f"matmul_precision={args.euler_beam_matmul_precision}, "
               f"child_policy={args.euler_beam_child_policy}, "
               f"q_temperature={args.euler_beam_q_temperature}")
+    if args.guidance_checkpoint:
+        print(
+            f"  guidance_checkpoint={args.guidance_checkpoint}, "
+            f"guidance_beta={args.guidance_beta}"
+        )
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -630,6 +715,9 @@ def main():
                     time_input=time_input,
                     train_scheduler=train_scheduler,
                     use_origin_mask=use_origin_mask,
+                    guidance_model=guidance_model,
+                    guidance_product=x_0 if guidance_model is not None else None,
+                    guidance_beta=args.guidance_beta,
                 )
             elif args.sampler == "euler_beam":
                 B_prod = end - start

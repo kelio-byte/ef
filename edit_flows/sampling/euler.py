@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 from edit_flows.core.rate_scale import apply_rate_parameterization, get_rate_scale
 from edit_flows.core.scheduler import KappaScheduler
+from edit_flows.guidance.sampling import apply_action_guidance
 from edit_flows.sampling.ops import apply_ins_del_operations
 from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 
@@ -331,12 +332,28 @@ def sample_euler(
     x_1: Optional[Tensor] = None,
     vocab_size: Optional[int] = None,
     use_origin_mask: bool = False,
+    guidance_model=None,
+    guidance_product: Optional[Tensor] = None,
+    guidance_beta: float = 1.0,
 ) -> tuple:
     from edit_flows.analysis.first_step import extract_oracle_event_set
     from edit_flows.sampling.oracle import compute_oracle_model_output
 
     device = next(model.parameters()).device
     batch_size = x_0.shape[0]
+
+    if guidance_beta < 0 or not torch.isfinite(torch.tensor(guidance_beta)):
+        raise ValueError("guidance_beta must be finite and non-negative")
+    if guidance_model is not None:
+        if guidance_product is None:
+            raise ValueError("guidance_product is required with guidance_model")
+        if guidance_product.ndim != 2 or guidance_product.shape[0] != batch_size:
+            raise ValueError(
+                "guidance_product must have shape [batch, product_length] "
+                "with the same batch size as x_0"
+            )
+        guidance_product = guidance_product.to(device=device, dtype=torch.long)
+        guidance_model.eval()
 
     x_t = x_0.to(device)
     if use_origin_mask:
@@ -389,6 +406,25 @@ def sample_euler(
             log_rates, t, scheduler, use_rate_reparam=use_rate_reparam,
             clamp_kappa=clamp_kappa, clamp_max=clamp_max,
         )
+
+        if guidance_model is not None and guidance_beta > 0:
+            guidance_product_pad_mask = guidance_product == pad_token
+            guidance_insert, guidance_substitute, guidance_delete = guidance_model(
+                guidance_product,
+                x_t,
+                t,
+                guidance_product_pad_mask,
+                x_pad_mask,
+            )
+            log_rates, log_ins_probs, log_sub_probs = apply_action_guidance(
+                log_rates,
+                log_ins_probs,
+                log_sub_probs,
+                guidance_insert,
+                guidance_substitute,
+                guidance_delete,
+                beta=guidance_beta,
+            )
 
         adapt_h = get_adaptive_h(default_h, t, scheduler)
         actions = _sample_edit_actions(

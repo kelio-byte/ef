@@ -4,11 +4,13 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.sample_retro import (
+    _apply_sampling_seed,
     _build_sampling_metadata,
     _infer_augmentation,
     _outputs_per_product,
     _select_products,
 )
+import torch
 
 
 def _euler_beam_args(tmp_path):
@@ -145,3 +147,32 @@ def test_euler_beam_output_count_includes_all_final_branches(tmp_path):
     args = _euler_beam_args(tmp_path)
     args.n_runs = 1
     assert _outputs_per_product(args) == 3
+
+
+def test_ordinary_euler_seed_is_applied_and_recorded(tmp_path):
+    args = _euler_beam_args(tmp_path)
+    args.sampler = "euler"
+    args.n_samples = 2
+    prediction_path = tmp_path / "predictions.txt"
+    prediction_path.write_bytes(b"A\n" * 4)
+    _apply_sampling_seed(42, torch.device("cpu"))
+    first = torch.rand(4)
+    _apply_sampling_seed(42, torch.device("cpu"))
+    second = torch.rand(4)
+    assert torch.equal(first, second)
+    metadata = _build_sampling_metadata(
+        args,
+        {"data_dir": "datasets/USPTO_aug20_global", "use_origin_mask": False},
+        prediction_path=str(prediction_path),
+        source_product_count=2,
+        selection_start_product=0,
+        product_count=2,
+        output_line_count=4,
+        n_sampling_steps=100,
+        sample_scheduler_name="cubic",
+        train_scheduler_name="cubic",
+        use_origin_mask=False,
+        elapsed_seconds=1.0,
+    )
+    assert metadata["sampling"]["seed_applied_to_sampler"] is True
+    assert metadata["sampling"]["seed_scope"] == "global torch RNG"
