@@ -2449,8 +2449,9 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 
 ## 34. 任务 31：独立target/reward选择与Terminal Twisting
 
-状态：`[-] DGM 阶段 1 mechanics、阶段 2 reward/terminal smoke、阶段 3 guidance 数据已
-完成；validity 未带来覆盖提升，阶段 4 真实 guidance 训练待开始`
+状态：`[-] DGM 阶段 1 mechanics、阶段 2 reward/terminal smoke、阶段 3 guidance 数据和
+阶段 4 action-level training/held-out 校准已完成；validity 未带来覆盖提升，阶段 5 ordinary
+Euler guidance 待接入`
 
 详细的训练 pipeline、推理流程、适配难点、准备清单和阶段门槛见
 [`new_docs/dgm.md`](dgm.md)。当前只完成设计，不把设计文档视为已完成实验。
@@ -2584,6 +2585,11 @@ guidance mean train/validation 为 **0.4800/0.4249**，相关为 **-0.371/-0.024
 均值 **0.0064**、selected-only 相关 **0.145**；`background_loss_weight=0.01` 后分别为
 **0.8277**、**0.327**。两次 wall 为 **150.5/155.1s**，峰值 allocated 均约 **1.16GB**；
 raw validation loss 不同量纲，不直接比较，暂保留 balanced 版本。
+balanced 版本再训练一 epoch（2,500 steps）耗时 **392.7s**，峰值 allocated/reserved
+**1.17/1.91GB**；全 validation 10,002 条中 8,685 条有 selected action，selected H 均值
+**0.8629**，selected-only reward-H 相关 **0.3599**，四个 t 区间为 **0.361/0.369/0.355/0.355**。
+阶段 4 的训练与 held-out 时间校准门槛通过；Top-k/invalid 尚无结论，下一步是 ordinary
+Euler guidance off/on。
 
 ### 34.G 结果表（占位）
 
@@ -2601,6 +2607,7 @@ raw validation loss 不同量纲，不直接比较，暂保留 balanced 版本�
 - guidance data generator 与真实 smoke 记录：`71f38f9`, `0e44f0e`；本轮文档结论 commit
   `0591957`
 - action targets/trainer、BOS sampling invariant 和独立训练入口：`0591957`
+- sparse action balanced loss、pilot/epoch1 训练记录：`3ea5a67`
 - validation/正式 guidance 数据结论 commit：`8eaaeb5`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）

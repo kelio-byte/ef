@@ -1,8 +1,8 @@
 # DGM 在 Edit Flows / Euler-Beam 中的适配方案
 
 状态：阶段 1 synthetic mechanics 已通过；阶段 2 reward 评估接口已完成；阶段 3 正式
-train/validation guidance 数据已生成并审计通过；阶段 4 的 action-level guidance 训练入口
-和 CPU smoke 已完成，真实 guidance 训练即将开始，尚未接入实际推理。
+train/validation guidance 数据已生成并审计通过；阶段 4 action-level guidance 训练和
+held-out 观测已通过最低门槛，尚未接入实际推理。
 
 本文面向本项目的实际实现，说明如何把
 `Discrete Guidance Matching (DGM)` 适配到当前的 Edit Flows 推理流程。文中把
@@ -664,6 +664,14 @@ insert/substitute/delete 稀疏 action mask，再对选中的 action 使用 `bac
   155.1s**，峰值 allocated 均约 **1.16GB**。balanced loss 的 raw validation loss
   约 **0.801**，不能与等权 loss **0.00417** 直接比较；当前保留 balanced 版本，后续以
   selected action 校准和真实 guided rollout 判断收益。
+- 使用 balanced loss 完成一 epoch（2,500 steps）的真实训练，checkpoint 保存在
+  `/root/autodl-tmp/dgm_guidance_runs/epoch1_balanced/guidance_final.pt`（不进 Git）。训练
+  wall **392.7s**，峰值 CUDA allocated/reserved **1.17/1.91GB**；validation 子集 loss
+  从 **0.818** 降到 **0.775**。全 validation 10,002 条记录中 8,685 条有 selected
+  action，selected H 均值 **0.8629**，selected-only reward-H 相关 **0.3599**；按 t 的
+  四个区间相关为 **0.361/0.369/0.355/0.355**，H 全局范围 `0.00154..1.287`。评估
+  forward wall **21.3s**。这满足阶段 4 的训练稳定性与时间校准门槛，但不代表 Top-k 已提升；
+  下一步必须做 ordinary Euler guidance off/on 对照。
 
 推荐的真实数据训练 smoke（正式数据生成完成后执行）为：
 
