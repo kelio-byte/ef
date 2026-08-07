@@ -2552,6 +2552,12 @@ Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
 - synthetic已知target importance estimate：两步 categorical chain 已通过
 - validation-A/B/C结果：`[待实验]`
 
+阶段 4 训练前发现并修正了一个 action-level 正确性风险：不能把 scalar reward 广播到
+所有 insert/substitute/delete 输出。新增 `edit_flows/guidance/targets.py` 由 state/terminal
+optimal alignment 生成稀疏 action masks，新增 `edit_flows/guidance/training.py` 统一
+Bregman loss、mask、梯度裁剪和 train/eval step；targets/training smoke 加入后，DGM/SMC/
+model 相关 CPU 回归为 **35 passed**。正式 guidance 训练待阶段 3 数据完成。
+
 阶段 3 数据生成器已完成代码和 CPU 回归：`edit_flows/guidance/data.py` 负责 aligned
 `x_t`、记录保存/加载和 collate，`scripts/generate_guidance_data.py` 只使用普通 Euler、
 按 augmentation 选择原始 product、保存 reward/终点/时间/seed；guidance 测试共 14 个通过。
@@ -2574,6 +2580,7 @@ guidance 数据仍待生成。
 - terminal数学smoke commit：`4d7c838`
 - guidance data generator 与真实 smoke 记录：`71f38f9`, `0e44f0e`；本轮文档结论 commit
   `[待提交]`
+- action targets/trainer：`[本轮待提交]`
 - validation结论commit：`[待填写]`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）

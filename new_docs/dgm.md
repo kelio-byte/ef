@@ -610,7 +610,11 @@ validation target 选择超参，也不训练 guidance model。阶段3的“接�
 → H_ins, H_sub, H_del
 ```
 
-训练目标使用正值 Bregman loss。先不要同时训练基础模型，也不要加复杂的目标样本正则。
+不能把一个 scalar reward 无差别广播到所有 action：这样只能学习“当前状态的平均 reward”，
+无法告诉模型哪个后继更好。当前实现先用 `x_t` 与 terminal 的 optimal alignment 生成
+insert/substitute/delete 稀疏 action mask，再对选中的 action 使用 `background + reward`、
+其余合法 action 使用小的正 background，训练正值 Bregman loss。它仍是 action-level
+近似，不宣称是严格 Z-space DGM。
 
 必须评估：
 
@@ -619,6 +623,16 @@ validation target 选择超参，也不训练 guidance model。阶段3的“接�
 - 不同时间 `t` 的校准误差；
 - 高 reward 样本是否得到更高 guided probability；
 - guidance forward 的耗时和显存。
+
+#### 阶段 4 当前实现记录（2026-08-07）
+
+- 新增 `edit_flows/guidance/targets.py`：从 state/terminal 构造三类 action mask，并把
+  reward 转为正值 action targets；
+- 新增 `edit_flows/guidance/training.py`：统一 forward、mask、Bregman loss、梯度裁剪和
+  train/eval step；不修改基础 Edit Flows checkpoint；
+- 新增 targets/training 测试；当前 DGM/SMC/模型相关 CPU 回归共 **35 passed**；
+- 这一步修正了“scalar reward 广播到所有 action”的潜在正确性问题。正式 guidance 训练
+  尚未开始，等待阶段3 train/validation 数据生成完成。
 
 ### 阶段 5：先接普通 Euler，不接 Beam
 
@@ -699,7 +713,7 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 | 1 | synthetic DGM | 已知 `q ∝ pR` 的采样频率、后验重加权、ESS/evidence 与理论一致；常数 guidance 不改变 `p` | 代数工具和 19 个测试通过，多步 rollout 待做 |
 | 2 | RDKit validity reward | reward 有限、非负、批量结果可复现且不读取 test target；invalid/ESS 变化可解释 | `[x]` 接口/格式转换/缓存/terminal smoke 通过；validity 仅保留为诊断 reward，未证明准确率提升 |
 | 3 | guidance 数据生成 | 按 product 隔离 train/validation；样本近似基础 `pθ`；保存 product、终点、reward、`t`、alignment、seed | 接口/CPU 测试/真实 5-product smoke 通过；正式大数据生成待做 |
-| 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | 模型和 smoke 已完成，训练未开始 |
+| 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | action targets/trainer/CPU smoke 完成；等待正式数据 |
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 未开始 |
 | 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 未开始 |
 | 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分 | checkpoint 已检查，兼容未做 |
