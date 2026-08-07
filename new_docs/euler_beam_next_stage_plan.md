@@ -2555,7 +2555,9 @@ Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
 阶段 3 数据生成器已完成代码和 CPU 回归：`edit_flows/guidance/data.py` 负责 aligned
 `x_t`、记录保存/加载和 collate，`scripts/generate_guidance_data.py` 只使用普通 Euler、
 按 augmentation 选择原始 product、保存 reward/终点/时间/seed；guidance 测试共 14 个通过。
-真实 checkpoint smoke 尚待在停止 `alive.py` 后运行，完成后必须重新启动 `alive.py`。
+真实 checkpoint smoke 已在停止并恢复 `alive.py` 的完整流程中通过：5 个 validation product、
+20 steps、10 条记录、reward positive 4/10、GPU wall 约 4.5s；正式 train/validation
+guidance 数据仍待生成。
 
 ### 34.G 结果表（占位）
 
@@ -2569,7 +2571,9 @@ Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
 
 - 预注册/候选方案commit：`e86754c`, `ebfcbc6`
 - reward实现commit：`4dde773`
-- terminal数学smoke commit：`[本轮待提交]`
+- terminal数学smoke commit：`4d7c838`
+- guidance data generator 与真实 smoke 记录：`71f38f9`, `0e44f0e`；本轮文档结论 commit
+  `[待提交]`
 - validation结论commit：`[待填写]`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）

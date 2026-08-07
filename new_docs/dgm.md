@@ -578,8 +578,10 @@ baseline checkpoint id
 - 默认 reward 是 RDKit validity，tokenized/global-aligned 终点会先 compact + inverse
   align；metadata 记录 checkpoint、scheduler、n_steps、n_samples、time_samples、seed 和
   batch RNG 作用域；
-- CPU 单元测试 `14 passed`（含 4 个 data tests），脚本 `--help` 和静态编译通过；尚未
-  启动真实 checkpoint 生成，因此阶段3仍需一个短 CUDA 生成 smoke 后才算通过。
+- CPU 单元测试 `14 passed`（含 4 个 data tests），脚本 `--help` 和静态编译通过；真实
+  checkpoint smoke 已完成：5 个 validation product、20 steps、每条轨迹取 2 个状态，共
+  10 条记录，reward positive **4/10**、均值 **0.4**，GPU wall **约 4.5s**；`.pt` 加载、
+  padding/collate 和 metadata 检查通过。
 
 推荐的首次 smoke（运行前先停止 `alive.py`，结束后立即重启）是：
 
@@ -594,7 +596,9 @@ python scripts/generate_guidance_data.py \
 ```
 
 该 smoke 只验证数据条数、reward 分布、状态长度、seed/metadata 和运行时间，不使用
-validation target 选择超参，也不训练 guidance model。
+validation target 选择超参，也不训练 guidance model。阶段3的“接口和真实生成”门槛通过；
+还需按相同 product 隔离规则生成正式 train-guidance/validation-guidance 数据，才能进入
+阶段4训练。
 
 ### 阶段 4：训练最小 guidance model
 
@@ -694,7 +698,7 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 | 0 | 冻结 baseline | 同 seed predictions SHA 可复现；guidance off 与当前 Euler 完全一致；指标和 metadata 齐全 | 部分已有历史基线，DGM 专用快照待做 |
 | 1 | synthetic DGM | 已知 `q ∝ pR` 的采样频率、后验重加权、ESS/evidence 与理论一致；常数 guidance 不改变 `p` | 代数工具和 19 个测试通过，多步 rollout 待做 |
 | 2 | RDKit validity reward | reward 有限、非负、批量结果可复现且不读取 test target；invalid/ESS 变化可解释 | `[x]` 接口/格式转换/缓存/terminal smoke 通过；validity 仅保留为诊断 reward，未证明准确率提升 |
-| 3 | guidance 数据生成 | 按 product 隔离 train/validation；样本近似基础 `pθ`；保存 product、终点、reward、`t`、alignment、seed | 生成器与 CPU 测试完成；真实 checkpoint smoke 待做 |
+| 3 | guidance 数据生成 | 按 product 隔离 train/validation；样本近似基础 `pθ`；保存 product、终点、reward、`t`、alignment、seed | 接口/CPU 测试/真实 5-product smoke 通过；正式大数据生成待做 |
 | 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | 模型和 smoke 已完成，训练未开始 |
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 未开始 |
 | 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 未开始 |
