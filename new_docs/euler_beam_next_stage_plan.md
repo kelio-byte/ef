@@ -2587,8 +2587,8 @@ wall 为 **0.186s**，train loss `0.5374→0.5215`、validation loss `0.5129→0
 - reward实现commit：`4dde773`
 - terminal数学smoke commit：`4d7c838`
 - guidance data generator 与真实 smoke 记录：`71f38f9`, `0e44f0e`；本轮文档结论 commit
-  `[待提交]`
-- action targets/trainer、BOS sampling invariant 和独立训练入口：`[本轮待提交]`
+  `0591957`
+- action targets/trainer、BOS sampling invariant 和独立训练入口：`0591957`
 - validation结论commit：`[待填写]`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）
