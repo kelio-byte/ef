@@ -2451,7 +2451,8 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 
 状态：`[-] DGM 阶段 1 mechanics、阶段 2 reward/terminal smoke、阶段 3 guidance 数据和
 阶段 4 action-level training/held-out 校准已完成；阶段 5 ordinary Euler 已完成 identity
-与 validation-200 对照，但 validity 未带来 Top-k 覆盖提升；阶段 7 forward reward 待接入`
+与 validation-200 对照，但 validity 未带来 Top-k 覆盖提升；阶段 7 已完成兼容加载/方向
+smoke 和 batch reward adapter，正在做 reward 校准`
 
 详细的训练 pipeline、推理流程、适配难点、准备清单和阶段门槛见
 [`new_docs/dgm.md`](dgm.md)。当前只完成设计，不把设计文档视为已完成实验。
@@ -2459,7 +2460,17 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 2026-08-07 进一步检查了用户上传的
 `new_checkpoints/MIT_mixed_augm_model_average_20.pt`：确认它是旧版 OpenNMT/torchtext
 格式的 Molecular Transformer forward checkpoint 候选（约 4 层、hidden 256、FFN 2048、
-8 heads、共享词表），当前阶段不阻塞 DGM；需要在阶段 7 再做隔离加载或移植验证。
+8 heads、共享词表）。阶段 7 已新增现代 PyTorch 兼容加载器、官方 tokenizer、batch
+teacher-forced reward 和 smoke 脚本，不需要在主环境安装旧 `torchtext`/OpenNMT。
+
+200 个 validation unique reactions 的方向 smoke：reactants→product 平均归一化 log-likelihood
+**-2.0448**，交换方向 **-3.3193**，正确方向胜出 **92.0%**。600 个候选 pair 的 reward
+batch wall **0.504s**，460 个唯一 pair；cache-only 重复调用 **0.018s** 且逐元素一致。
+在 validation reaction 200–399 的 12,000 条候选上直接 raw-forward rerank 的累计
+Top-1/2/3/5/10 为 **36.0/51.5/64.0/72.0/84.5%**，baseline 为
+**51.0/66.5/72.0/77.0/83.5%**，Oracle 均 **86.5%**。结论：forward checkpoint 有可用
+方向信号和高效 batch 接口，但 raw score 未校准，直接 rerank 不是可接受方法；下一步是
+validation-A/B 的正值 reward/β 校准和 learned terminal guidance，而不是直接改默认 sampler。
 
 同日完成 DGM 的低风险 utility 子阶段：新增正值 guidance、`p × H` 后验重加权、Bregman
 loss 和 RDKit validity reward 接口；新增 guidance 测试 10 个通过，现有相关回归测试 12
@@ -2608,8 +2619,8 @@ Euler guidance off/on。
 因此阶段 5 的接口、seed、identity 和输出一致性门槛通过，但 validity reward 的准确率
 门槛未通过：Top-1/3/10 和 Oracle 持平，Top-2 下降 2 个百分点，推理 wall 约为 baseline
 的 1.51 倍。当前 guidance 默认关闭，不继续把这个弱 reward 接到 Euler-Beam/SMC；下一步
-应优先完成阶段 7 的独立 Molecular Transformer checkpoint/tokenizer/方向 smoke，获得
-更贴近逆合成正确性的 forward reward。
+应继续完成阶段 7 的 validation-A/B 正值 reward/β 校准和 learned terminal guidance，获得
+更贴近逆合成正确性的 forward reward；在此之前不把 raw score 直接接入默认 Euler-Beam。
 
 ### 34.G 结果表（占位）
 
@@ -2631,6 +2642,7 @@ Euler guidance off/on。
 - validation/正式 guidance 数据结论 commit：`8eaaeb5`
 - ordinary Euler guidance identity 与 validation-200 对照代码：`2a5a078`
 - validation-200 validity guidance 结论：`8bf9c8f`
+- Molecular Transformer 兼容加载、tokenizer、forward reward adapter：`8ae00b9`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）
 

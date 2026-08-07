@@ -4,7 +4,8 @@
 train/validation guidance 数据已生成并审计通过；阶段 4 action-level guidance 训练和
 held-out 观测已通过最低门槛；阶段 5 ordinary Euler action-level adapter 已实现，identity
 和 validation-200 off/on 对照均完成。当前实现机制通过，但 validity reward 尚未通过准确率
-收益门槛；下一步转向阶段 7 的 forward reaction reward，默认采样仍关闭 guidance。
+收益门槛；阶段 7 的 forward reaction reward 已完成 checkpoint/tokenizer/方向 smoke 和
+批量 reward adapter，正在做 validation reward 校准，默认采样仍关闭 guidance。
 
 本文面向本项目的实际实现，说明如何把
 `Discrete Guidance Matching (DGM)` 适配到当前的 Edit Flows 推理流程。文中把
@@ -783,6 +784,30 @@ model：先完成 checkpoint/tokenizer/方向 smoke，再封装 terminal forward
 6. 在 validation-A 调整很小的 `β` 候选集合，在 validation-B 复核；
 7. 最后才在 test 上运行一次。
 
+#### 阶段 7 当前实现与 validation 诊断（2026-08-08）
+
+- 新增 `edit_flows/forward/molecular_transformer.py`：在不安装旧版 `torchtext`/OpenNMT
+  的前提下重建 OpenNMT 0.4.1 的 encoder、decoder、attention、LayerNorm、位置编码和
+  generator，并对 checkpoint 做 strict state-dict 加载；新增官方 SMILES tokenizer 和
+  `scripts/forward_model_smoke.py`。
+- 新增 `edit_flows/forward/reward.py`：批量把 Edit Flows `#global#` 候选转换为普通 SMILES，
+  用 teacher-forced、长度归一化的 `log p(product | reactants)` 作为 raw forward score，
+  支持 caller-owned pair cache；`positive_forward_reward()` 只在需要 DGM 正值目标时做
+  `exp(score / temperature)`，不把负 log-likelihood 直接广播成 action target。
+- 兼容加载、tokenizer 和 reward 单元测试 **4 passed**。200 个 validation unique reactions
+  的方向 smoke 中，正确的 reactants→product 平均 score **-2.0448**，交换方向
+  product→reactants 为 **-3.3193**，正确方向胜出 **92.0%**；因此 checkpoint、词表和
+  方向达到进入 reward 实验的最低门槛。
+- 600 个已有 validation 候选的 batch reward smoke 使用 460 个唯一 pair，CUDA wall
+  **0.504s**；完全命中 cache 的重复调用 **0.018s**，输出逐元素完全一致。
+- 作为“是否可以直接 rerank”的反证诊断，在 validation reaction 200–399 的 12,000 条
+  ordinary-Euler `n_samples=3` × augmentation 候选上直接按 raw forward score 排序，Top-1/2/3/5/10 为
+  **36.0/51.5/64.0/72.0/84.5%**（累计），baseline 为
+  **51.0/66.5/72.0/77.0/83.5%**，Oracle 均为 **86.5%**。它只略改善 Top-10，明显损害
+  Top-1/Top-2，说明 forward score 目前是有方向信息但未校准的弱 reward；不能把直接
+  rerank 设为方法结论，也不能据此在 test 上调温度。下一步是在 validation-A/B 固定小的
+  reward temperature/β 候选，先训练或校准 terminal guidance，再做 off/on 对照。
+
 如果没有可靠的 forward checkpoint，不能为了“使用 DGM”临时把反向模型自身的
 log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 
@@ -808,7 +833,7 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 | 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | balanced action-level 训练、held-out 校准和成本测量完成 |
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 机制通过；validation-200 validity reward 未提升 Top-k，默认关闭 |
 | 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 暂缓，等待更有信息量的 forward reward |
-| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分 | checkpoint 已检查，兼容未做 |
+| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分 | checkpoint/兼容加载/方向 smoke/批量 adapter 已通过；直接 rerank 未通过准确率门槛，learned terminal guidance 待做 |
 | 8 | 严格 Z-space DGM | GAP/变长动作映射明确；synthetic 和 identity-limit 测试通过；才可使用 exact DGM 表述 | 未开始 |
 
 任何阶段只达到“代码能运行”而没有达到对应栏的正确性和对照门槛，都不记为通过。
@@ -929,7 +954,8 @@ PyTorch 0.4.1 和 `torchtext==0.3.1`。这意味着它**不能直接当作当前
 1. 建立隔离的旧版 OpenNMT/torchtext 环境，调用官方 `translate.py`；或
 2. 编写兼容加载器，将 checkpoint 的 state dict 和 vocabulary 移植到当前环境。
 
-在没有完成最小 forward smoke 前，不把它直接接入 DGM 主实验。
+已完成现代 PyTorch 兼容加载和最小 forward smoke，当前仍不把未校准的 raw score 直接接入
+DGM 主采样；需要先完成 validation reward 校准和 terminal guidance 对照。
 
 还需要特别注意：
 
@@ -964,12 +990,9 @@ Molecular Transformer 要求旧版 PyTorch 0.4.1、`torchtext==0.3.1` 和旧 Ope
 直接在 `/root/autodl-tmp/ef` 中执行无版本约束的 `pip install torchtext` 或安装旧版
 OpenNMT；这可能破坏当前 PyTorch/CUDA 环境。
 
-阶段 7 需要运行官方 checkpoint 时，按以下优先级处理：
-
-1. 先尝试只读 state-dict/vocabulary 移植到现代 PyTorch，不改变主环境；
-2. 如果必须运行官方 `translate.py`，创建独立 `mt_legacy` conda/虚拟环境，所有旧依赖
-   只安装到该环境；
-3. 在旧环境中完成最小方向/tokenization smoke 后，再决定是否保留该方案。
+阶段 7 当前已经采用第一优先级：只读 state-dict/vocabulary 移植到现代 PyTorch，主环境
+没有安装旧依赖。如果未来需要复核官方 `translate.py` 的 beam 生成，再创建隔离
+`/root/autodl-tmp/mt_legacy` 环境；这不是当前 teacher-forced reward 的前置条件。
 
 安装任何包前都要记录环境、版本、安装命令和 `pip check`/import 结果；当前主环境不因
 forward reward 的实验而改变。
@@ -1071,15 +1094,15 @@ DGM 实现。
 - [ ] 完成 reward 接口、缓存和 metadata。
 - [ ] 确认 guidance train/validation 按 product 隔离。
 - [ ] 决定第一版使用 RDKit validity reward。
-- [ ] 确认是否拥有可靠的 forward model 权重和推理接口。
+- [x] 确认 forward model 权重、官方 tokenizer、方向和现代兼容推理接口。
 - [ ] 训练最小 guidance adapter，不修改基础 checkpoint。
 - [x] 先在普通 Euler 上完成 guidance off/on A/B，并完成 validation-200 对照。
 - [ ] 只有独立 reward 在普通 Euler 上通过准确率门槛后，再接 Euler-Beam/Euler-SMC。
 - [ ] 最后才在 validation 上选择 forward reward 和 `β`，再运行 test。
 
-本文当前阶段的下一步是阶段 7：先对已有 Molecular Transformer checkpoint 做隔离的
-加载、tokenization 和方向 smoke，再决定是否实现批量 terminal forward reward；在此之前
-不修改当前默认 Euler-Beam，也不把 validity guidance 打开为默认配置。
+本文当前阶段的下一步是阶段 7 的 validation reward 校准：在不重叠 validation-A/B 上固定
+少量 `temperature/β` 候选，比较 raw forward reward、正值变换和 learned terminal guidance；
+在准确率门槛通过前不修改当前默认 Euler-Beam，也不把 validity guidance 打开为默认配置。
 
 ---
 
