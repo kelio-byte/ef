@@ -4,9 +4,11 @@ import torch
 from edit_flows.guidance.zspace import (
     ZSpaceMappingError,
     apply_z_transition,
+    compose_edit_action_log_weights,
     edit_to_z_candidates,
     z_transition_to_edit,
 )
+from edit_flows.guidance.dgm import guided_log_probs
 
 
 def test_z_transition_maps_substitute_and_operation_channel():
@@ -19,6 +21,24 @@ def test_z_transition_maps_substitute_and_operation_channel():
     assert edit.token == 12
     assert edit.action_channel(32) == 44
     torch.testing.assert_close(apply_z_transition(old, new, vocab_size=32), new)
+
+
+def test_action_weight_composition_and_unit_guidance_identity():
+    log_rates = torch.tensor([[[0.2, -0.3, -0.7]]])
+    log_insert = torch.tensor([[[-1.0, -2.0, -3.0, -4.0]]])
+    log_substitute = torch.tensor([[[-0.5, -1.5, -2.5, -3.5]]])
+    combined = compose_edit_action_log_weights(
+        log_rates, log_insert, log_substitute,
+    )
+    expected = torch.cat(
+        (log_rates[..., 0:1] + log_insert,
+         log_rates[..., 1:2] + log_substitute,
+         log_rates[..., 2:3]),
+        dim=-1,
+    )
+    torch.testing.assert_close(combined, expected)
+    identity = guided_log_probs(combined, torch.ones_like(combined))
+    torch.testing.assert_close(identity, torch.log_softmax(combined, dim=-1))
 
 
 def test_gap_transition_exposes_unique_insertion_boundary():

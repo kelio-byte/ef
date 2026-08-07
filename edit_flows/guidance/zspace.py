@@ -26,6 +26,34 @@ class ZSpaceMappingError(ValueError):
     """Raised when a fixed-coordinate Z transition is not a valid edit."""
 
 
+def compose_edit_action_log_weights(
+    log_rates: Tensor,
+    log_insert_probs: Tensor,
+    log_substitute_probs: Tensor,
+) -> Tensor:
+    """Combine Edit Flows outputs into ``position × operation/token`` weights.
+
+    ``log_rates`` must already use the caller's desired time/rate
+    parameterization.  The output channel order is exactly the one used by
+    :func:`edit_flows.core.z_space.make_ut_mask_from_z`: insertion tokens,
+    substitution tokens, then one deletion channel.  No normalization or
+    guidance is applied here, so this is safe to use for diagnostics and for a
+    future fixed-coordinate sampler.
+    """
+    if log_rates.ndim != 3 or log_rates.shape[-1] != 3:
+        raise ValueError("log_rates must have shape [batch, length, 3]")
+    if log_insert_probs.ndim != 3 or log_substitute_probs.ndim != 3:
+        raise ValueError("token log-probabilities must have shape [batch, length, vocab]")
+    if log_insert_probs.shape != log_substitute_probs.shape:
+        raise ValueError("insert and substitute shapes must match")
+    if log_rates.shape[:2] != log_insert_probs.shape[:2]:
+        raise ValueError("rate and token-probability batch/length dimensions differ")
+    insert = log_rates[..., 0:1] + log_insert_probs
+    substitute = log_rates[..., 1:2] + log_substitute_probs
+    delete = log_rates[..., 2:3]
+    return torch.cat((insert, substitute, delete), dim=-1)
+
+
 @dataclass(frozen=True)
 class ZEdit:
     """A one-coordinate Z transition and its X-space edit interpretation.

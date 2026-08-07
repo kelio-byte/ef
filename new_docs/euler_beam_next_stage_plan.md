@@ -2781,7 +2781,7 @@ Record final Top-k and performance validation
 `GAP→token=insert`、`token→GAP=delete`、`token→token=substitute`，统一处理 BOS/PAD、
 X-space 插入锚点和 operation channel（`insert: token`、`substitute: token+V`、
 `delete: 2V`）。反向映射返回所有可能的 Z 坐标；连续 GAP run 显式标记
-`ambiguous=True`，要求双射时直接拒绝。相关 guidance/forward 测试集合为 **31 passed**。
+`ambiguous=True`，要求双射时直接拒绝。相关 guidance/forward 测试集合为 **32 passed**。
 全量 `pytest` 为 **262 passed / 17 failed**；失败来自既有 beam 测试使用
 `EditCandidate(log_u_real)` 而当前 API 为 `log_u`，以及受影响的旧 controlled-model 用例，
 本次不修改无关 beam 代码。
@@ -2793,3 +2793,9 @@ X-space 插入锚点和 operation channel（`insert: token`、`substitute: token
 变长 Edit Flow 不能直接称为论文 exact posterior；下一阶段必须保留 GAP 身份实现固定
 Z-state transition，或明确采用 action-level approximate guidance。该审计只改变独立模块，
 默认 sampler、checkpoint 和历史结果不变。
+
+同一隔离模块新增 `compose_edit_action_log_weights()`，把基础模型的
+`[rate_ins, rate_sub, rate_del]` 与 token log-prob 组合为
+`insert[V] + substitute[V] + delete` 通道；全 1 guidance 的 identity 已通过测试。
+该 DG-1 接口不改变 rate parameterization、采样归一化或默认 sampler，为后续 fixed-Z
+实验提供唯一可测试的 action-weight 入口。
