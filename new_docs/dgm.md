@@ -829,6 +829,15 @@ forward reward 不是常数且可以被 adapter 学到；这只是可学习性�
 | forward guidance, β=1.00 | 50.0% | 67.0% | 71.5% | 77.0% | 80.5% | 83.0% | 11.850/11.500/11.775% | 2.271 | 379.2 s |
 | forward guidance, β=0.25 | 52.5% | 65.5% | 71.5% | 78.5% | 82.5% | 85.5% | 11.325/11.825/12.525% | 2.380 | 380.1 s |
 
+为排除 adapter 欠训练，又保持上述所有采样条件不变，将同一架构训练到 2,500 steps（两遍
+train data）。训练 wall **644.5 s**、峰值显存 allocated/reserved **2.24/5.11 GB**，
+最后一次完整 validation loss **0.3206**，selected reward–guidance Pearson **0.5210**。
+使用该 checkpoint、β=0.25 的结果为 Top-1/2/3/5/10 **53.5/66.5/69.5/75.0/81.5%**，
+Oracle **85.0%**，invalid@1/2/3 **12.900/11.700/11.875%**，mean final rank **2.400**，
+sampling wall **378.8 s**。相对于 pilot，Top-1 再升 1.0 个百分点，但 Top-3、Top-10 和
+Oracle 分别再降 2.0、1.0、0.5 个百分点；因此“继续训练即可恢复覆盖”的假设也没有得到
+支持。
+
 这里 β=0.25 的 Top-1 比 baseline 高 1.5 个百分点，但 Top-3 低 0.5、Top-10 低 1.0、
 Oracle 低 1.0 个百分点；β=1.0 的 Top-10/Oracle 分别下降 3.0/3.5 个百分点。两种
 guided 运行的 wall 都约为 baseline 的 **1.50 倍**，主要来自每个 Euler step 的 guidance
@@ -836,10 +845,10 @@ forward。50-reaction 预筛中 β=0.25/0.5 的 Top-1 都下降 4 个百分点�
 的全局改善信号。
 
 因此阶段 7 当前只通过了“checkpoint、方向、批量接口和 guidance 可学习性”门槛，尚未
-通过“固定预算下 Top-1 不回退且 Top-3/10 或 Oracle 稳定提升”的准确率门槛。该 forward
-reward 不能进入默认 Euler/Euler-Beam；下一步若继续，只能在 validation 上训练更充分的
-adapter 或做独立的 reward 校准/终点 guidance，并保留 baseline 与本轮结果作为对照，不能
-用 test target 选择 β。
+通过“固定预算下 Top-1 不回退且 Top-3/10 或 Oracle 稳定提升”的准确率门槛。pilot 与充分
+训练两个 adapter 都未通过，说明瓶颈不只是欠训练。该 forward reward 不能进入默认
+Euler/Euler-Beam；后续若继续，应转向独立 reward 校准、终点/候选级的受约束使用，或严格
+Z-space 研究，并保留 baseline 与本轮结果作为对照，不能用 test target 选择 β。
 
 如果没有可靠的 forward checkpoint，不能为了“使用 DGM”临时把反向模型自身的
 log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
@@ -1128,7 +1137,7 @@ DGM 实现。
 - [ ] 确认 guidance train/validation 按 product 隔离。
 - [ ] 决定第一版使用 RDKit validity reward。
 - [x] 确认 forward model 权重、官方 tokenizer、方向和现代兼容推理接口。
-- [ ] 训练最小 guidance adapter，不修改基础 checkpoint。
+- [x] 训练最小及充分训练 guidance adapter，不修改基础 checkpoint；准确率门槛未通过。
 - [x] 先在普通 Euler 上完成 guidance off/on A/B，并完成 validation-200 对照。
 - [ ] 只有独立 reward 在普通 Euler 上通过准确率门槛后，再接 Euler-Beam/Euler-SMC。
 - [ ] 最后才在 validation 上选择 forward reward 和 `β`，再运行 test。

@@ -2484,11 +2484,20 @@ steps、seed42 的固定预算对照中：
 | forward guidance, β=1.00 | 50.0% | 67.0% | 71.5% | 77.0% | 80.5% | 83.0% | 11.850/11.500/11.775% | 2.271 | 379.2s |
 | forward guidance, β=0.25 | 52.5% | 65.5% | 71.5% | 78.5% | 82.5% | 85.5% | 11.325/11.825/12.525% | 2.380 | 380.1s |
 
+为排除 adapter 欠训练，又保持上述所有采样条件不变，将同一架构训练到 2,500 steps（两遍
+train data）。训练 wall **644.5s**、峰值显存 allocated/reserved **2.24/5.11GB**，
+最后一次完整 validation loss **0.3206**，selected reward–guidance Pearson **0.5210**。
+使用该 checkpoint、β=0.25 的结果为 Top-1/2/3/5/10 **53.5/66.5/69.5/75.0/81.5%**，
+Oracle **85.0%**，invalid@1/2/3 **12.900/11.700/11.875%**，mean final rank **2.400**，
+sampling wall **378.8s**。相对于 pilot，Top-1 再升 1.0 个百分点，但 Top-3、Top-10 和
+Oracle 分别再降 2.0、1.0、0.5 个百分点；继续训练没有恢复覆盖。
+
 β=0.25 虽然 Top-1 比 baseline 高 1.5 个百分点，但 Top-3、Top-10、Oracle 分别低
 0.5、1.0、1.0 个百分点；β=1.0 的 Top-10/Oracle 下降 3.0/3.5 个百分点。guided wall
 约为 baseline 的 **1.50×**。因此 forward reward 的“可学习”门槛通过，固定预算准确率
-门槛未通过；不接入默认 Euler-Beam/SMC。后续若继续，只做更充分 adapter 或独立 reward
-校准，并在不重叠 validation 上复核，不使用 test 调 β。
+门槛未通过；不接入默认 Euler-Beam/SMC。pilot 与充分训练两个 adapter 都未通过，后续若
+继续应转向独立 reward 校准、终点/候选级的受约束使用，或严格 Z-space 研究，并在不重叠
+validation 上复核，不使用 test 调 β。
 
 同日完成 DGM 的低风险 utility 子阶段：新增正值 guidance、`p × H` 后验重加权、Bregman
 loss 和 RDKit validity reward 接口；新增 guidance 测试 10 个通过，现有相关回归测试 12
@@ -2761,6 +2770,6 @@ Record final Top-k and performance validation
 `new_docs/dgm.md` 中登记；本节结论对应文档提交（待填写）。
 
 通过项：Molecular Transformer 兼容加载、官方 tokenizer、reactants→product 方向、批量
-缓存、forward reward/H 的可学习性。未通过项：在 200 个完整 validation reaction 的
-固定预算上同时保持覆盖和 Top-3/10/Oracle。当前默认采样配置不变，forward reward 仅作为
-后续校准和诊断资产。
+缓存、forward reward/H 的可学习性。pilot 与 2,500-step 充分训练 adapter 都未通过在
+200 个完整 validation reaction 的固定预算上同时保持覆盖和 Top-3/10/Oracle 的门槛。
+当前默认采样配置不变，forward reward 仅作为后续校准和诊断资产。
