@@ -617,6 +617,22 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 
 这一阶段才可以讨论是否使用“exact DGM”这个表述。
 
+### 阶段通过门槛总表
+
+| 阶段 | 任务 | 达到什么效果才算通过 | 当前状态 |
+|---|---|---|---|
+| 0 | 冻结 baseline | 同 seed predictions SHA 可复现；guidance off 与当前 Euler 完全一致；指标和 metadata 齐全 | 部分已有历史基线，DGM 专用快照待做 |
+| 1 | synthetic DGM | 已知 `q ∝ pR` 的采样频率、后验重加权、ESS/evidence 与理论一致；常数 guidance 不改变 `p` | 代数工具和 19 个测试通过，多步 rollout 待做 |
+| 2 | RDKit validity reward | reward 有限、非负、批量结果可复现且不读取 test target；invalid/ESS 变化可解释 | 接口已写，真实 rollout 待做 |
+| 3 | guidance 数据生成 | 按 product 隔离 train/validation；样本近似基础 `pθ`；保存 product、终点、reward、`t`、alignment、seed | 未开始 |
+| 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | 模型和 smoke 已完成，训练未开始 |
+| 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 未开始 |
+| 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 未开始 |
+| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分 | checkpoint 已检查，兼容未做 |
+| 8 | 严格 Z-space DGM | GAP/变长动作映射明确；synthetic 和 identity-limit 测试通过；才可使用 exact DGM 表述 | 未开始 |
+
+任何阶段只达到“代码能运行”而没有达到对应栏的正确性和对照门槛，都不记为通过。
+
 ---
 
 ## 5. 需要提前准备的东西
@@ -720,6 +736,33 @@ PyTorch 0.4.1 和 `torchtext==0.3.1`。这意味着它**不能直接当作当前
 
 因此，这个 checkpoint 很有价值，但它属于阶段 7 的 forward reward 资产，不是阶段 0～6
 的阻塞条件。第一版仍然先用 RDKit reward 和 synthetic target 验证 DGM mechanics。
+
+### 5.5 依赖安装策略
+
+当前 `/root/autodl-tmp/ef` 环境已经具备第一阶段所需依赖：
+
+```text
+torch 2.13.0+cu130
+rdkit 2026.03.5
+numpy 1.26.4
+einops 0.8.2
+tensorboard 2.21.0
+```
+
+当前缺少 `torchtext` 和 `onmt`，但这不是 Edit Flows/DGM 第一阶段的缺包。由于官方
+Molecular Transformer 要求旧版 PyTorch 0.4.1、`torchtext==0.3.1` 和旧 OpenNMT，禁止
+直接在 `/root/autodl-tmp/ef` 中执行无版本约束的 `pip install torchtext` 或安装旧版
+OpenNMT；这可能破坏当前 PyTorch/CUDA 环境。
+
+阶段 7 需要运行官方 checkpoint 时，按以下优先级处理：
+
+1. 先尝试只读 state-dict/vocabulary 移植到现代 PyTorch，不改变主环境；
+2. 如果必须运行官方 `translate.py`，创建独立 `mt_legacy` conda/虚拟环境，所有旧依赖
+   只安装到该环境；
+3. 在旧环境中完成最小方向/tokenization smoke 后，再决定是否保留该方案。
+
+安装任何包前都要记录环境、版本、安装命令和 `pip check`/import 结果；当前主环境不因
+forward reward 的实验而改变。
 
 ---
 
