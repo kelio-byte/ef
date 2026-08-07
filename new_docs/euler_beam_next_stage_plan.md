@@ -2449,8 +2449,8 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 
 ## 34. 任务 31：独立target/reward选择与Terminal Twisting
 
-状态：`[-] DGM 阶段 1 mechanics、阶段 2 reward/terminal smoke 已完成；validity 未带来
-覆盖提升，真实中间 guidance 尚未接入`
+状态：`[-] DGM 阶段 1 mechanics、阶段 2 reward/terminal smoke、阶段 3 guidance 数据已
+完成；validity 未带来覆盖提升，阶段 4 真实 guidance 训练待开始`
 
 详细的训练 pipeline、推理流程、适配难点、准备清单和阶段门槛见
 [`new_docs/dgm.md`](dgm.md)。当前只完成设计，不把设计文档视为已完成实验。
@@ -2556,19 +2556,23 @@ Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
 所有 insert/substitute/delete 输出。新增 `edit_flows/guidance/targets.py` 由 state/terminal
 optimal alignment 生成稀疏 action masks，新增 `edit_flows/guidance/training.py` 统一
 Bregman loss、mask、梯度裁剪和 train/eval step；targets/training smoke 加入后，DGM/SMC/
-model 相关 CPU 回归为 **35 passed**。正式 guidance 训练待阶段 3 数据完成。
+model 相关 CPU 回归为 **35 passed**。正式 guidance 训练在阶段 3 数据完成后进入真实 smoke。
 
 阶段 3 数据生成器已完成代码和 CPU 回归：`edit_flows/guidance/data.py` 负责 aligned
 `x_t`、记录保存/加载和 collate，`scripts/generate_guidance_data.py` 只使用普通 Euler、
 按 augmentation 选择原始 product、保存 reward/终点/时间/seed；guidance 测试共 14 个通过。
 真实 checkpoint smoke 已在停止并恢复 `alive.py` 的完整流程中通过：5 个 validation product、
 20 steps、10 条记录、reward positive 4/10、GPU wall 约 4.5s；正式 train/validation
-guidance 数据正在生成。首次正式 train 运行在第 120/626 批暴露了 Euler 可能编辑 BOS 的
+正式 guidance 数据已生成。首次正式 train 运行在第 120/626 批暴露了 Euler 可能编辑 BOS 的
 边界问题（原始 product index 8019）；已在 ordinary Euler 和 Euler-Beam action sampler
 统一屏蔽位置 0，并用失败批次短复现确认修复后终态全部保留 BOS。该修复只约束训练目标中
-本来就固定的结构 token，不改变普通分子 token 的随机编辑语义。
+本来就固定的结构 token，不改变普通分子 token 的随机编辑语义。修复后正式数据已完成并
+审计：train **40,003 products / 80,006 records / 1475.5s / 87.72% reward-positive**，
+validation **5,001 products / 10,002 records / 182.5s / 87.76% reward-positive**；两份
+数据均每 product 两个时间点、BOS/time/reward/index 检查通过。
 
-阶段 4 的 action target/trainer 也已具备：targets/training 相关回归为 **35 passed**，
+阶段 3 的正式生成与结构审计门槛已通过。阶段 4 的 action target/trainer 也已具备：
+targets/training 相关回归为 **35 passed**，
 alignment mask 改为 CPU 构造后再搬到 GPU；新增独立 `scripts/train_guidance.py`，支持
 AdamW、validation、TensorBoard 和独立 guidance checkpoint。CPU tiny smoke 2 steps 的
 wall 为 **0.186s**，train loss `0.5374→0.5215`、validation loss `0.5129→0.4999`。
@@ -2589,7 +2593,7 @@ wall 为 **0.186s**，train loss `0.5374→0.5215`、validation loss `0.5129→0
 - guidance data generator 与真实 smoke 记录：`71f38f9`, `0e44f0e`；本轮文档结论 commit
   `0591957`
 - action targets/trainer、BOS sampling invariant 和独立训练入口：`0591957`
-- validation结论commit：`[待填写]`
+- validation/正式 guidance 数据结论 commit：`[待提交]`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）
 

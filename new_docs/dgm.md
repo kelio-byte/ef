@@ -1,8 +1,8 @@
 # DGM 在 Edit Flows / Euler-Beam 中的适配方案
 
 状态：阶段 1 synthetic mechanics 已通过；阶段 2 reward 评估接口已完成；阶段 3 正式
-train/validation 数据生成正在进行，阶段 4 的 action-level guidance 训练入口和 CPU smoke
-已完成，尚未接入实际推理。
+train/validation guidance 数据已生成并审计通过；阶段 4 的 action-level guidance 训练入口
+和 CPU smoke 已完成，真实 guidance 训练即将开始，尚未接入实际推理。
 
 本文面向本项目的实际实现，说明如何把
 `Discrete Guidance Matching (DGM)` 适配到当前的 Edit Flows 推理流程。文中把
@@ -588,6 +588,13 @@ baseline checkpoint id
   只屏蔽 PAD。已在普通 Euler 和 Euler-Beam 的 action sampler 中统一屏蔽位置 0，并加入
   回归测试；失败批次（原始 product index 8019）修复后短复现不再产生非 BOS 终态。这样
   既保证 guidance 数据格式合法，也避免 DGM 与 baseline 使用不同的序列语义。
+- 修复后正式数据已完整生成并通过全量 CPU 审计：train 为 **40,003 products / 80,006
+  records**，GPU wall **1475.5s（24.6min）**；validation 为 **5,001 products / 10,002
+  records**，GPU wall **182.5s（3.0min）**。两份数据均为每个 product 两个中间时间点，
+  `t=0.0099..0.9901`，所有 product/state/terminal 的第 0 列为 BOS，记录与 product
+  索引一一对应且无跨 split 重叠。RDKit validity reward 为二值：train positive
+  **70,180/80,006 = 87.72%**，validation **8,778/10,002 = 87.76%**；metadata、
+  scheduler、checkpoint、seed 和 record 数均通过检查。
 
 推荐的首次 smoke（运行前先停止 `alive.py`，结束后立即重启）是：
 
@@ -602,9 +609,8 @@ python scripts/generate_guidance_data.py \
 ```
 
 该 smoke 只验证数据条数、reward 分布、状态长度、seed/metadata 和运行时间，不使用
-validation target 选择超参，也不训练 guidance model。阶段3的“接口和真实生成”门槛通过；
-还需按相同 product 隔离规则生成正式 train-guidance/validation-guidance 数据，才能进入
-阶段4训练。
+validation target 选择超参，也不训练 guidance model。阶段 3 的“接口、正式生成和结构审计”
+门槛已通过，下一步进入阶段 4 真实 guidance 训练。
 
 ### 阶段 4：训练最小 guidance model
 
@@ -637,8 +643,8 @@ insert/substitute/delete 稀疏 action mask，再对选中的 action 使用 `bac
 - 新增 `edit_flows/guidance/training.py`：统一 forward、mask、Bregman loss、梯度裁剪和
   train/eval step；不修改基础 Edit Flows checkpoint；
 - 新增 targets/training 测试；当前 DGM/SMC/模型相关 CPU 回归共 **35 passed**；
-- 这一步修正了“scalar reward 广播到所有 action”的潜在正确性问题。正式 guidance 训练
-  尚未开始，等待阶段3 train/validation 数据生成完成；alignment mask 在 CPU 构造后再搬到
+- 这一步修正了“scalar reward 广播到所有 action”的潜在正确性问题。正式 train/validation
+  数据已生成；alignment mask 在 CPU 构造后再搬到
   GPU，避免每个训练 batch 在 GPU 上执行 Python/DP 对齐。
 - 新增 `scripts/train_guidance.py`：独立加载 guidance `.pt`，冻结基础 checkpoint 不参与
   训练，使用 AdamW、梯度裁剪、validation 截断和 TensorBoard `train/*`、`validation/*`
