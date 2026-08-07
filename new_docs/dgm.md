@@ -4,8 +4,9 @@
 train/validation guidance 数据已生成并审计通过；阶段 4 action-level guidance 训练和
 held-out 观测已通过最低门槛；阶段 5 ordinary Euler action-level adapter 已实现，identity
 和 validation-200 off/on 对照均完成。当前实现机制通过，但 validity reward 尚未通过准确率
-收益门槛；阶段 7 的 forward reaction reward 已完成 checkpoint/tokenizer/方向 smoke 和
-批量 reward adapter，正在做 validation reward 校准，默认采样仍关闭 guidance。
+收益门槛；阶段 7 的 forward reaction reward 已完成 checkpoint/tokenizer/方向 smoke、
+批量 reward adapter 和 pilot guidance/β 校准，但尚未通过完整 Top-k 门槛，默认采样仍
+关闭 guidance。
 
 本文面向本项目的实际实现，说明如何把
 `Discrete Guidance Matching (DGM)` 适配到当前的 Edit Flows 推理流程。文中把
@@ -808,6 +809,38 @@ model：先完成 checkpoint/tokenizer/方向 smoke，再封装 terminal forward
   rerank 设为方法结论，也不能据此在 test 上调温度。下一步是在 validation-A/B 固定小的
   reward temperature/β 候选，先训练或校准 terminal guidance，再做 off/on 对照。
 
+##### 阶段 7 pilot guidance 与 β 对照（2026-08-08）
+
+为避免把 forward score 直接当作排序器，先用生成的 `train_forward_t1.pt` /
+`val_forward_t1.pt` 训练独立的 action-level guidance adapter。pilot 使用 batch 64、
+`background_loss_weight=0.01`、1,000 steps；训练 wall **219.6 s**，峰值显存
+allocated/reserved **2.23/5.11 GB**。在完整 validation guidance 数据（10,002 条）
+上，selected-action guidance 与 forward reward 的 Pearson 相关为 **0.4437**，说明
+forward reward 不是常数且可以被 adapter 学到；这只是可学习性门槛，不代表采样准确率
+已经提升。
+
+随后冻结 checkpoint、seed=42、ordinary Euler、`n_samples=3`、100 steps、batch 64 和
+同一 validation reaction 200–399（200 个完整反应、12,000 条输出），只比较 guidance
+强度。baseline 与两个 forward-guided 结果如下：
+
+| 配置 | Top-1 | Top-2 | Top-3 | Top-5 | Top-10 | Oracle | invalid@1/2/3 | mean final rank | wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| guidance off | 51.0% | 66.5% | 72.0% | 77.0% | 83.5% | 86.5% | 11.675/11.225/12.425% | 2.474 | 253.0 s |
+| forward guidance, β=1.00 | 50.0% | 67.0% | 71.5% | 77.0% | 80.5% | 83.0% | 11.850/11.500/11.775% | 2.271 | 379.2 s |
+| forward guidance, β=0.25 | 52.5% | 65.5% | 71.5% | 78.5% | 82.5% | 85.5% | 11.325/11.825/12.525% | 2.380 | 380.1 s |
+
+这里 β=0.25 的 Top-1 比 baseline 高 1.5 个百分点，但 Top-3 低 0.5、Top-10 低 1.0、
+Oracle 低 1.0 个百分点；β=1.0 的 Top-10/Oracle 分别下降 3.0/3.5 个百分点。两种
+guided 运行的 wall 都约为 baseline 的 **1.50 倍**，主要来自每个 Euler step 的 guidance
+forward。50-reaction 预筛中 β=0.25/0.5 的 Top-1 都下降 4 个百分点，也没有形成稳定
+的全局改善信号。
+
+因此阶段 7 当前只通过了“checkpoint、方向、批量接口和 guidance 可学习性”门槛，尚未
+通过“固定预算下 Top-1 不回退且 Top-3/10 或 Oracle 稳定提升”的准确率门槛。该 forward
+reward 不能进入默认 Euler/Euler-Beam；下一步若继续，只能在 validation 上训练更充分的
+adapter 或做独立的 reward 校准/终点 guidance，并保留 baseline 与本轮结果作为对照，不能
+用 test target 选择 β。
+
 如果没有可靠的 forward checkpoint，不能为了“使用 DGM”临时把反向模型自身的
 log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 
@@ -833,7 +866,7 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 | 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | balanced action-level 训练、held-out 校准和成本测量完成 |
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 机制通过；validation-200 validity reward 未提升 Top-k，默认关闭 |
 | 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 暂缓，等待更有信息量的 forward reward |
-| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分 | checkpoint/兼容加载/方向 smoke/批量 adapter 已通过；直接 rerank 未通过准确率门槛，learned terminal guidance 待做 |
+| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分；guided Top-k 门槛通过 | checkpoint/兼容加载/方向 smoke/批量 adapter 和 pilot 可学习性已通过；β=0.25/1.0 完整 validation 对照未通过准确率门槛，默认关闭 |
 | 8 | 严格 Z-space DGM | GAP/变长动作映射明确；synthetic 和 identity-limit 测试通过；才可使用 exact DGM 表述 | 未开始 |
 
 任何阶段只达到“代码能运行”而没有达到对应栏的正确性和对照门槛，都不记为通过。
@@ -1100,9 +1133,11 @@ DGM 实现。
 - [ ] 只有独立 reward 在普通 Euler 上通过准确率门槛后，再接 Euler-Beam/Euler-SMC。
 - [ ] 最后才在 validation 上选择 forward reward 和 `β`，再运行 test。
 
-本文当前阶段的下一步是阶段 7 的 validation reward 校准：在不重叠 validation-A/B 上固定
-少量 `temperature/β` 候选，比较 raw forward reward、正值变换和 learned terminal guidance；
-在准确率门槛通过前不修改当前默认 Euler-Beam，也不把 validity guidance 打开为默认配置。
+本文当前阶段的下一步是决定是否继续阶段 7 的 learned terminal/action guidance：如果继续，
+只在不重叠 validation-A/B 上训练更充分的 adapter，并固定少量 `temperature/β` 候选；如果
+仍不能同时保住覆盖与排序，则冻结 forward reward 为可复现的诊断资产，转向其他独立 reward
+或严格 Z-space 研究。在准确率门槛通过前不修改当前默认 Euler-Beam，也不把 validity 或
+forward guidance 打开为默认配置。
 
 ---
 

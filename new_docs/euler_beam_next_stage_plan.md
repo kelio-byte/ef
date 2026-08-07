@@ -2452,7 +2452,7 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 状态：`[-] DGM 阶段 1 mechanics、阶段 2 reward/terminal smoke、阶段 3 guidance 数据和
 阶段 4 action-level training/held-out 校准已完成；阶段 5 ordinary Euler 已完成 identity
 与 validation-200 对照，但 validity 未带来 Top-k 覆盖提升；阶段 7 已完成兼容加载/方向
-smoke 和 batch reward adapter，正在做 reward 校准`
+smoke、batch reward adapter 和 pilot guidance/β 校准，但完整 Top-k 门槛未通过`
 
 详细的训练 pipeline、推理流程、适配难点、准备清单和阶段门槛见
 [`new_docs/dgm.md`](dgm.md)。当前只完成设计，不把设计文档视为已完成实验。
@@ -2471,6 +2471,24 @@ Top-1/2/3/5/10 为 **36.0/51.5/64.0/72.0/84.5%**，baseline 为
 **51.0/66.5/72.0/77.0/83.5%**，Oracle 均 **86.5%**。结论：forward checkpoint 有可用
 方向信号和高效 batch 接口，但 raw score 未校准，直接 rerank 不是可接受方法；下一步是
 validation-A/B 的正值 reward/β 校准和 learned terminal guidance，而不是直接改默认 sampler。
+
+2026-08-08 完成 forward reward pilot adapter 与 β 对照。pilot（batch64、1,000 steps、
+`background_loss_weight=0.01`）训练 wall **219.6s**，峰值显存 allocated/reserved
+**2.23/5.11GB**；完整 validation reward/H 的 selected-action Pearson 相关为
+**0.4437**。在同一 validation reaction 200–399、ordinary Euler `n_samples=3`、100
+steps、seed42 的固定预算对照中：
+
+| 配置 | Top-1 | Top-2 | Top-3 | Top-5 | Top-10 | Oracle | invalid@1/2/3 | mean final rank | wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| guidance off | 51.0% | 66.5% | 72.0% | 77.0% | 83.5% | 86.5% | 11.675/11.225/12.425% | 2.474 | 253.0s |
+| forward guidance, β=1.00 | 50.0% | 67.0% | 71.5% | 77.0% | 80.5% | 83.0% | 11.850/11.500/11.775% | 2.271 | 379.2s |
+| forward guidance, β=0.25 | 52.5% | 65.5% | 71.5% | 78.5% | 82.5% | 85.5% | 11.325/11.825/12.525% | 2.380 | 380.1s |
+
+β=0.25 虽然 Top-1 比 baseline 高 1.5 个百分点，但 Top-3、Top-10、Oracle 分别低
+0.5、1.0、1.0 个百分点；β=1.0 的 Top-10/Oracle 下降 3.0/3.5 个百分点。guided wall
+约为 baseline 的 **1.50×**。因此 forward reward 的“可学习”门槛通过，固定预算准确率
+门槛未通过；不接入默认 Euler-Beam/SMC。后续若继续，只做更充分 adapter 或独立 reward
+校准，并在不重叠 validation 上复核，不使用 test 调 β。
 
 同日完成 DGM 的低风险 utility 子阶段：新增正值 guidance、`p × H` 后验重加权、Bregman
 loss 和 RDKit validity reward 接口；新增 guidance 测试 10 个通过，现有相关回归测试 12
@@ -2735,3 +2753,14 @@ Add per-run Euler-Beam policies
 Compare augmentation aggregation strategies
 Record final Top-k and performance validation
 ```
+
+### 34.K 阶段 7 pilot forward guidance 结论（2026-08-08）
+
+代码/数据资产：`7514e1e`（forward guidance data）；pilot checkpoint 和三组采样结果均
+保存在 `/root/autodl-tmp/dgm_guidance_runs/` 外部实验目录，未写入 Git。结果已在本文和
+`new_docs/dgm.md` 中登记；本节结论对应文档提交（待填写）。
+
+通过项：Molecular Transformer 兼容加载、官方 tokenizer、reactants→product 方向、批量
+缓存、forward reward/H 的可学习性。未通过项：在 200 个完整 validation reaction 的
+固定预算上同时保持覆盖和 Top-3/10/Oracle。当前默认采样配置不变，forward reward 仅作为
+后续校准和诊断资产。
