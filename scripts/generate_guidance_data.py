@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import random
+import time
 from typing import Sequence
 
 import torch
@@ -186,7 +187,11 @@ def generate(args: argparse.Namespace) -> dict:
         for product in products
     ]
     records = []
-    for batch_start in range(0, len(products), args.batch_size):
+    generation_started = time.perf_counter()
+    total_batches = (len(products) + args.batch_size - 1) // args.batch_size
+    for batch_index, batch_start in enumerate(
+        range(0, len(products), args.batch_size), start=1,
+    ):
         batch_products = products[batch_start:batch_start + args.batch_size]
         batch_ids = product_ids[batch_start:batch_start + args.batch_size]
         batch_seed = _mix_seed(args.seed, batch_start, 0)
@@ -267,6 +272,17 @@ def generate(args: argparse.Namespace) -> dict:
                         sample_seed=sample_seed,
                         coupling_seed=coupling_seed + local_time,
                     ))
+        if batch_index == 1 or batch_index == total_batches or batch_index % 10 == 0:
+            elapsed = time.perf_counter() - generation_started
+            rate = batch_index / max(elapsed, 1e-9)
+            eta = (total_batches - batch_index) / max(rate, 1e-9)
+            print(
+                f"Guidance batches {batch_index}/{total_batches} | "
+                f"products {min(batch_start + args.batch_size, len(products))}/"
+                f"{len(products)} | elapsed {elapsed:.1f}s | ETA {eta:.1f}s",
+                flush=True,
+            )
+    generation_elapsed = time.perf_counter() - generation_started
     metadata = {
         "schema_version": 1,
         "checkpoint": str(Path(args.checkpoint).resolve()),
@@ -284,6 +300,8 @@ def generate(args: argparse.Namespace) -> dict:
         "sample_scheduler": sample_scheduler.name,
         "train_scheduler": train_scheduler.name,
         "model_vocab": checkpoint_data.get("model_vocab", len(token2id)),
+        "generation_wall_seconds": generation_elapsed,
+        "batch_count": total_batches,
     }
     save_guidance_dataset(output, records, metadata=metadata)
     reward_values = torch.tensor([record["reward"] for record in records])
@@ -293,6 +311,7 @@ def generate(args: argparse.Namespace) -> dict:
         "records": len(records),
         "reward_mean": float(reward_values.mean().item()) if records else 0.0,
         "reward_positive": int(reward_values.sum().item()) if records else 0,
+        "wall_seconds": generation_elapsed,
     }
     print(summary)
     return summary
