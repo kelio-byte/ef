@@ -5,6 +5,7 @@ import torch
 
 from edit_flows.sampling.euler_smc import (
     SMCParticleSet,
+    apply_terminal_twist,
     advance_particles,
     euler_transition_step,
     effective_sample_size,
@@ -12,6 +13,7 @@ from edit_flows.sampling.euler_smc import (
     run_euler_smc_bootstrap,
     systematic_resample,
     systematic_resample_batch,
+    terminal_twist_target_increment,
 )
 from edit_flows.core.scheduler import LinearScheduler
 from edit_flows.utils.tokens import BOS_TOKEN, PAD_TOKEN
@@ -124,6 +126,40 @@ def test_importance_ratio_and_genealogy_survive_resampling():
         torch.full((3,), -math.log(3)),
     )
     assert set(resampled.particles.ancestor_ids.tolist()).issubset({0, 1, 2})
+
+
+def test_terminal_twist_matches_exponential_tilt_and_identity_limit():
+    particles = SMCParticleSet.initial(torch.arange(3).unsqueeze(-1))
+    reward = torch.tensor([0.0, 1.0, 2.0])
+    beta = 0.7
+    result = apply_terminal_twist(particles, reward, beta=beta)
+    expected = torch.softmax(beta * reward, dim=0)
+    assert torch.allclose(
+        torch.softmax(result.particles.log_weights, dim=0), expected,
+        atol=1e-6,
+    )
+    assert result.log_evidence_increment == pytest.approx(
+        float(torch.logsumexp(-math.log(3.0) + beta * reward, dim=0))
+    )
+
+    identity = apply_terminal_twist(particles, reward, beta=0.0)
+    assert torch.allclose(
+        identity.particles.log_weights,
+        particles.log_weights,
+        atol=1e-6,
+    )
+    assert identity.ess_before_resampling == pytest.approx(3.0)
+
+
+def test_terminal_twist_target_increment_validates_inputs():
+    with pytest.raises(ValueError, match="match.*shape"):
+        terminal_twist_target_increment(
+            torch.zeros(2), torch.zeros(3), beta=1.0,
+        )
+    with pytest.raises(ValueError, match="finite"):
+        terminal_twist_target_increment(
+            torch.zeros(2), torch.tensor([0.0, float("nan")]), beta=1.0,
+        )
 
 
 def test_particle_validation_rejects_missing_resampling_seed():

@@ -2449,8 +2449,8 @@ resampling次数、forward次数和wall。输出目录：`results/task30_euler_s
 
 ## 34. 任务 31：独立target/reward选择与Terminal Twisting
 
-状态：`[-] DGM 阶段 1 mechanics 与阶段 2 reward 评估接口已完成；terminal twisting 和
-learned guidance 尚未接入`
+状态：`[-] DGM 阶段 1 mechanics、阶段 2 reward 评估接口和 terminal 数学 smoke 已完成；
+真实多步 rollout 与 learned guidance 尚未接入`
 
 详细的训练 pipeline、推理流程、适配难点、准备清单和阶段门槛见
 [`new_docs/dgm.md`](dgm.md)。当前只完成设计，不把设计文档视为已完成实验。
@@ -2472,7 +2472,11 @@ normalizer estimate 和 ESS 检查通过。尚未训练 guidance model，也尚�
 调用 RDKit。31,700/36,000 合法，valid rate **88.06%**；normalized unique 为 15,850，
 cache hit **55.97%**；单进程耗时约 **5.89s**，启用 cache 约 **2.82s**。同文件的 baseline
 Top-1/2/3/10 为 **70.0/84.5/90.5/93.5%**，Oracle-any **95.5%**；这不是 reward-guided
-提升，只是 reward-only 诊断，terminal twisting 仍待实现。
+提升，只是 reward-only 诊断，真实多步 terminal twisting 仍待实现。
+
+随后新增 `terminal_twist_target_increment()` 和 `apply_terminal_twist()`，在不触碰默认
+Euler/Euler-Beam 的情况下把终点权重定义为 `exp(βR)`。两步 synthetic 测试确认指数倾斜、
+`β=0` identity limit、ESS/evidence 和输入校验通过；真实多步 rollout 尚未完成。
 
 ### 34.A 方法/改进介绍
 
@@ -2539,7 +2543,7 @@ Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
 - 主reward及独立数据边界：第一版暂定 RDKit validity（不读取 test target）；正式主线仍需
   validation-A/B 预注册确认
 - reward 表示转换与缓存：`retro_tokenized_validity_reward()` 已实现并通过测试
-- terminal-twisting入口与metadata：`[待实现]`
+- terminal-twisting入口：`apply_terminal_twist()` 已实现；多步入口 metadata `[待实现]`
 - synthetic已知target importance estimate：两步 categorical chain 已通过
 - validation-A/B/C结果：`[待实验]`
 
@@ -2548,12 +2552,14 @@ Top-1～10、Oracle、invalid、true unique和wall，不能只看Top-1。
 | reward/beta | budget | Top-1 | Top-3 | Top-10 | Oracle | invalid | mean ESS | wall |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | bootstrap target=proposal | `[固定]` | — | — | — | — | — | — | — |
-| terminal reward | `[固定]` | — | — | — | — | — | — | — |
+| terminal reward (数学 smoke) | 固定 3 粒子、`β=0.7` | — | — | — | — | — | 见测试 | <1s |
+| terminal reward (真实 rollout) | `[待固定]` | — | — | — | — | — | — | — |
 
 ### 34.H Git记录
 
 - 预注册/候选方案commit：`e86754c`, `ebfcbc6`
-- reward实现commit：`[本轮待提交]`
+- reward实现commit：`4dde773`
+- terminal数学smoke commit：`[本轮待提交]`
 - validation结论commit：`[待填写]`
 
 ### 34.I 新训练 checkpoint tiny 回归（2026-08-07）

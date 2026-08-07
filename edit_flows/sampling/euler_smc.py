@@ -212,6 +212,96 @@ class EulerSMCBootstrapResult:
     log_evidence: float
 
 
+def terminal_twist_target_increment(
+    log_proposal_increment: Tensor,
+    terminal_reward: Tensor,
+    *,
+    beta: float = 1.0,
+) -> Tensor:
+    """Return a terminal-twisted target increment.
+
+    The first isolated reward adapter uses the exponential tilt
+
+    ``q(y) ∝ p_proposal(y) * exp(beta * R(y))``.
+
+    This helper only forms the log target increment; it does not sample, alter
+    the proposal, or inspect targets.  Keeping the arithmetic separate makes
+    the identity limit (``beta=0``) and synthetic importance-ratio checks
+    explicit before any chemistry sampler is exposed.
+    """
+    if log_proposal_increment.ndim != 1:
+        raise ValueError(
+            "log_proposal_increment must be 1-D, got shape "
+            f"{tuple(log_proposal_increment.shape)}"
+        )
+    if terminal_reward.shape != log_proposal_increment.shape:
+        raise ValueError(
+            "terminal_reward must match log_proposal_increment shape, got "
+            f"{tuple(terminal_reward.shape)} vs "
+            f"{tuple(log_proposal_increment.shape)}"
+        )
+    if not math.isfinite(beta):
+        raise ValueError(f"beta must be finite, got {beta}")
+    if not torch.isfinite(log_proposal_increment).all():
+        raise ValueError("log_proposal_increment must contain finite values")
+    if not torch.isfinite(terminal_reward).all():
+        raise ValueError("terminal_reward must contain finite values")
+    log_increment = log_proposal_increment + float(beta) * terminal_reward
+    if not torch.isfinite(log_increment).all():
+        raise ValueError("terminal twist produced non-finite increments")
+    return log_increment
+
+
+def apply_terminal_twist(
+    particles: SMCParticleSet,
+    terminal_reward: Tensor,
+    *,
+    beta: float = 1.0,
+    ess_threshold: Optional[float] = None,
+    resample_seed: Optional[int] = None,
+) -> SMCStepResult:
+    """Apply one terminal reward factor to an existing particle population.
+
+    The particles are already at their terminal states.  Therefore the
+    proposal increment is zero and the target/proposal ratio is exactly
+    ``exp(beta * terminal_reward)``.  This is intentionally a separate
+    operation from :func:`run_euler_smc_bootstrap`: no intermediate twisting,
+    learned proposal, or default sampler behavior is changed.
+    """
+    if terminal_reward.shape != (particles.n_particles,):
+        raise ValueError(
+            "terminal_reward must have one value per particle, got shape "
+            f"{tuple(terminal_reward.shape)} for {particles.n_particles}"
+        )
+    parent_indices = torch.arange(
+        particles.n_particles,
+        dtype=torch.long,
+        device=particles.states.device,
+    )
+    zero_increment = torch.zeros(
+        particles.n_particles,
+        dtype=particles.log_weights.dtype,
+        device=particles.states.device,
+    )
+    log_target_increment = terminal_twist_target_increment(
+        zero_increment,
+        terminal_reward.to(
+            device=particles.states.device,
+            dtype=particles.log_weights.dtype,
+        ),
+        beta=beta,
+    )
+    return advance_particles(
+        particles,
+        particles.states,
+        parent_indices,
+        log_target_increment=log_target_increment,
+        log_proposal_increment=zero_increment,
+        ess_threshold=ess_threshold,
+        resample_seed=resample_seed,
+    )
+
+
 @torch.inference_mode()
 def euler_transition_step(
     model,

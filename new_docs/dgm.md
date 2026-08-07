@@ -520,10 +520,15 @@ reward-only 诊断；reward 只读取采样终点，不读取 target，target �
 - 同一预测文件的评分对照为 Top-1/2/3/10 = **70.0/84.5/90.5/93.5%**，Oracle-any
   **95.5%**。这些是 baseline 诊断值，不是 validity twisting 带来的提升；尚未运行
   reward-guided sampler，因此不把阶段 2 记为最终通过。
+- 新增 `terminal_twist_target_increment()` 与 `apply_terminal_twist()`：在已有终点粒子上
+  只施加 `exp(βR)` 的 target/proposal 比值；synthetic 测试验证指数倾斜、`β=0` identity
+  limit、ESS/evidence 以及输入校验均通过。它仍是独立 adapter，不会改变默认
+  Euler/Euler-Beam。
 
-结论：reward 接口、表示转换、批量评估与缓存已通过；下一步是实现一个隔离的 terminal
-twisting smoke，并在同一 validation 上比较 proposal/target 权重、ESS、invalid 和
-Top-1～10。若只改变 reward 而没有固定总候选预算，不能把结果解释为 DGM 收益。
+结论：reward 接口、表示转换、批量评估、缓存和纯 terminal-twisting 数学 smoke 已通过；
+下一步是把该 adapter 接到一个隔离的多步 validation rollout，在同一总候选预算下比较
+proposal/target 权重、ESS、invalid 和 Top-1～10。若只改变 reward 而没有固定总候选预算，
+不能把结果解释为 DGM 收益。
 
 ### 阶段 3：生成 guidance 训练数据
 
@@ -650,7 +655,7 @@ log-prob 当成独立 reward；那只是重复基础 proposal 的信息。
 |---|---|---|---|
 | 0 | 冻结 baseline | 同 seed predictions SHA 可复现；guidance off 与当前 Euler 完全一致；指标和 metadata 齐全 | 部分已有历史基线，DGM 专用快照待做 |
 | 1 | synthetic DGM | 已知 `q ∝ pR` 的采样频率、后验重加权、ESS/evidence 与理论一致；常数 guidance 不改变 `p` | 代数工具和 19 个测试通过，多步 rollout 待做 |
-| 2 | RDKit validity reward | reward 有限、非负、批量结果可复现且不读取 test target；invalid/ESS 变化可解释 | 接口/格式转换/缓存和 validation 基准已完成；terminal rollout 待做 |
+| 2 | RDKit validity reward | reward 有限、非负、批量结果可复现且不读取 test target；invalid/ESS 变化可解释 | 接口/格式转换/缓存和 terminal 数学 smoke 已完成；真实 rollout 待做 |
 | 3 | guidance 数据生成 | 按 product 隔离 train/validation；样本近似基础 `pθ`；保存 product、终点、reward、`t`、alignment、seed | 未开始 |
 | 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | 模型和 smoke 已完成，训练未开始 |
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 未开始 |
