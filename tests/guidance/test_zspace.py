@@ -41,6 +41,19 @@ def test_action_weight_composition_and_unit_guidance_identity():
     torch.testing.assert_close(identity, torch.log_softmax(combined, dim=-1))
 
 
+def test_fixed_coordinate_toy_recovers_known_density_ratio():
+    """A fixed Z coordinate obeys q(z) ∝ p(z)R(z) exactly."""
+    base = torch.tensor([0.6, 0.3, 0.1])
+    reward = torch.tensor([0.5, 2.0, 3.0])
+    target = base * reward
+    target = target / target.sum()
+    guided = guided_log_probs(base.log(), reward).exp()
+    generator = torch.Generator().manual_seed(20260808)
+    samples = torch.multinomial(guided, 100_000, replacement=True, generator=generator)
+    empirical = torch.bincount(samples, minlength=3).float() / samples.numel()
+    torch.testing.assert_close(empirical, target, atol=0.01, rtol=0.0)
+
+
 def test_gap_transition_exposes_unique_insertion_boundary():
     old = torch.tensor([1, 10, 2, 11, 0])
     new = torch.tensor([1, 10, 12, 11, 0])

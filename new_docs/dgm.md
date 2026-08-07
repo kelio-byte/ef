@@ -865,7 +865,7 @@ X-space 插入锚点和 Edit Flows 的 operation channel（`insert: token`、
 一定有唯一逆映射；连续 GAP run 会显式标记 `ambiguous=True`，`require_unique=True` 时
 拒绝该 transition。
 
-单元测试覆盖单坐标三类动作、BOS/多坐标拒绝、唯一插入和连续 GAP 非双射，共 **32 passed**
+单元测试覆盖单坐标三类动作、BOS/多坐标拒绝、唯一插入和连续 GAP 非双射，共 **33 passed**
 （forward/guidance 相关测试集合）。全量 `pytest` 为 **262 passed / 17 failed**；失败全部
 来自既有 `tests/sampling/test_beam.py` 与当前 `EditCandidate(log_u)` API 不一致及其受影响
 的旧 beam controlled-model 用例，本次隔离 DG-0 没有修改 beam 代码，避免把无关修复混入
@@ -881,7 +881,8 @@ source→target 对只改变一个坐标。这个结果不是 sampler 指标，�
 rate/token 输出组合为统一的 `insert[V] + substitute[V] + delete` 通道，并用
 `guided_log_probs()` 验证全 1 guidance 的逐元素 identity；它只做组合，不改变 rate
 parameterization、归一化或现有 sampler。该接口与映射测试均通过，正式 guided sampler
-仍未接入。
+仍未接入。一个固定坐标 toy 通过 `q(z)∝p(z)R(z)` 经验分布测试，说明 DGM 的密度比
+代数在固定 Z-space 上是正确的；当前阻塞来自变长 X-space 的坐标映射，而不是该代数。
 
 如果 action-level 近似显示收益且没有明显的概率不一致，再处理：
 
@@ -904,7 +905,7 @@ parameterization、归一化或现有 sampler。该接口与映射测试均通�
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 机制通过；validation-200 validity reward 未提升 Top-k，默认关闭 |
 | 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 暂缓，等待更有信息量的 forward reward |
 | 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分；guided Top-k 门槛通过 | checkpoint/兼容加载/方向 smoke/批量 adapter 和 pilot 可学习性已通过；β=0.25/1.0 完整 validation 对照未通过准确率门槛，默认关闭 |
-| 8 | 严格 Z-space DGM | GAP/变长动作映射明确；synthetic 和 identity-limit 测试通过；才可使用 exact DGM 表述 | DG-0 映射审计、DG-1 action-weight identity 已完成；高比例非双射插入使完整 exact sampler 暂未开始 |
+| 8 | 严格 Z-space DGM | GAP/变长动作映射明确；synthetic 和 identity-limit 测试通过；才可使用 exact DGM 表述 | DG-0 映射审计、DG-1 action-weight identity、固定坐标 toy 已通过；高比例非双射插入使完整 exact sampler 暂未开始 |
 
 任何阶段只达到“代码能运行”而没有达到对应栏的正确性和对照门槛，都不记为通过。
 

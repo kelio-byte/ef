@@ -2781,7 +2781,7 @@ Record final Top-k and performance validation
 `GAP→token=insert`、`token→GAP=delete`、`token→token=substitute`，统一处理 BOS/PAD、
 X-space 插入锚点和 operation channel（`insert: token`、`substitute: token+V`、
 `delete: 2V`）。反向映射返回所有可能的 Z 坐标；连续 GAP run 显式标记
-`ambiguous=True`，要求双射时直接拒绝。相关 guidance/forward 测试集合为 **32 passed**。
+`ambiguous=True`，要求双射时直接拒绝。相关 guidance/forward 测试集合为 **33 passed**。
 全量 `pytest` 为 **262 passed / 17 failed**；失败来自既有 beam 测试使用
 `EditCandidate(log_u_real)` 而当前 API 为 `log_u`，以及受影响的旧 controlled-model 用例，
 本次不修改无关 beam 代码。
@@ -2798,4 +2798,5 @@ Z-state transition，或明确采用 action-level approximate guidance。该审�
 `[rate_ins, rate_sub, rate_del]` 与 token log-prob 组合为
 `insert[V] + substitute[V] + delete` 通道；全 1 guidance 的 identity 已通过测试。
 该 DG-1 接口不改变 rate parameterization、采样归一化或默认 sampler，为后续 fixed-Z
-实验提供唯一可测试的 action-weight 入口。
+实验提供唯一可测试的 action-weight 入口。新增固定坐标 toy 的 `q(z)∝p(z)R(z)` 经验分布
+测试通过，说明密度比代数本身正确；当前阻塞来自变长 X-space 坐标映射，而不是 DGM 代数。
