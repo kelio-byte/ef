@@ -6,6 +6,7 @@ from collections.abc import MutableMapping, Sequence
 
 import torch
 from torch import Tensor
+from rdkit import Chem
 
 from .molecular_transformer import (
     MolecularTransformerScorer,
@@ -102,4 +103,141 @@ def positive_forward_reward(
     return torch.exp(clipped / temperature)
 
 
-__all__ = ["forward_log_likelihood_reward", "positive_forward_reward"]
+def _canonical_smiles_clear_map(smiles: str) -> str:
+    """Return an isomeric canonical SMILES without atom-map annotations."""
+
+    molecule = Chem.MolFromSmiles(smiles)
+    if molecule is None:
+        return ""
+    for atom in molecule.GetAtoms():
+        if atom.HasProp("molAtomMapNumber"):
+            atom.ClearProp("molAtomMapNumber")
+    return Chem.MolToSmiles(molecule, isomericSmiles=True)
+
+
+def forward_beam_reconstruction_rank(
+    scorer: MolecularTransformerScorer,
+    reactants_global: Sequence[str],
+    products_global: Sequence[str],
+    *,
+    beam_size: int = 5,
+    max_length: int = 200,
+    min_length: int = 1,
+    batch_size: int = 16,
+    forbid_unk: bool = False,
+    canonicalize_source: bool = False,
+    cache: MutableMapping[str, Sequence[str]] | None = None,
+) -> Tensor:
+    """Return the 1-based forward-beam rank of each requested product.
+
+    A rank of zero means that the product was not reconstructed or that the
+    input pair was malformed.  The forward generator depends only on the
+    candidate reactants, so ``cache`` is keyed by normalized reactant SMILES
+    and stores the generated product beam.  With ``canonicalize_source=True``,
+    atom maps are removed and chemically equivalent SMILES share one forward
+    input/cache entry.  True retrosynthesis targets are never consumed by this
+    function.
+    """
+
+    if len(reactants_global) != len(products_global):
+        raise ValueError("reactants_global and products_global must have equal length")
+    ranks = torch.zeros(len(reactants_global), dtype=torch.long)
+    normalized: list[tuple[str, str] | None] = []
+    pending: dict[str, list[int]] = {}
+    generated: dict[str, Sequence[str]] = {}
+    for index, (reactants, product) in enumerate(
+        zip(reactants_global, products_global)
+    ):
+        try:
+            source = retro_global_to_smiles(reactants)
+            target = _canonical_smiles_clear_map(retro_global_to_smiles(product))
+            if canonicalize_source:
+                source = _canonical_smiles_clear_map(source)
+            if not source or not target:
+                raise ValueError("empty normalized reaction side")
+            smi_tokenize(source)
+        except (TypeError, ValueError):
+            normalized.append(None)
+            continue
+        normalized.append((source, target))
+        if cache is not None and source in cache:
+            generated[source] = cache[source]
+        else:
+            pending.setdefault(source, []).append(index)
+
+    if pending:
+        sources = list(pending)
+        predictions, _ = scorer.generate_batch(
+            sources,
+            beam_size=beam_size,
+            max_length=max_length,
+            min_length=min_length,
+            batch_size=batch_size,
+            forbid_unk=forbid_unk,
+        )
+        for source, beam in zip(sources, predictions):
+            canonical_beam = [
+                _canonical_smiles_clear_map(prediction)
+                for prediction in beam
+            ]
+            generated[source] = canonical_beam
+            if cache is not None:
+                cache[source] = canonical_beam
+
+    for index, pair in enumerate(normalized):
+        if pair is None:
+            continue
+        source, target = pair
+        for rank, prediction in enumerate(generated[source], start=1):
+            if prediction and prediction == target:
+                ranks[index] = rank
+                break
+    return ranks
+
+
+def forward_beam_reconstruction_reward(
+    scorer: MolecularTransformerScorer,
+    reactants_global: Sequence[str],
+    products_global: Sequence[str],
+    *,
+    beam_size: int = 5,
+    max_length: int = 200,
+    min_length: int = 1,
+    batch_size: int = 16,
+    forbid_unk: bool = False,
+    canonicalize_source: bool = False,
+    reciprocal_rank: bool = True,
+    miss_reward: float = 0.0,
+    cache: MutableMapping[str, Sequence[str]] | None = None,
+) -> Tensor:
+    """Map forward product reconstruction ranks to a finite reward."""
+
+    if miss_reward < 0 or not torch.isfinite(torch.tensor(miss_reward)):
+        raise ValueError("miss_reward must be finite and non-negative")
+    ranks = forward_beam_reconstruction_rank(
+        scorer,
+        reactants_global,
+        products_global,
+        beam_size=beam_size,
+        max_length=max_length,
+        min_length=min_length,
+        batch_size=batch_size,
+        forbid_unk=forbid_unk,
+        canonicalize_source=canonicalize_source,
+        cache=cache,
+    )
+    reward = torch.full(ranks.shape, float(miss_reward), dtype=torch.float32)
+    matched = ranks > 0
+    if reciprocal_rank:
+        reward[matched] = ranks[matched].float().reciprocal()
+    else:
+        reward[matched] = 1.0
+    return reward
+
+
+__all__ = [
+    "forward_beam_reconstruction_rank",
+    "forward_beam_reconstruction_reward",
+    "forward_log_likelihood_reward",
+    "positive_forward_reward",
+]

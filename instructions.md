@@ -229,6 +229,36 @@ $PY scripts/eval.py \
 同时保存 `guidance_final.pt` 和按最低 validation loss 选择的 `guidance_best.pt`，正式采样
 优先使用后者。训练/数据生成的完整研究协议见 `new_docs/dgm.md`。
 
+正向 Molecular Transformer 的 beam 生成能力可独立检查：
+
+```bash
+$PY scripts/evaluate_forward_beam.py \
+  --products_file "$DATA/val/src-val.txt" \
+  --targets_file "$DATA/val/tgt-val.txt" \
+  --checkpoint new_checkpoints/MIT_mixed_augm_model_average_20.pt \
+  --output_json results/forward_beam_val.json \
+  --start_reaction 400 --max_reactions 200 --augmentation 20 \
+  --beam_size 5 --batch_size 8 --device cuda
+```
+
+对已有、带 `sampling_metadata.json` 的逆合成候选做正向重构 reward 诊断和重排：
+
+```bash
+$PY scripts/rerank_forward_beam.py \
+  --predictions results/eval_run/predictions.txt \
+  --products_file "$DATA/val/src-val.txt" \
+  --targets_file "$DATA/val/tgt-val.txt" \
+  --checkpoint new_checkpoints/MIT_mixed_augm_model_average_20.pt \
+  --output_dir results/eval_run_forward_rerank \
+  --forward_beam_size 5 --batch_size 8 --device cuda \
+  --canonicalize_source
+```
+
+`--targets_file` 只用于 validation 候选正确性 AUC，不能参与 reward；reward 本身只检查候选
+反应物能否正向重构输入 product。`--canonicalize_source` 会让等价 SMILES 共用正向输入和缓存，
+当前 validation-B 对照约提速 3 倍并提高 AUC，后续默认开启。重排后仍需按原 prediction beam、
+augmentation、reaction offset 调用评分脚本。
+
 ## 5. 分离运行采样和打分
 
 需要调试中间文件时使用 `sample_retro.py`：

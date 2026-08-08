@@ -410,6 +410,150 @@ class MolecularTransformerScorer:
             all_scores.append(summed.cpu())
         return torch.cat(all_scores) if all_scores else torch.empty(0)
 
+    @torch.inference_mode()
+    def generate_batch(
+        self,
+        source_smiles: Sequence[str],
+        *,
+        beam_size: int = 5,
+        max_length: int = 200,
+        min_length: int = 1,
+        batch_size: int = 16,
+        forbid_unk: bool = False,
+    ) -> tuple[list[list[str]], Tensor]:
+        """Generate forward products with a batched autoregressive beam.
+
+        The returned predictions are ordered by raw sequence log-probability
+        and have shape ``[examples][beam]``; the score tensor is ``[N, K]``.
+        ``max_length`` counts generated tokens including EOS.  This is a
+        minimal inference-only equivalent of the legacy OpenNMT translator:
+        encoder states are cached once per input chunk, while the decoder is
+        recomputed over each alive prefix because the compatibility model does
+        not expose OpenNMT's incremental cache.
+        """
+
+        if beam_size < 1 or batch_size < 1:
+            raise ValueError("beam_size and batch_size must be positive")
+        if max_length < 1:
+            raise ValueError("max_length must be positive")
+        if min_length < 0 or min_length >= max_length:
+            raise ValueError("min_length must satisfy 0 <= min_length < max_length")
+        if max_length >= 5000:
+            raise ValueError("max_length must be below the legacy decoder limit 5000")
+        if not source_smiles:
+            return [], torch.empty((0, beam_size), dtype=torch.float32)
+
+        all_predictions: list[list[str]] = []
+        all_scores: list[Tensor] = []
+        for start in range(0, len(source_smiles), batch_size):
+            chunk = source_smiles[start : start + batch_size]
+            src_ids = [self._encode(value, add_bos_eos=False) for value in chunk]
+            src_batch = self._pad(src_ids)
+            predictions, scores = self._generate_encoded_chunk(
+                src_batch,
+                beam_size=beam_size,
+                max_length=max_length,
+                min_length=min_length,
+                forbid_unk=forbid_unk,
+            )
+            all_predictions.extend(predictions)
+            all_scores.append(scores.cpu())
+        return all_predictions, torch.cat(all_scores, dim=0)
+
+    def _generate_encoded_chunk(
+        self,
+        src_ids: Tensor,
+        *,
+        beam_size: int,
+        max_length: int,
+        min_length: int,
+        forbid_unk: bool,
+    ) -> tuple[list[list[str]], Tensor]:
+        """Run beam generation for one already-padded source chunk."""
+
+        example_count = src_ids.shape[0]
+        src = src_ids.transpose(0, 1).unsqueeze(-1).contiguous()
+        _, memory = self.model.encoder(src)
+        src = src.repeat_interleave(beam_size, dim=1)
+        memory = memory.repeat_interleave(beam_size, dim=1)
+
+        alive = torch.full(
+            (example_count, beam_size, 1),
+            self.bos_id,
+            dtype=torch.long,
+            device=self.device,
+        )
+        scores = torch.full(
+            (example_count, beam_size),
+            float("-inf"),
+            dtype=memory.dtype,
+            device=self.device,
+        )
+        scores[:, 0] = 0.0
+        finished = torch.zeros(
+            (example_count, beam_size), dtype=torch.bool, device=self.device,
+        )
+
+        for step in range(max_length):
+            decoder_input = alive.reshape(
+                example_count * beam_size, -1,
+            ).transpose(0, 1).unsqueeze(-1).contiguous()
+            hidden = self.model.decoder(decoder_input, memory, src)[-1]
+            log_probs = F.log_softmax(self.generator(hidden), dim=-1).reshape(
+                example_count, beam_size, -1,
+            )
+            log_probs[:, :, self.pad_id] = float("-inf")
+            log_probs[:, :, self.bos_id] = float("-inf")
+            if forbid_unk:
+                log_probs[:, :, self.unk_id] = float("-inf")
+            if step < min_length:
+                log_probs[:, :, self.eos_id] = float("-inf")
+            if finished.any():
+                log_probs = log_probs.masked_fill(
+                    finished.unsqueeze(-1), float("-inf"),
+                )
+                log_probs[:, :, self.eos_id] = torch.where(
+                    finished,
+                    torch.zeros_like(scores),
+                    log_probs[:, :, self.eos_id],
+                )
+
+            candidate_scores = scores.unsqueeze(-1) + log_probs
+            next_scores, next_indices = torch.topk(
+                candidate_scores.flatten(1), beam_size, dim=-1,
+            )
+            parent = torch.div(
+                next_indices, len(self.vocab), rounding_mode="floor",
+            )
+            token = next_indices.remainder(len(self.vocab))
+            alive = torch.cat(
+                [
+                    alive.gather(
+                        1, parent.unsqueeze(-1).expand(-1, -1, alive.shape[-1]),
+                    ),
+                    token.unsqueeze(-1),
+                ],
+                dim=-1,
+            )
+            finished = finished.gather(1, parent) | token.eq(self.eos_id)
+            scores = next_scores
+            if finished.all():
+                break
+
+        decoded: list[list[str]] = []
+        for rows in alive.tolist():
+            example_predictions = []
+            for row in rows:
+                tokens = []
+                for token_id in row[1:]:
+                    if token_id == self.eos_id:
+                        break
+                    if token_id not in (self.pad_id, self.bos_id):
+                        tokens.append(self.vocab[token_id])
+                example_predictions.append("".join(tokens))
+            decoded.append(example_predictions)
+        return decoded, scores
+
     def _encode(self, smiles: str, *, add_bos_eos: bool) -> list[int]:
         ids = [self.stoi.get(token, self.unk_id) for token in smi_tokenize(smiles)]
         if add_bos_eos:
