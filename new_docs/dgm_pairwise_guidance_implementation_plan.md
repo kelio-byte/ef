@@ -2,7 +2,7 @@
 
 > 日期：2026-08-08
 > 执行对象：后续 GPT-Luna / 项目维护者
-> 状态：P0–P5、P5b、P5c 实现与 smoke 已完成；P5 正确实现但未通过收益门槛，新的 1k pilot 待做，P6 暂缓
+> 状态：P0–P5、P5b、P5c、P5d、P5e 已完成；P5d 排序改善但校准未通过，P6 暂缓
 > 研究路线：继续改进 learned action-level approximate DGM；本阶段不做 terminal reranker
 > 校准，也不进入 exact Z-space 重写。
 
@@ -614,6 +614,24 @@ ordinary Euler 做反应级评估。
 rank accuracy，但当前 `mean(log H)` 排序目标会牺牲与 reward 的连续校准（尤其 lambda=.25）。
 后续若继续，应明确选择“校准优先的 score-aware ranking”或“纯 rank 优先”研究目标；在目标未
 重新定义前，不再盲目扫描 lambda。
+
+#### P5e：Pearson 诊断（2026-08-08）
+
+为排除全局 Pearson 被不同 product 的 score offset 污染的可能，新增只读指标
+`reward_score_pearson_within_group`：对每个 product group 的 candidate score/reward 去中心化后
+再计算 pooled Pearson。它不改变旧 `reward_score_pearson`、loss 或 checkpoint selection。
+
+对 P5d 三个 best checkpoint 的结果：
+
+| run | global Pearson | within-group Pearson | pair acc |
+|---|---:|---:|---:|
+| lambda=0 control | 0.1135 | **0.1490** | 55.15% |
+| lambda=0.25 | -0.0118 | **0.0667** | 59.66% |
+| lambda=1.0 | 0.0645 | **0.0733** | 53.65% |
+
+组内 Pearson 同样下降，说明 lambda=.25 的校准恶化是真实的，不是跨 product offset 造成的。该
+诊断不改变 P5d 的 gate 结论；下一步只研究一个 score-aware calibration 项，禁止继续扫描旧
+lambda 或直接扩大到 10k。
 
 ### P6：10k 训练
 

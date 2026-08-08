@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from edit_flows.guidance.ranking import (
+    _within_group_pearson,
     score_masked_action_sets,
     shared_anchor_pairwise_loss,
 )
@@ -70,9 +71,17 @@ def test_shared_anchor_pairwise_loss_prefers_higher_reward_action_sets():
     assert metrics["pair_count"].item() == 6
     assert metrics["pair_accuracy_tie_half"].item() > 0.99
     assert metrics["no_action_candidate_fraction"].item() == 0.0
+    assert torch.isfinite(metrics["reward_score_pearson_within_group"])
     loss.backward()
     assert all(value.grad is not None for value in guidance)
     assert all(torch.isfinite(value.grad).all() for value in guidance)
+
+
+def test_within_group_pearson_removes_group_score_offsets():
+    values = torch.tensor([10.0, 11.0, 20.0, 21.0])
+    rewards = torch.tensor([0.0, 1.0, 0.0, 1.0])
+    groups = torch.tensor([0, 0, 1, 1])
+    assert _within_group_pearson(values, rewards, groups).item() > 0.99
 
 
 def test_shared_anchor_pairwise_loss_penalizes_reversed_scores():

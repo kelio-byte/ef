@@ -158,6 +158,27 @@ def _safe_pearson(left: Tensor, right: Tensor) -> Tensor:
     )
 
 
+def _within_group_pearson(
+    left: Tensor,
+    right: Tensor,
+    group_ids: Tensor,
+) -> Tensor:
+    """Pearson correlation after removing each group's score offset."""
+    if left.shape != right.shape or left.ndim != 1 or group_ids.shape != left.shape:
+        raise ValueError("within-group correlation inputs must be equal-shaped rank-1 tensors")
+    if left.numel() < 2:
+        return left.new_zeros(())
+    left_residual = left.clone()
+    right_residual = right.clone()
+    for group_id in torch.unique(group_ids):
+        mask = group_ids == group_id
+        if int(mask.sum().item()) < 2:
+            continue
+        left_residual[mask] -= left[mask].mean()
+        right_residual[mask] -= right[mask].mean()
+    return _safe_pearson(left_residual, right_residual)
+
+
 def shared_anchor_pairwise_loss(
     guidance: tuple[Tensor, Tensor, Tensor],
     state_tokens: Tensor,
@@ -238,6 +259,7 @@ def shared_anchor_pairwise_loss(
             "valid_pair_group_fraction": zero.detach(),
             "no_action_candidate_fraction": zero.detach(),
             "reward_score_pearson": zero.detach(),
+            "reward_score_pearson_within_group": zero.detach(),
         }
         return zero, metrics
 
@@ -305,8 +327,17 @@ def shared_anchor_pairwise_loss(
     candidate_rewards = torch.stack([
         reward[key[1]] for key in unique_keys
     ]).to(device=device)
+    candidate_groups = torch.tensor(
+        [int(source_index[key[0]].item()) for key in unique_keys],
+        dtype=torch.long, device=device,
+    )
     reward_score_pearson = _safe_pearson(
         candidate_rewards[valid_scores], scores[valid_scores],
+    ).detach()
+    reward_score_pearson_within_group = _within_group_pearson(
+        scores[valid_scores],
+        candidate_rewards[valid_scores],
+        candidate_groups[valid_scores],
     ).detach()
     valid_pair_group_fraction = scores.new_tensor(
         len(valid_group_sources) / max(group_count, 1),
@@ -321,5 +352,6 @@ def shared_anchor_pairwise_loss(
         "valid_pair_group_fraction": valid_pair_group_fraction,
         "no_action_candidate_fraction": no_action_fraction.detach(),
         "reward_score_pearson": reward_score_pearson,
+        "reward_score_pearson_within_group": reward_score_pearson_within_group,
     }
     return pair_loss, metrics

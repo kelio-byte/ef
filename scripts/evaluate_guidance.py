@@ -116,7 +116,10 @@ def evaluate(args: argparse.Namespace) -> dict:
                 if name in _PAIR_WEIGHTED_METRICS and pair_count > 0:
                     totals[name] = totals.get(name, 0.0) + value * pair_count
                     weights[name] = weights.get(name, 0.0) + pair_count
-                elif name == "reward_score_pearson" and candidate_count > 0:
+                elif name in {
+                    "reward_score_pearson",
+                    "reward_score_pearson_within_group",
+                } and candidate_count > 0:
                     totals[name] = totals.get(name, 0.0) + value * candidate_count
                     weights[name] = weights.get(name, 0.0) + candidate_count
                 elif name in {"pair_count", "candidate_pair_count"}:

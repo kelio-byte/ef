@@ -1470,3 +1470,7 @@ Pearson 从 0.1135 降到 -0.0118；lambda=1.0 为 **53.65%**。Bregman 分别�
 0.77967，pairwise 两组均在 1.15× guard 内，但只有 lambda=.25 的 rank 提升，且 Pearson gate
 失败。因此这是“rank 改善、连续校准恶化”的部分结果，不启动 seed43、10k 或 sampling A/B；不能
 宣称 end-to-end Top-k 提升。
+
+随后加入只读的 `reward_score_pearson_within_group` 诊断，排除跨 product score offset：control
+为 0.1490，lambda=.25 为 0.0667，lambda=1 为 0.0733。组内 Pearson 也下降，确认 lambda=.25
+的连续校准损失是真现象；不修改旧 gate，不继续扫描 lambda。

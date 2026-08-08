@@ -90,7 +90,7 @@ def _pairwise_metric_weight(name: str, metrics: dict[str, float]) -> float:
         "pair_margin_mean",
     }:
         return max(float(metrics.get("pair_count", 0.0)), 0.0)
-    if name == "reward_score_pearson":
+    if name in {"reward_score_pearson", "reward_score_pearson_within_group"}:
         return max(float(metrics.get("candidate_pair_count", 0.0)), 0.0)
     return 0.0
 
