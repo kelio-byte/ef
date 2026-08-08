@@ -2,7 +2,7 @@
 
 > 日期：2026-08-08
 > 执行对象：后续 GPT-Luna / 项目维护者
-> 状态：P0–P5 已完成；P5 正确实现但未通过收益门槛，P6 暂缓
+> 状态：P0–P5、P5b 已完成；P5 正确实现但未通过收益门槛，P6 暂缓
 > 研究路线：继续改进 learned action-level approximate DGM；本阶段不做 terminal reranker
 > 校准，也不进入 exact Z-space 重写。
 
@@ -528,6 +528,38 @@ evaluator 复核：
 P5 完成后更新 `new_docs/dgm.md`、`new_docs/0808.md` 对应实验占位，并创建结果 commit。大型
 checkpoint 不提交，只提交配置/summary JSON 和文档；若 summary 位于 `/root/autodl-tmp`，复制
 前先确认文件不包含巨大 tensor 或敏感路径。
+
+#### P5b：pairwise pilot 失败原因审计（2026-08-08）
+
+P5 的 pairwise loss 名义上要求同一 product 组内共享 `(product, x_t, t)`，因此在继续扩大训练
+前先审计冻结 guidance records 的真实结构。新增只读脚本
+`scripts/audit_guidance_anchors.py`，只读取 `.pt` 记录，统计每组 state/time 的唯一数以及同一
+时间的偶然配对；对应单元测试为 `tests/guidance/test_anchor_audit.py`。
+
+validation-200 的可复现结果（JSON 保存于 `/root/autodl-tmp/dgm_guidance_runs/anchor_audit_val200.json`）：
+
+| split | records/groups | group size | mean unique time | mean unique state | all states equal | all times equal |
+|---|---:|---:|---:|---:|---:|---:|
+| train-1k | 4,000/1,000 | 4 | 3.936 | 2.630 | 117/1,000 (11.7%) | 0/1,000 |
+| train-10k | 40,000/10,000 | 4 | 3.9364 | 2.6092 | 1,176/10,000 (11.76%) | 0/10,000 |
+| val-200 | 800/200 | 4 | 3.940 | 2.655 | 23/200 (11.5%) | 0/200 |
+
+validation-200 中只有 12 个同时间 record pair，且仅 7 个 state 完全相同。原因在于旧生成脚本
+先对每个独立 Euler terminal 采样，再调用 `sample_intermediate_states(product, terminal, t)`
+为每条记录独立重建中间 state；`source_index` 只表示同一 product，并不表示共享 anchor。因而
+当前 evaluator 的“shared-anchor pair accuracy”和 P5 的 pairwise loss 实际是在把不同条件状态
+下的 terminal action mask 放进同一组比较，排序信号是反事实且有噪声。这个结论也与 P5 的结果
+一致：pairwise lambda=0.25/1.0 分别为 58.63%/57.93%，低于 grouped control 的 59.73%。
+
+辅助审计还发现：validation-200 的 unequal-reward pair 中 18.14% 因某一候选没有有效 action
+而被跳过；有效 action-set 的平均 token-set Jaccard 为 0.347，说明候选之间也并非天然共享局部
+动作。5 个 batch 的 Bregman/pairwise 梯度 cosine 均值约 0.158，范围 -0.221 到 0.909，不能把
+失败简单归因于单一的梯度冲突。
+
+P5b 结论：不是继续调 lambda 或换 seed，而是先修正数据定义。保留现有 `.pt` 和 checkpoint 不
+覆盖；下一子阶段应新增隔离的 shared-anchor 数据生成路径：先采样一个公共 `x_t`，再从该状态
+独立继续 Euler 得到多个 terminal，并在记录中保存 anchor provenance。只有新数据审计达到每组
+时间/state 全相同，才重新进行 1k pilot；P6 的 10k、Top-k 和采样 A/B 继续暂停。
 
 ### P6：10k 训练
 

@@ -1444,5 +1444,14 @@ P5 使用 seed42 在 1k train/200 validation 上完成了预注册的三组训�
 shared-anchor pair accuracy 为 **59.73%**，lambda=0.25 为 **58.63%**，lambda=1.0 为
 **57.93%**；对应 wall 为 136.8/169.3/177.1s，peak allocated/reserved 约为
 2.03/3.50、2.04/3.50、2.04/3.50GB。两种 pairwise 权重均低于 control，未达到 +3pp 门槛，
-因此没有运行 seed43、10k 或 Top-k。P5 记为“实现正确、实验未通过”；下一步先做 loss/数据
-诊断，不把结果归因于随机波动。
+因此没有运行 seed43、10k 或 Top-k。P5 记为“实现正确、实验未通过”；随后完成 P5b 数据定义
+审计。现有 1k/10k/validation guidance 记录虽然每个 product 有 4 条记录，但四条记录的时间
+从未全部相同，且 validation-200 只有 23/200 组的 state 恰好全部相同（平均每组 2.655 个不同
+state）。这是因为旧生成路径对每个独立 terminal 分别调用 `sample_intermediate_states(product,
+terminal, t)`，`source_index` 只共享 product，不共享 `(x_t,t)`。因此当前 shared-anchor pairwise
+指标是条件状态错配下的反事实诊断，不能作为可靠的同一 anchor 排序信号。
+
+P5b 新增 `scripts/audit_guidance_anchors.py` 及单元测试，审计结果写入
+`/root/autodl-tmp/dgm_guidance_runs/anchor_audit_val200.json`。下一步先隔离实现真正的
+shared-anchor 数据生成（公共 `x_t` 后独立 continuation），并验证每组 state/time 完全一致；在
+此之前不扩大到 10k、不做 Top-k 或 Euler 采样 A/B。
