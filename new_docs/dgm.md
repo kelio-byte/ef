@@ -1027,6 +1027,26 @@ editable total-rate 守恒、BOS 非编辑位置不变、高 H 位置 rate 上�
 `a4671889...a6949ca` 且 byte-level `cmp` 通过；β=0.1 改变 **74/120** 行并无数值/CUDA 错误。
 下一步在固定 validation-A 上比较 per-position 与 per-sample，其他参数完全不变。
 
+validation-A 的 per-sample β=0.10 结果为 Top-1/2/3/5/10
+**53.0/64.0/71.0/77.5/82.0%**、Oracle **84.5%**、sampling wall **约371s**。同 checkpoint、
+同 β 的 per-position 为 **53.0/66.5/71.5/78.5/83.5%**、Oracle **85.5%**；baseline 为
+**51.0/66.5/72.0/77.0/83.5%**、Oracle **86.5%**。per-sample 除 Top-1 持平外，在
+Top-2/3/5/10 和 Oracle 上均被 per-position 支配，且无速度收益，因此没有必要继续运行
+validation-B，也不将新模式设为默认。实现保留为隔离研究开关，默认仍是 per-position。
+
+至此，当前 forward-beam reward + action-level adapter 的两种稳定归一化都未通过 A/B 综合
+门槛。后续不再无依据扩大 full-40k、扫描 β 或接 Euler-Beam。可行研究路线分为：
+
+1. 把已经在 validation-B 提升 Top-1/3/10 的 terminal forward-beam reranker 作为实用模块，
+   研究更低成本的候选级混合/校准；
+2. 重定义 guidance 的训练与 checkpoint 选择目标，例如显式 product 内 pairwise ranking，
+   但这改变当前 Bregman/action-target 研究假设；
+3. 进入严格 Z-space，保留 GAP 身份并追踪变长坐标，解决 89.735% ambiguous insert，属于较大
+   sampler/状态表示改造。
+
+三条路线的研究目标、改动范围和计算预算不同；在选定主目标前不应同时继续，以免在同一
+validation 子集上反复试错造成选择偏差。
+
 **方法限制。** `apply_action_guidance()` 当前在每个位置保持基础模型的总 edit rate，只在
 该位置内部重分配 insert/substitute/delete/token。因此它不能把编辑概率从错误位置移到正确
 位置，也不能增强低 rate 位置的纠错或抑制某位置的全部编辑；这保证数值稳定，但不是 exact
@@ -1097,7 +1117,7 @@ parameterization、归一化或现有 sampler。该接口与映射测试均通�
 | 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | balanced action-level 训练、held-out 校准和成本测量完成 |
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 机制通过；validation-200 validity reward 未提升 Top-k，默认关闭 |
 | 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 暂缓，等待更有信息量的 forward reward |
-| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分；guided Top-k 门槛通过 | 10k 多终点后 A/B 的中高阶指标改善但 Top-1 方向相反；默认关闭，转入 per-sample total-rate 适配对照 |
+| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分；guided Top-k 门槛通过 | 10k 多终点与两种 rate normalization 均完成；learned guidance 未通过 A/B 综合门槛，默认关闭；terminal reranker 单独通过候选级门槛 |
 | 8 | 严格 Z-space DGM | GAP/变长动作映射明确；synthetic 和 identity-limit 测试通过；才可使用 exact DGM 表述 | DG-0 映射审计、DG-1 action-weight identity、固定坐标 toy 已通过；高比例非双射插入使完整 exact sampler 暂未开始 |
 
 任何阶段只达到“代码能运行”而没有达到对应栏的正确性和对照门槛，都不记为通过。
