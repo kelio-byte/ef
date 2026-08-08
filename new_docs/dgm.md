@@ -1417,3 +1417,24 @@ DGM 实现。
 
 除此之外，我会继续按本文档推进，不等待逐步确认；实验结束后如果没有新的 GPU 任务，
 会启动 `alive.py` 保持机器在线，并保留日志、metadata 和 Git 记录。
+
+## 11. Product-internal pairwise guidance extension（2026-08-08）
+
+在阶段 7 learned guidance 未通过 validation-A/B 综合准确率门槛后，按
+`new_docs/dgm_pairwise_guidance_implementation_plan.md` 开始低风险的训练目标改造。当前
+P0–P3 已完成，尚未运行 GPU pilot：
+
+- P0：确认 1k/10k/validation guidance 数据每个 `source_index` 严格包含 4 条记录，现有
+  guidance/forward 定向回归 **42 passed**；
+- P1：新增 `ProductGroupBatchSampler`，只在显式 grouped 模式启用，保证 product group 不跨 batch；
+- P2：新增 shared-anchor `mean(log H)` terminal score 和 pairwise softplus loss；同一 anchor
+  的状态/时间下比较多个 terminal，equal reward 和 no-action candidate 均有明确处理；
+- P3：`train_guidance.py` 已接入 grouped/pairwise 参数、全 anchor validation、1.15× Bregman
+  guardrail、TensorBoard 指标和 `summary.json`；新增只读 `scripts/evaluate_guidance.py`；
+- P3 定向回归为 **53 passed**。缩小模型的 1-step CPU pairwise、guarded checkpoint、旧默认
+  路径和 checkpoint loader smoke 均通过；当前没有 Top-k 或 pairwise accuracy 实验结论。
+
+当前正在进入 P4：先做 CUDA smoke（验证显存、梯度、checkpoint 和 `β=0` identity），再按预注册
+`lambda_pair=0/0.25/1.0` 在 1k 数据上训练。只有两个 seed 的 shared-anchor pair accuracy 相对
+control 平均提升至少 3 个百分点、Bregman guardrail 和效率门槛同时通过，才扩大到 10k；在此
+之前不扫描其它 lambda、不接 Euler-Beam。

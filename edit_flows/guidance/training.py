@@ -10,6 +10,7 @@ from edit_flows.guidance.targets import (
     build_action_target_masks,
     make_action_reward_targets,
 )
+from edit_flows.guidance.ranking import shared_anchor_pairwise_loss
 
 
 def _safe_pearson_correlation(left: Tensor, right: Tensor) -> Tensor:
@@ -37,6 +38,12 @@ def guidance_action_loss(
     *,
     background: float = 1e-4,
     background_loss_weight: float = 0.01,
+    pairwise_loss_weight: float = 0.0,
+    pairwise_temperature: float = 1.0,
+    pairwise_equal_tolerance: float = 1e-6,
+    pairwise_group_size: int = 4,
+    pairwise_anchor_rotation: int = 0,
+    pairwise_all_anchors: bool = False,
 ) -> tuple[Tensor, dict[str, float]]:
     """Compute action-specific positive-guidance loss for one padded batch."""
     if (
@@ -44,12 +51,20 @@ def guidance_action_loss(
         or not torch.isfinite(torch.tensor(background_loss_weight))
     ):
         raise ValueError("background_loss_weight must be finite and non-negative")
+    if (
+        pairwise_loss_weight < 0
+        or not torch.isfinite(torch.tensor(pairwise_loss_weight))
+    ):
+        raise ValueError("pairwise_loss_weight must be finite and non-negative")
     required = {
         "product_tokens", "state_tokens", "terminal_tokens", "time", "reward",
     }
     missing = sorted(required.difference(batch))
     if missing:
         raise KeyError(f"guidance batch is missing fields: {missing}")
+    pairwise_requested = pairwise_loss_weight > 0 or pairwise_all_anchors
+    if pairwise_requested and "source_index" not in batch:
+        raise KeyError("pairwise guidance requires source_index in the batch")
     device = next(model.parameters()).device
     product_tokens = batch["product_tokens"].to(device=device)
     state_tokens = batch["state_tokens"].to(device=device)
@@ -118,7 +133,25 @@ def guidance_action_loss(
     loss_delete, selected_delete_loss, background_delete_loss = balanced_loss(
         guidance_delete, target_delete, delete_mask,
     )
-    loss = (loss_insert + loss_substitute + loss_delete) / 3.0
+    bregman_loss = (loss_insert + loss_substitute + loss_delete) / 3.0
+    pairwise_loss = bregman_loss * 0.0
+    pairwise_metrics: dict[str, Tensor] = {}
+    if pairwise_requested:
+        pairwise_loss, pairwise_metrics = shared_anchor_pairwise_loss(
+            (guidance_insert, guidance_substitute, guidance_delete),
+            state_tokens,
+            terminal_tokens,
+            batch["source_index"],
+            reward,
+            vocab_size=model.vocab_size,
+            group_size=pairwise_group_size,
+            anchor_rotation=pairwise_anchor_rotation,
+            all_anchors=pairwise_all_anchors,
+            temperature=pairwise_temperature,
+            equal_tolerance=pairwise_equal_tolerance,
+            pad_token=model.pad_token,
+        )
+    total_loss = bregman_loss + pairwise_loss_weight * pairwise_loss
     with torch.no_grad():
         selected = (
             insert_mask.any(dim=-1).float().mean()
@@ -147,7 +180,13 @@ def guidance_action_loss(
             selected_guidance[selected_rows],
         )
         metrics = {
-            "loss": float(loss.item()),
+            "loss": float(total_loss.item()),
+            "loss_total": float(total_loss.item()),
+            "loss_bregman": float(bregman_loss.item()),
+            "loss_pairwise": float(pairwise_loss.item()),
+            "pairwise_loss_weight": float(pairwise_loss_weight),
+            "pairwise_temperature": float(pairwise_temperature),
+            "pairwise_equal_tolerance": float(pairwise_equal_tolerance),
             "loss_insert": float(loss_insert.item()),
             "loss_substitute": float(loss_substitute.item()),
             "loss_delete": float(loss_delete.item()),
@@ -170,7 +209,9 @@ def guidance_action_loss(
             "guidance_substitute_mean": float(guidance_substitute.mean().item()),
             "guidance_delete_mean": float(guidance_delete.mean().item()),
         }
-    return loss, metrics
+        for name, value in pairwise_metrics.items():
+            metrics[name] = float(value.item())
+    return total_loss, metrics
 
 
 def train_guidance_step(
@@ -181,6 +222,12 @@ def train_guidance_step(
     background: float = 1e-4,
     background_loss_weight: float = 0.01,
     max_grad_norm: float | None = 1.0,
+    pairwise_loss_weight: float = 0.0,
+    pairwise_temperature: float = 1.0,
+    pairwise_equal_tolerance: float = 1e-6,
+    pairwise_group_size: int = 4,
+    pairwise_anchor_rotation: int = 0,
+    pairwise_all_anchors: bool = False,
 ) -> dict[str, float]:
     """Run one optimizer step and return scalar diagnostics."""
     model.train()
@@ -188,6 +235,12 @@ def train_guidance_step(
     loss, metrics = guidance_action_loss(
         model, batch, background=background,
         background_loss_weight=background_loss_weight,
+        pairwise_loss_weight=pairwise_loss_weight,
+        pairwise_temperature=pairwise_temperature,
+        pairwise_equal_tolerance=pairwise_equal_tolerance,
+        pairwise_group_size=pairwise_group_size,
+        pairwise_anchor_rotation=pairwise_anchor_rotation,
+        pairwise_all_anchors=pairwise_all_anchors,
     )
     loss.backward()
     if max_grad_norm is not None:
@@ -206,6 +259,12 @@ def evaluate_guidance_step(
     *,
     background: float = 1e-4,
     background_loss_weight: float = 0.01,
+    pairwise_loss_weight: float = 0.0,
+    pairwise_temperature: float = 1.0,
+    pairwise_equal_tolerance: float = 1e-6,
+    pairwise_group_size: int = 4,
+    pairwise_anchor_rotation: int = 0,
+    pairwise_all_anchors: bool = False,
 ) -> dict[str, float]:
     """Evaluate guidance loss without changing parameters or RNG state."""
     was_training = model.training
@@ -213,6 +272,12 @@ def evaluate_guidance_step(
     _, metrics = guidance_action_loss(
         model, batch, background=background,
         background_loss_weight=background_loss_weight,
+        pairwise_loss_weight=pairwise_loss_weight,
+        pairwise_temperature=pairwise_temperature,
+        pairwise_equal_tolerance=pairwise_equal_tolerance,
+        pairwise_group_size=pairwise_group_size,
+        pairwise_anchor_rotation=pairwise_anchor_rotation,
+        pairwise_all_anchors=pairwise_all_anchors,
     )
     if was_training:
         model.train()

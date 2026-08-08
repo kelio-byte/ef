@@ -166,3 +166,84 @@ def test_reward_guidance_correlation_excludes_rows_without_target_actions():
     )
     assert metrics["selected_row_fraction"] == pytest.approx(2 / 3)
     assert metrics["reward_selected_guidance_corr"] > 0.999
+
+
+def _pairwise_batch():
+    records = []
+    terminals = [
+        [BOS_TOKEN, 5],
+        [BOS_TOKEN, 6],
+        [BOS_TOKEN, 7],
+        [BOS_TOKEN, 4, 8],
+    ]
+    rewards = [1.0, 0.5, 0.25, 0.0]
+    for sample_index, (terminal, reward) in enumerate(zip(terminals, rewards)):
+        records.append(make_guidance_record(
+            product_tokens=[BOS_TOKEN, 4],
+            state_tokens=[BOS_TOKEN, 4],
+            terminal_tokens=terminal,
+            time_step=0.5,
+            reward=reward,
+            source_index=10,
+            sample_index=sample_index,
+            time_index=50,
+            sample_seed=sample_index + 1,
+            coupling_seed=sample_index + 10,
+        ))
+    return collate_guidance_records(records)
+
+
+def _small_guidance_model():
+    return ProductConditionedGuidance(
+        vocab_size=16,
+        hidden_dim=16,
+        product_layers=1,
+        state_layers=1,
+        num_heads=4,
+        dim_feedforward=32,
+        max_seq_len=16,
+        dropout=0.0,
+        attention_dropout=0.0,
+    )
+
+
+def test_pairwise_training_loss_is_optional_and_reports_shared_anchor_metrics():
+    torch.manual_seed(4)
+    batch = _pairwise_batch()
+    model = _small_guidance_model()
+    base_loss, base_metrics = guidance_action_loss(model, batch)
+    zero_loss, zero_metrics = guidance_action_loss(
+        model, batch, pairwise_loss_weight=0.0,
+    )
+    assert torch.equal(base_loss, zero_loss)
+    assert zero_metrics["loss_pairwise"] == 0.0
+
+    pair_loss, pair_metrics = guidance_action_loss(
+        model, batch,
+        pairwise_loss_weight=0.5,
+        pairwise_group_size=4,
+    )
+    assert torch.isfinite(pair_loss)
+    assert pair_metrics["pair_count"] == 6.0
+    assert pair_metrics["candidate_pair_count"] == 6.0
+    assert pair_metrics["loss_pairwise"] > 0.0
+    pair_loss.backward()
+    assert any(
+        parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        for parameter in model.parameters()
+    )
+
+
+def test_pairwise_validation_can_use_all_anchors_without_changing_model():
+    torch.manual_seed(5)
+    model = _small_guidance_model()
+    batch = _pairwise_batch()
+    before = [parameter.detach().clone() for parameter in model.parameters()]
+    metrics = evaluate_guidance_step(
+        model, batch, pairwise_all_anchors=True,
+    )
+    assert metrics["pair_count"] == 24.0
+    assert metrics["valid_pair_group_fraction"] == 1.0
+    assert all(torch.equal(a, b) for a, b in zip(
+        before, model.parameters(), strict=True,
+    ))

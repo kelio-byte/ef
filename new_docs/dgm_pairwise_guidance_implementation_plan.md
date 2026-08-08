@@ -2,7 +2,7 @@
 
 > 日期：2026-08-08
 > 执行对象：后续 GPT-Luna / 项目维护者
-> 状态：待实现
+> 状态：P0–P3 代码实现、CPU 定向测试和 CLI smoke 已完成；P4 GPU smoke 待执行
 > 研究路线：继续改进 learned action-level approximate DGM；本阶段不做 terminal reranker
 > 校准，也不进入 exact Z-space 重写。
 
@@ -381,6 +381,19 @@ efficiency/steps_per_second
 P3 通过条件：旧命令兼容；lambda=0 训练 smoke；pairwise checkpoint 能保存、加载、只读评估；
 TensorBoard/JSON 指标齐全。
 
+#### P3 当前实现记录（2026-08-08）
+
+- 新增 `ProductGroupBatchSampler`，默认训练命令不启用，grouped 模式要求每组严格 4 条记录。
+- 新增 `shared_anchor_pairwise_loss()` 和 `score_terminal_action_sets()`；mean-log-H、equal
+  reward 跳过、no-action 统计、pairwise accuracy 和 Pearson 均有单元测试。
+- `train_guidance.py` 新增 grouped/pairwise 参数、全 anchor validation、Bregman guardrail、
+  TensorBoard 指标和 `summary.json`。
+- 新增只读 `scripts/evaluate_guidance.py`，用于在相同 shared-anchor 口径下比较旧/new checkpoint。
+- guidance/forward 定向回归为 **53 passed**；1-step CPU grouped pairwise smoke、guarded
+  checkpoint smoke、旧默认路径 smoke 均通过；新 checkpoint 可由 `sample_retro.py` loader 读取。
+- 目前没有 GPU pilot、Top-k 结果或 pairwise 方法准确率结论；P4 先做 GPU smoke，P5 才开始 1k
+  预注册实验。
+
 完成后创建独立 commit，例如：
 
 ```text
@@ -442,7 +455,8 @@ model architecture = 完全沿用当前配置
 lambda = 0.00 / 0.25 / 1.00
 ```
 
-命令模板（P3 参数实现后使用）：
+命令模板（P3 参数已实现；lambda=0 control 使用 `--checkpoint_selection validation_loss`，
+pairwise run 使用 `pairwise_guarded` 并引用 control 的 `summary.json`）：
 
 ```bash
 conda activate ef
@@ -457,8 +471,10 @@ python scripts/train_guidance.py \
   --model_vocab 73 --hidden_dim 256 --product_layers 2 --state_layers 4 \
   --num_heads 8 --dim_feedforward 1024 --max_seq_len 512 \
   --dropout 0.1 --attention_dropout 0.1 --seed 42 \
-  --group_size 4 --pairwise_loss_weight 0.25 \
-  --pairwise_temperature 1.0 --pairwise_all_val_anchors
+  --use_grouped_batches --group_size 4 --pairwise_loss_weight 0.25 \
+  --pairwise_temperature 1.0 --pairwise_all_val_anchors \
+  --checkpoint_selection pairwise_guarded \
+  --control_metrics_json /path/to/lambda0_control/summary.json
 ```
 
 先运行一次很短的 `max_steps=5` smoke，再运行 500 steps。不同 lambda 使用不同输出目录，禁止
