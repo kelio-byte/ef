@@ -23,15 +23,19 @@ def apply_action_guidance(
     *,
     beta: float = 1.0,
     eps: float = 1e-12,
+    rate_normalization: str = "per_position",
+    position_mask: Tensor | None = None,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Reweight one Euler action distribution with positive guidance.
 
     ``log_rates`` has final dimension ``(insert, substitute, delete)``;
     insert/substitute guidance have the same ``[B, L, V]`` shape as their
     token posteriors and delete guidance has shape ``[B, L, 1]``.  The
-    returned rates preserve ``sum(log_rates.exp())`` per position.  Therefore
-    a constant guidance tensor changes neither rates nor token posteriors.
-    ``beta=0`` is an exact identity path.
+    ``rate_normalization='per_position'`` preserves total rate at every
+    position.  ``'per_sample'`` preserves the sum across editable positions,
+    allowing guidance to move intensity between positions.  Therefore a
+    constant guidance tensor changes neither rates nor token posteriors in
+    either mode.  ``beta=0`` is an exact identity path.
     """
     if log_rates.ndim != 3 or log_rates.shape[-1] != 3:
         raise ValueError("log_rates must have shape [B, L, 3]")
@@ -49,6 +53,15 @@ def apply_action_guidance(
         raise ValueError("beta must be finite and non-negative")
     if eps <= 0 or not torch.isfinite(torch.tensor(eps)):
         raise ValueError("eps must be finite and positive")
+    if rate_normalization not in {"per_position", "per_sample"}:
+        raise ValueError(
+            "rate_normalization must be 'per_position' or 'per_sample'"
+        )
+    if position_mask is not None:
+        if position_mask.shape != log_rates.shape[:2]:
+            raise ValueError("position_mask must match [batch, length]")
+        if position_mask.dtype != torch.bool:
+            raise TypeError("position_mask must be boolean")
     if beta == 0:
         return log_rates, log_insert_probs, log_substitute_probs
     for name, tensor in (
@@ -71,29 +84,61 @@ def apply_action_guidance(
     rates = log_rates.exp()
     insert_probs = log_insert_probs.exp()
     substitute_probs = log_substitute_probs.exp()
+    base_insert = rates[:, :, 0:1] * insert_probs
+    base_substitute = rates[:, :, 1:2] * substitute_probs
+    base_delete = rates[:, :, 2:3]
     # H^beta is the density-ratio contribution.  Clamp only the log argument
     # for numerical safety; the guidance model itself is required to be > 0.
     h_insert = (guidance_insert.clamp_min(eps).log() * beta).exp()
     h_substitute = (guidance_substitute.clamp_min(eps).log() * beta).exp()
     h_delete = (guidance_delete.clamp_min(eps).log() * beta).exp()
 
-    weighted_insert = rates[:, :, 0:1] * insert_probs * h_insert
-    weighted_substitute = rates[:, :, 1:2] * substitute_probs * h_substitute
-    weighted_delete = rates[:, :, 2:3] * h_delete
+    weighted_insert = base_insert * h_insert
+    weighted_substitute = base_substitute * h_substitute
+    weighted_delete = base_delete * h_delete
     weighted_total = (
         weighted_insert.sum(dim=-1)
         + weighted_substitute.sum(dim=-1)
         + weighted_delete.squeeze(-1)
     )
     base_total = rates.sum(dim=-1)
-    scale = torch.where(
-        base_total > 0,
-        base_total / weighted_total.clamp_min(eps),
-        torch.ones_like(base_total),
-    )
-    weighted_insert = weighted_insert * scale.unsqueeze(-1)
-    weighted_substitute = weighted_substitute * scale.unsqueeze(-1)
-    weighted_delete = weighted_delete * scale.unsqueeze(-1)
+    if rate_normalization == "per_position":
+        scale = torch.where(
+            base_total > 0,
+            base_total / weighted_total.clamp_min(eps),
+            torch.ones_like(base_total),
+        ).unsqueeze(-1)
+        weighted_insert = weighted_insert * scale
+        weighted_substitute = weighted_substitute * scale
+        weighted_delete = weighted_delete * scale
+    else:
+        active = (
+            position_mask
+            if position_mask is not None
+            else torch.ones_like(base_total, dtype=torch.bool)
+        )
+        active_float = active.to(dtype=base_total.dtype)
+        base_sample_total = (base_total * active_float).sum(dim=-1)
+        weighted_sample_total = (weighted_total * active_float).sum(dim=-1)
+        scale = torch.where(
+            base_sample_total > 0,
+            base_sample_total / weighted_sample_total.clamp_min(eps),
+            torch.ones_like(base_sample_total),
+        ).reshape(-1, 1, 1)
+        weighted_insert = weighted_insert * scale
+        weighted_substitute = weighted_substitute * scale
+        weighted_delete = weighted_delete * scale
+        if position_mask is not None:
+            active_3d = active.unsqueeze(-1)
+            weighted_insert = torch.where(
+                active_3d, weighted_insert, base_insert,
+            )
+            weighted_substitute = torch.where(
+                active_3d, weighted_substitute, base_substitute,
+            )
+            weighted_delete = torch.where(
+                active_3d, weighted_delete, base_delete,
+            )
 
     guided_rates = torch.stack(
         [

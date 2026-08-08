@@ -220,7 +220,9 @@ $PY scripts/eval.py \
   --batch_size 64 --device cuda --seed 42 \
   --start_product 4000 --max_products 4000 --augmentation 20 \
   --guidance_checkpoint /path/to/guidance_best.pt \
-  --guidance_beta 0.10 --n_best 10
+  --guidance_beta 0.10 \
+  --guidance_rate_normalization per_position \
+  --n_best 10
 ```
 
 先加 `--dry_run` 检查内部命令；上例会自动推导为 validation reaction 200–399、
@@ -228,6 +230,12 @@ $PY scripts/eval.py \
 推理不要添加这两个参数。guidance 训练使用 `scripts/train_guidance.py`；有 validation 时会
 同时保存 `guidance_final.pt` 和按最低 validation loss 选择的 `guidance_best.pt`，正式采样
 优先使用后者。训练/数据生成的完整研究协议见 `new_docs/dgm.md`。
+
+`--guidance_rate_normalization` 有两种模式：`per_position` 是历史默认值，在每个位置内部重排
+动作但保持该位置总 edit rate；`per_sample` 保持整条序列所有可编辑位置的总 rate，允许把
+强度移到 guidance 更看好的位置。两者都必须在相同 checkpoint/β/seed 下比较；`β=0` 应与
+无 guidance 的 predictions byte-level 相同。当前 `per_sample` 仍处于 validation 研究阶段，
+没有通过 A/B 前不要用于正式 test。
 
 正向 Molecular Transformer 的 beam 生成能力可独立检查：
 

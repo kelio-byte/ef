@@ -86,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Exponent applied to action guidance weights",
     )
+    sampling.add_argument(
+        "--guidance_rate_normalization",
+        choices=("per_position", "per_sample"),
+        default="per_position",
+    )
     sampling.add_argument("--n_branches", type=int, default=3)
     sampling.add_argument("--n_children", type=int, default=2)
     sampling.add_argument("--n_runs", type=int, default=3)
@@ -216,6 +221,7 @@ def build_sample_command(args: argparse.Namespace) -> list[str]:
         command.extend((
             "--guidance_checkpoint", args.guidance_checkpoint,
             "--guidance_beta", str(args.guidance_beta),
+            "--guidance_rate_normalization", args.guidance_rate_normalization,
         ))
     _add_value(
         command,

@@ -333,6 +333,9 @@ def _build_sampling_metadata(
                 ),
                 "guidance_beta": args.guidance_beta,
                 "guidance_mode": "action_rate_normalized",
+                "guidance_rate_normalization": getattr(
+                    args, "guidance_rate_normalization", "per_position",
+                ),
             })
         sampling["seed_scope"] = (
             "global torch RNG"
@@ -407,6 +410,15 @@ def main():
     parser.add_argument(
         "--guidance_beta", type=float, default=1.0,
         help="Exponent applied to guidance weights (0 gives baseline identity)",
+    )
+    parser.add_argument(
+        "--guidance_rate_normalization",
+        choices=("per_position", "per_sample"),
+        default="per_position",
+        help=(
+            "Preserve edit rate at each position (legacy) or across each "
+            "sample while allowing guidance to move rate between positions"
+        ),
     )
     parser.add_argument("--batch_size", type=int, default=32,
                         help="GPU batch size (number of products per batch)")
@@ -718,6 +730,7 @@ def main():
                     guidance_model=guidance_model,
                     guidance_product=x_0 if guidance_model is not None else None,
                     guidance_beta=args.guidance_beta,
+                    guidance_rate_normalization=args.guidance_rate_normalization,
                 )
             elif args.sampler == "euler_beam":
                 B_prod = end - start

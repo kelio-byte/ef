@@ -70,6 +70,7 @@ class TestSampleEuler:
         guided, _ = sample_euler(
             dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
             guidance_model=guidance, guidance_product=x_0, guidance_beta=0.0,
+            guidance_rate_normalization="per_sample",
         )
         assert torch.equal(baseline, guided)
 

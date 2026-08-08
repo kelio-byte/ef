@@ -335,6 +335,7 @@ def sample_euler(
     guidance_model=None,
     guidance_product: Optional[Tensor] = None,
     guidance_beta: float = 1.0,
+    guidance_rate_normalization: str = "per_position",
 ) -> tuple:
     from edit_flows.analysis.first_step import extract_oracle_event_set
     from edit_flows.sampling.oracle import compute_oracle_model_output
@@ -344,6 +345,10 @@ def sample_euler(
 
     if guidance_beta < 0 or not torch.isfinite(torch.tensor(guidance_beta)):
         raise ValueError("guidance_beta must be finite and non-negative")
+    if guidance_rate_normalization not in {"per_position", "per_sample"}:
+        raise ValueError(
+            "guidance_rate_normalization must be per_position or per_sample"
+        )
     if guidance_model is not None:
         if guidance_product is None:
             raise ValueError("guidance_product is required with guidance_model")
@@ -424,6 +429,10 @@ def sample_euler(
                 guidance_substitute,
                 guidance_delete,
                 beta=guidance_beta,
+                rate_normalization=guidance_rate_normalization,
+                position_mask=(~x_pad_mask) & (
+                    torch.arange(x_t.shape[1], device=device).unsqueeze(0) > 0
+                ),
             )
 
         adapt_h = get_adaptive_h(default_h, t, scheduler)

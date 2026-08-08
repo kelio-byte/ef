@@ -60,3 +60,51 @@ def test_guidance_preserves_position_rate_and_normalizes_posteriors():
         atol=1e-5,
         rtol=1e-5,
     )
+
+
+def test_per_sample_guidance_preserves_editable_total_and_moves_rate():
+    log_rates = torch.zeros(1, 3, 3)
+    log_insert = torch.log_softmax(torch.zeros(1, 3, 2), dim=-1)
+    log_substitute = torch.log_softmax(torch.zeros(1, 3, 2), dim=-1)
+    h_insert = torch.ones(1, 3, 2)
+    h_substitute = torch.ones(1, 3, 2)
+    h_delete = torch.ones(1, 3, 1)
+    h_insert[:, 2] = 9.0
+    h_substitute[:, 2] = 9.0
+    h_delete[:, 2] = 9.0
+    editable = torch.tensor([[False, True, True]])
+
+    guided_rates, _, _ = apply_action_guidance(
+        log_rates,
+        log_insert,
+        log_substitute,
+        h_insert,
+        h_substitute,
+        h_delete,
+        rate_normalization="per_sample",
+        position_mask=editable,
+    )
+    base = log_rates.exp().sum(dim=-1)
+    guided = guided_rates.exp().sum(dim=-1)
+    torch.testing.assert_close(guided[editable].sum(), base[editable].sum())
+    assert guided[0, 2] > guided[0, 1]
+    torch.testing.assert_close(guided[0, 0], base[0, 0])
+
+
+def test_constant_guidance_is_identity_with_per_sample_normalization():
+    values = _inputs()
+    log_rates, log_insert, log_substitute = values[:3]
+    constant = 4.0
+    actual = apply_action_guidance(
+        log_rates,
+        log_insert,
+        log_substitute,
+        torch.full_like(log_insert, constant),
+        torch.full_like(log_substitute, constant),
+        torch.full_like(log_rates[:, :, :1], constant),
+        rate_normalization="per_sample",
+        position_mask=torch.tensor([[False, True, True], [False, True, False]]),
+    )
+    torch.testing.assert_close(actual[0], log_rates)
+    torch.testing.assert_close(actual[1], log_insert)
+    torch.testing.assert_close(actual[2], log_substitute)

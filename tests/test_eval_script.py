@@ -70,11 +70,13 @@ def test_sample_command_carries_optional_guidance_settings():
         "--sampler", "euler",
         "--guidance_checkpoint", "guidance.pt",
         "--guidance_beta", "0.1",
+        "--guidance_rate_normalization", "per_sample",
     )
     command = eval_script.build_sample_command(args)
     rendered = " ".join(command)
     assert "--guidance_checkpoint guidance.pt" in rendered
     assert "--guidance_beta 0.1" in rendered
+    assert "--guidance_rate_normalization per_sample" in rendered
 
 
 def test_score_command_defaults_to_top10_diagnostics():

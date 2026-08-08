@@ -1012,6 +1012,21 @@ A 的 Top-1 +2 但 Oracle -1，B 的 Top-1 -2 但 Top-2/3 与 Oracle 提升；�
 per-sample total-rate preservation；后者允许 guidance 把编辑强度在不同位置之间重新分配，
 但必须先通过 β=0 identity、常数 H identity 和样本总 rate 守恒测试。
 
+##### per-sample total-rate 适配实现（2026-08-08）
+
+新增可选 `guidance_rate_normalization=per_sample`，旧 `per_position` 保持默认。两者都先按
+`base action rate × H^β` 加权；旧模式在每个位置单独缩放回原总率，新模式只在每个样本的
+所有可编辑位置上使用一个缩放因子，因此保持样本总 edit rate，却允许高 H 位置增加 rate、
+低 H 位置降低 rate。BOS/PAD 不参与总率并保持原值。该模式仍是 action-level approximate
+guidance，不是 exact Z-space DGM。
+
+纯张量测试覆盖：per-position 回归、β=0 identity、两种模式下常数 H identity、per-sample
+editable total-rate 守恒、BOS 非编辑位置不变、高 H 位置 rate 上升、token posterior 归一化和
+非法参数拒绝。ordinary Euler sampler 级 β=0 也通过。真实 checkpoint 使用 validation 行
+4000–4039、20 steps、3 samples 的 smoke：baseline 与 per-sample β=0 predictions SHA 均为
+`a4671889...a6949ca` 且 byte-level `cmp` 通过；β=0.1 改变 **74/120** 行并无数值/CUDA 错误。
+下一步在固定 validation-A 上比较 per-position 与 per-sample，其他参数完全不变。
+
 **方法限制。** `apply_action_guidance()` 当前在每个位置保持基础模型的总 edit rate，只在
 该位置内部重分配 insert/substitute/delete/token。因此它不能把编辑概率从错误位置移到正确
 位置，也不能增强低 rate 位置的纠错或抑制某位置的全部编辑；这保证数值稳定，但不是 exact
