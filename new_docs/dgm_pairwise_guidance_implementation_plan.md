@@ -2,7 +2,7 @@
 
 > 日期：2026-08-08
 > 执行对象：后续 GPT-Luna / 项目维护者
-> 状态：P0–P4 代码实现与 smoke 已完成；P5 1k pilot 待执行
+> 状态：P0–P5 已完成；P5 正确实现但未通过收益门槛，P6 暂缓
 > 研究路线：继续改进 learned action-level approximate DGM；本阶段不做 terminal reranker
 > 校准，也不进入 exact Z-space 重写。
 
@@ -505,6 +505,25 @@ seed 42 第一轮进入 seed 43 复核的门槛：
 方向一致，且平均 pair accuracy 提升至少 3 点。
 
 若不通过：记录负结果，停止，不生成新数据、不跑 Top-k、不上 10k。
+
+#### P5 当前实验记录（2026-08-08）
+
+三组实验均使用 seed42、1k train/200 validation、500 steps、batch64、同一模型和
+`per_position` 无关的 guidance 训练设置。shared-anchor 指标由完整 800-record validation
+evaluator 复核：
+
+| run | best step | best Bregman | shared-anchor pair acc | Pearson | wall | peak allocated/reserved |
+|---|---:|---:|---:|---:|---:|---:|
+| lambda=0 control | 100 | 0.79768 | **59.73%** | 0.1132 | 136.8s | 2.03/3.50GB |
+| lambda=0.25 | 300 | 0.81301 | 58.63% | 0.1562 | 169.3s | 2.04/3.50GB |
+| lambda=1.0 | 300 | 0.80533 | 57.93% | 0.1822 | 177.1s | 2.04/3.50GB |
+
+两种 pairwise 权重都低于同 seed grouped control，未达到预注册的“至少提升 3 个百分点”门槛；
+因此不运行 seed43、不生成 10k 新数据、不做 Top-k sampling。旧 checkpoint 采用同一 evaluator
+的参考值为：1k old best **56.04%**、10k old best **55.39%**、10k old final **57.49%**。
+这说明 grouped control 本身比旧打散训练的 checkpoint 更好，但当前 pairwise loss 没有带来
+额外排序收益。P5 记为**正确实现但实验未通过**，下一步先做 loss/数据诊断，不把失败归因于
+随机波动，也不通过事后换 seed 或 checkpoint 选择规则来挽救。
 
 P5 完成后更新 `new_docs/dgm.md`、`new_docs/0808.md` 对应实验占位，并创建结果 commit。大型
 checkpoint 不提交，只提交配置/summary JSON 和文档；若 summary 位于 `/root/autodl-tmp`，复制

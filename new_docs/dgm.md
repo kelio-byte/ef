@@ -1422,7 +1422,7 @@ DGM 实现。
 
 在阶段 7 learned guidance 未通过 validation-A/B 综合准确率门槛后，按
 `new_docs/dgm_pairwise_guidance_implementation_plan.md` 开始低风险的训练目标改造。当前
-P0–P3 已完成，尚未运行 GPU pilot：
+P0–P5 已完成，P5 的 pilot 正确运行但未通过收益门槛：
 
 - P0：确认 1k/10k/validation guidance 数据每个 `source_index` 严格包含 4 条记录，现有
   guidance/forward 定向回归 **42 passed**；
@@ -1432,7 +1432,7 @@ P0–P3 已完成，尚未运行 GPU pilot：
 - P3：`train_guidance.py` 已接入 grouped/pairwise 参数、全 anchor validation、1.15× Bregman
   guardrail、TensorBoard 指标和 `summary.json`；新增只读 `scripts/evaluate_guidance.py`；
 - P3 定向回归为 **53 passed**。缩小模型的 1-step CPU pairwise、guarded checkpoint、旧默认
-  路径和 checkpoint loader smoke 均通过；当前没有 Top-k 或 pairwise accuracy 实验结论。
+  路径和 checkpoint loader smoke 均通过。
 
 P4 CUDA smoke 已完成：RTX 3090 上缩小模型 1-step 训练/validation、CUDA evaluator 和真实
 `sample_retro.py` 调用均通过；同 seed、`n_steps=2`、20 条 augmentation 的 baseline 与
@@ -1440,7 +1440,9 @@ P4 CUDA smoke 已完成：RTX 3090 上缩小模型 1-step 训练/validation、CU
 全量测试为 **285 passed, 17 failed**，17 个 failure 均为既有 beam 测试 API/controlled-model
 问题。
 
-当前进入 P5：按预注册 `lambda_pair=0/0.25/1.0` 在 1k 数据上训练。只有两个 seed 的
-shared-anchor pair accuracy 相对 control 平均提升至少 3 个百分点、Bregman guardrail 和效率
-门槛同时通过，才扩大到 10k；在此之前不扫描其它 lambda、不接 Euler-Beam。P4 smoke 不提供
-pairwise 准确率结论。
+P5 使用 seed42 在 1k train/200 validation 上完成了预注册的三组训练：grouped control 的
+shared-anchor pair accuracy 为 **59.73%**，lambda=0.25 为 **58.63%**，lambda=1.0 为
+**57.93%**；对应 wall 为 136.8/169.3/177.1s，peak allocated/reserved 约为
+2.03/3.50、2.04/3.50、2.04/3.50GB。两种 pairwise 权重均低于 control，未达到 +3pp 门槛，
+因此没有运行 seed43、10k 或 Top-k。P5 记为“实现正确、实验未通过”；下一步先做 loss/数据
+诊断，不把结果归因于随机波动。
