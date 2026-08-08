@@ -10,7 +10,10 @@ from edit_flows.guidance.targets import (
     build_action_target_masks,
     make_action_reward_targets,
 )
-from edit_flows.guidance.ranking import shared_anchor_pairwise_loss
+from edit_flows.guidance.ranking import (
+    score_calibration_loss,
+    shared_anchor_pairwise_loss,
+)
 
 
 def _safe_pearson_correlation(left: Tensor, right: Tensor) -> Tensor:
@@ -44,6 +47,7 @@ def guidance_action_loss(
     pairwise_group_size: int = 4,
     pairwise_anchor_rotation: int = 0,
     pairwise_all_anchors: bool = False,
+    score_calibration_weight: float = 0.0,
 ) -> tuple[Tensor, dict[str, float]]:
     """Compute action-specific positive-guidance loss for one padded batch."""
     if (
@@ -56,6 +60,11 @@ def guidance_action_loss(
         or not torch.isfinite(torch.tensor(pairwise_loss_weight))
     ):
         raise ValueError("pairwise_loss_weight must be finite and non-negative")
+    if (
+        score_calibration_weight < 0
+        or not torch.isfinite(torch.tensor(score_calibration_weight))
+    ):
+        raise ValueError("score_calibration_weight must be finite and non-negative")
     required = {
         "product_tokens", "state_tokens", "terminal_tokens", "time", "reward",
     }
@@ -63,7 +72,8 @@ def guidance_action_loss(
     if missing:
         raise KeyError(f"guidance batch is missing fields: {missing}")
     pairwise_requested = pairwise_loss_weight > 0 or pairwise_all_anchors
-    if pairwise_requested and "source_index" not in batch:
+    calibration_requested = score_calibration_weight > 0
+    if (pairwise_requested or calibration_requested) and "source_index" not in batch:
         raise KeyError("pairwise guidance requires source_index in the batch")
     device = next(model.parameters()).device
     product_tokens = batch["product_tokens"].to(device=device)
@@ -151,7 +161,28 @@ def guidance_action_loss(
             equal_tolerance=pairwise_equal_tolerance,
             pad_token=model.pad_token,
         )
-    total_loss = bregman_loss + pairwise_loss_weight * pairwise_loss
+    calibration_loss = bregman_loss * 0.0
+    calibration_metrics: dict[str, Tensor] = {}
+    if calibration_requested:
+        calibration_loss, calibration_metrics = score_calibration_loss(
+            (guidance_insert, guidance_substitute, guidance_delete),
+            state_tokens,
+            terminal_tokens,
+            batch["source_index"],
+            reward,
+            vocab_size=model.vocab_size,
+            group_size=pairwise_group_size,
+            anchor_rotation=pairwise_anchor_rotation,
+            all_anchors=pairwise_all_anchors,
+            equal_tolerance=pairwise_equal_tolerance,
+            pad_token=model.pad_token,
+        )
+    total_loss = (
+        bregman_loss
+        + pairwise_loss_weight * pairwise_loss
+        + score_calibration_weight * calibration_loss
+    )
+    pairwise_metrics.update(calibration_metrics)
     with torch.no_grad():
         selected = (
             insert_mask.any(dim=-1).float().mean()
@@ -184,7 +215,9 @@ def guidance_action_loss(
             "loss_total": float(total_loss.item()),
             "loss_bregman": float(bregman_loss.item()),
             "loss_pairwise": float(pairwise_loss.item()),
+            "loss_score_calibration": float(calibration_loss.item()),
             "pairwise_loss_weight": float(pairwise_loss_weight),
+            "score_calibration_weight": float(score_calibration_weight),
             "pairwise_temperature": float(pairwise_temperature),
             "pairwise_equal_tolerance": float(pairwise_equal_tolerance),
             "loss_insert": float(loss_insert.item()),
@@ -228,6 +261,7 @@ def train_guidance_step(
     pairwise_group_size: int = 4,
     pairwise_anchor_rotation: int = 0,
     pairwise_all_anchors: bool = False,
+    score_calibration_weight: float = 0.0,
 ) -> dict[str, float]:
     """Run one optimizer step and return scalar diagnostics."""
     model.train()
@@ -241,6 +275,7 @@ def train_guidance_step(
         pairwise_group_size=pairwise_group_size,
         pairwise_anchor_rotation=pairwise_anchor_rotation,
         pairwise_all_anchors=pairwise_all_anchors,
+        score_calibration_weight=score_calibration_weight,
     )
     loss.backward()
     if max_grad_norm is not None:
@@ -265,6 +300,7 @@ def evaluate_guidance_step(
     pairwise_group_size: int = 4,
     pairwise_anchor_rotation: int = 0,
     pairwise_all_anchors: bool = False,
+    score_calibration_weight: float = 0.0,
 ) -> dict[str, float]:
     """Evaluate guidance loss without changing parameters or RNG state."""
     was_training = model.training
@@ -278,6 +314,7 @@ def evaluate_guidance_step(
         pairwise_group_size=pairwise_group_size,
         pairwise_anchor_rotation=pairwise_anchor_rotation,
         pairwise_all_anchors=pairwise_all_anchors,
+        score_calibration_weight=score_calibration_weight,
     )
     if was_training:
         model.train()

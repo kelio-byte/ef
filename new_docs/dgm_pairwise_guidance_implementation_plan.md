@@ -633,6 +633,34 @@ rank accuracy，但当前 `mean(log H)` 排序目标会牺牲与 reward 的连�
 诊断不改变 P5d 的 gate 结论；下一步只研究一个 score-aware calibration 项，禁止继续扫描旧
 lambda 或直接扩大到 10k。
 
+#### P5f：score-aware calibration 小型验证协议（待执行）
+
+P5e 表明 rank loss 单独使用会损害连续校准，因此新增一个默认关闭的 centered/normalized
+within-group calibration loss。它对同一 anchor 的 candidate `mean(log H)` 和 reward 分别去
+中心化、归一化，再做 MSE；不改变 ordinary Euler、action mask 或旧 pairwise loss。CLI 参数为
+`--score_calibration_weight`，默认 0，旧命令完全兼容。
+
+单一预注册设置：
+
+```text
+pairwise_loss_weight = 0.25
+score_calibration_weight = 0.10
+pairwise_temperature = 1.0
+seed = 42, train/val = corrected shared-anchor 1k/200
+steps = 500, batch = 64, same architecture and guard as P5d
+```
+
+选择 0.10 的依据是 P5d validation 上 raw calibration loss 约 1.64，乘 0.10 后与
+`0.25 × pairwise_loss ≈ 0.17` 同量级；这是一次假设检验，不扫描权重。先做 5-step CLI smoke，
+再做一次 500-step pilot。通过门槛同时要求：
+
+1. within-group Pearson 不低于 control **0.1490**；
+2. shared-anchor pair accuracy 不低于 control **55.15%**；
+3. Bregman ≤ control 的 1.15×（**0.7954**）；
+4. 无 NaN、wall 不超过 control 的 2.5 倍。
+
+任一条件失败都不进入 10k 或 sampling A/B；只记录校准项是否改善了 rank/score 的权衡。
+
 ### P6：10k 训练
 
 只有 P5 通过才执行。使用：

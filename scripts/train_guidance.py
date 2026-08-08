@@ -116,6 +116,10 @@ def run(args: argparse.Namespace) -> dict:
         torch.tensor(args.pairwise_equal_tolerance)
     ):
         raise ValueError("pairwise_equal_tolerance must be finite and non-negative")
+    if args.score_calibration_weight < 0 or not torch.isfinite(
+        torch.tensor(args.score_calibration_weight)
+    ):
+        raise ValueError("score_calibration_weight must be finite and non-negative")
     _set_seed(args.seed)
     device = torch.device(args.device)
     train_dataset = GuidanceDataset(args.train_data)
@@ -130,6 +134,7 @@ def run(args: argparse.Namespace) -> dict:
     grouped_batches = (
         args.use_grouped_batches
         or args.pairwise_loss_weight > 0
+        or args.score_calibration_weight > 0
         or args.pairwise_all_val_anchors
         or args.checkpoint_selection == "pairwise_guarded"
     )
@@ -259,6 +264,7 @@ def run(args: argparse.Namespace) -> dict:
                 pairwise_equal_tolerance=args.pairwise_equal_tolerance,
                 pairwise_group_size=args.group_size,
                 pairwise_anchor_rotation=global_step % args.group_size,
+                score_calibration_weight=args.score_calibration_weight,
             )
             global_step += 1
             last_train_metrics = metrics
@@ -290,6 +296,7 @@ def run(args: argparse.Namespace) -> dict:
                         pairwise_equal_tolerance=args.pairwise_equal_tolerance,
                         pairwise_group_size=args.group_size,
                         pairwise_all_anchors=args.pairwise_all_val_anchors,
+                        score_calibration_weight=args.score_calibration_weight,
                     )
                     val_batch_size = val_batch["reward"].shape[0]
                     val_count += val_batch_size
@@ -525,6 +532,7 @@ def main() -> None:
     parser.add_argument("--pairwise_loss_weight", type=float, default=0.0)
     parser.add_argument("--pairwise_temperature", type=float, default=1.0)
     parser.add_argument("--pairwise_equal_tolerance", type=float, default=1e-6)
+    parser.add_argument("--score_calibration_weight", type=float, default=0.0)
     parser.add_argument(
         "--pairwise_all_val_anchors",
         action="store_true",

@@ -3,6 +3,7 @@ import torch
 
 from edit_flows.guidance.ranking import (
     _within_group_pearson,
+    score_calibration_loss,
     score_masked_action_sets,
     shared_anchor_pairwise_loss,
 )
@@ -82,6 +83,18 @@ def test_within_group_pearson_removes_group_score_offsets():
     rewards = torch.tensor([0.0, 1.0, 0.0, 1.0])
     groups = torch.tensor([0, 0, 1, 1])
     assert _within_group_pearson(values, rewards, groups).item() > 0.99
+
+
+def test_score_calibration_loss_is_differentiable_and_finite():
+    guidance, state, terminal, source_index, reward = _ranking_batch()
+    loss, metrics = score_calibration_loss(
+        guidance, state, terminal, source_index, reward,
+        vocab_size=16, group_size=4,
+    )
+    assert torch.isfinite(loss)
+    assert metrics["score_calibration_group_count"].item() == 1.0
+    loss.backward()
+    assert all(value.grad is not None for value in guidance)
 
 
 def test_shared_anchor_pairwise_loss_penalizes_reversed_scores():

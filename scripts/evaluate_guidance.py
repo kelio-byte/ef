@@ -33,6 +33,9 @@ _PAIR_WEIGHTED_METRICS = {
     "pair_tie_fraction",
     "pair_margin_mean",
 }
+_GROUP_WEIGHTED_METRICS = {
+    "score_calibration_loss",
+}
 
 
 def _load_model(checkpoint_path: str, device: torch.device) -> ProductConditionedGuidance:
@@ -106,16 +109,23 @@ def evaluate(args: argparse.Namespace) -> dict:
                 batch,
                 pairwise_group_size=args.group_size,
                 pairwise_all_anchors=args.all_anchors,
+                score_calibration_weight=args.score_calibration_weight,
             )
             batch_size = int(batch["reward"].shape[0])
             record_count += batch_size
             batch_count += 1
             pair_count = max(float(metrics.get("pair_count", 0.0)), 0.0)
             candidate_count = max(float(metrics.get("candidate_pair_count", 0.0)), 0.0)
+            calibration_group_count = max(
+                float(metrics.get("score_calibration_group_count", 0.0)), 0.0,
+            )
             for name, value in metrics.items():
                 if name in _PAIR_WEIGHTED_METRICS and pair_count > 0:
                     totals[name] = totals.get(name, 0.0) + value * pair_count
                     weights[name] = weights.get(name, 0.0) + pair_count
+                elif name in _GROUP_WEIGHTED_METRICS and calibration_group_count > 0:
+                    totals[name] = totals.get(name, 0.0) + value * calibration_group_count
+                    weights[name] = weights.get(name, 0.0) + calibration_group_count
                 elif name in {
                     "reward_score_pearson",
                     "reward_score_pearson_within_group",
@@ -178,6 +188,7 @@ def main() -> None:
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--max_batches", type=int, default=0)
     parser.add_argument("--all_anchors", action="store_true")
+    parser.add_argument("--score_calibration_weight", type=float, default=0.0)
     evaluate(parser.parse_args())
 
 

@@ -355,3 +355,117 @@ def shared_anchor_pairwise_loss(
         "reward_score_pearson_within_group": reward_score_pearson_within_group,
     }
     return pair_loss, metrics
+
+
+def score_calibration_loss(
+    guidance: tuple[Tensor, Tensor, Tensor],
+    state_tokens: Tensor,
+    terminal_tokens: Tensor,
+    source_index: Tensor,
+    reward: Tensor,
+    *,
+    vocab_size: int,
+    group_size: int = 4,
+    anchor_rotation: int = 0,
+    all_anchors: bool = False,
+    equal_tolerance: float = 1e-6,
+    pad_token: int = 0,
+    eps: float = 1e-6,
+) -> tuple[Tensor, dict[str, Tensor]]:
+    """Match centered candidate scores to centered rewards within each group.
+
+    The score is the same ``mean(log H)`` used by pairwise ranking.  For each
+    selected anchor, both candidate scores and rewards are centered and
+    normalized within that product group before an MSE is computed.  This
+    removes arbitrary group offsets while retaining the relative reward scale;
+    groups with equal rewards or no-action candidates are skipped.
+    """
+    if not isinstance(anchor_rotation, int) or anchor_rotation < 0:
+        raise ValueError("anchor_rotation must be a non-negative integer")
+    if equal_tolerance < 0 or not torch.isfinite(torch.tensor(float(equal_tolerance))):
+        raise ValueError("equal_tolerance must be finite and non-negative")
+    if eps <= 0 or not torch.isfinite(torch.tensor(float(eps))):
+        raise ValueError("eps must be finite and positive")
+    if state_tokens.ndim != 2 or terminal_tokens.ndim != 2:
+        raise ValueError("state_tokens and terminal_tokens must be rank-2")
+    if state_tokens.shape[0] != terminal_tokens.shape[0]:
+        raise ValueError("state and terminal batches must have equal size")
+    if source_index.shape != reward.shape or source_index.ndim != 1:
+        raise ValueError("source_index and reward must have shape [batch]")
+    reward = reward.to(device=state_tokens.device, dtype=torch.float32)
+    if not torch.isfinite(reward).all() or (reward < 0).any():
+        raise ValueError("reward must contain finite non-negative values")
+    _validate_guidance_tensors(guidance, state_length=state_tokens.shape[1])
+    groups = _group_rows(source_index, group_size)
+
+    selected_keys: list[tuple[int, int]] = []
+    for group in groups:
+        anchors = group if all_anchors else [
+            group[(anchor_rotation + int(source_index[group[0]].item()) % group_size) % group_size]
+        ]
+        for anchor in anchors:
+            selected_keys.extend((anchor, candidate) for candidate in group)
+    if not selected_keys:
+        zero = sum((value.sum() for value in guidance)) * 0.0
+        return zero, {
+            "score_calibration_loss": zero.detach(),
+            "score_calibration_group_count": zero.detach(),
+            "score_calibration_candidate_count": zero.detach(),
+        }
+
+    device = guidance[0].device
+    anchor_rows = torch.tensor(
+        [key[0] for key in selected_keys], dtype=torch.long, device=device,
+    )
+    terminal_rows = torch.tensor(
+        [key[1] for key in selected_keys], dtype=torch.long, device=device,
+    )
+    anchor_guidance = tuple(value.index_select(0, anchor_rows) for value in guidance)
+    scores, counts = score_terminal_action_sets(
+        anchor_guidance,
+        state_tokens.index_select(0, anchor_rows.to(state_tokens.device)),
+        terminal_tokens.index_select(0, terminal_rows.to(terminal_tokens.device)),
+        vocab_size=vocab_size,
+        pad_token=pad_token,
+    )
+    rewards = reward.index_select(0, terminal_rows.to(reward.device))
+    losses: list[Tensor] = []
+    valid_candidates = 0
+    valid_groups = 0
+    offset = 0
+    for group in groups:
+        anchors = group if all_anchors else [
+            group[(anchor_rotation + int(source_index[group[0]].item()) % group_size) % group_size]
+        ]
+        for _anchor in anchors:
+            group_scores = scores[offset:offset + group_size]
+            group_counts = counts[offset:offset + group_size]
+            group_rewards = rewards[offset:offset + group_size]
+            offset += group_size
+            valid = group_counts > 0
+            if int(valid.sum().item()) < 2:
+                continue
+            valid_scores = group_scores[valid]
+            valid_rewards = group_rewards[valid]
+            if float((valid_rewards.max() - valid_rewards.min()).item()) <= equal_tolerance:
+                continue
+            score_centered = valid_scores - valid_scores.mean()
+            reward_centered = valid_rewards - valid_rewards.mean()
+            score_normalized = score_centered / torch.sqrt(
+                score_centered.square().mean() + float(eps)
+            )
+            reward_normalized = reward_centered / torch.sqrt(
+                reward_centered.square().mean() + float(eps)
+            )
+            losses.append((score_normalized - reward_normalized).square().mean())
+            valid_candidates += int(valid.sum().item())
+            valid_groups += 1
+    if losses:
+        loss = torch.stack(losses).mean()
+    else:
+        loss = sum((value.sum() for value in guidance)) * 0.0
+    return loss, {
+        "score_calibration_loss": loss.detach(),
+        "score_calibration_group_count": loss.new_tensor(float(valid_groups)),
+        "score_calibration_candidate_count": loss.new_tensor(float(valid_candidates)),
+    }

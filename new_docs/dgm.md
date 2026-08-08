@@ -1474,3 +1474,8 @@ Pearson 从 0.1135 降到 -0.0118；lambda=1.0 为 **53.65%**。Bregman 分别�
 随后加入只读的 `reward_score_pearson_within_group` 诊断，排除跨 product score offset：control
 为 0.1490，lambda=.25 为 0.0667，lambda=1 为 0.0733。组内 Pearson 也下降，确认 lambda=.25
 的连续校准损失是真现象；不修改旧 gate，不继续扫描 lambda。
+
+下一步的唯一候选是一个默认关闭的 score-aware calibration loss：同一 anchor 内将 candidate
+`mean(log H)` 与 reward 分别去中心化、归一化后做 MSE。预注册 `pairwise λ=0.25`、
+`score_calibration_weight=0.10`，依据是现有 raw calibration loss≈1.64，使其训练贡献与 pairwise
+项同量级；先 5-step smoke，再 500-step pilot，不扫描其他权重。

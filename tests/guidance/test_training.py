@@ -234,6 +234,22 @@ def test_pairwise_training_loss_is_optional_and_reports_shared_anchor_metrics():
     )
 
 
+def test_score_calibration_term_is_optional_and_updates_parameters():
+    torch.manual_seed(7)
+    batch = _pairwise_batch()
+    model = _small_guidance_model()
+    loss, metrics = guidance_action_loss(
+        model, batch, score_calibration_weight=0.5,
+    )
+    assert torch.isfinite(loss)
+    assert metrics["loss_score_calibration"] > 0.0
+    loss.backward()
+    assert any(
+        parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        for parameter in model.parameters()
+    )
+
+
 def test_pairwise_validation_can_use_all_anchors_without_changing_model():
     torch.manual_seed(5)
     model = _small_guidance_model()
