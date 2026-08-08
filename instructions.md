@@ -259,6 +259,32 @@ $PY scripts/rerank_forward_beam.py \
 当前 validation-B 对照约提速 3 倍并提高 AUC，后续默认开启。重排后仍需按原 prediction beam、
 augmentation、reaction offset 调用评分脚本。
 
+生成同一 product 的 4 个独立终点并附加 forward-beam reward：
+
+```bash
+$PY scripts/generate_guidance_data.py \
+  --checkpoint new_checkpoints/checkpoint_step600000.pt \
+  --products_file "$DATA/train/src-train.txt" \
+  --output /path/to/train_multiterm_validity.pt \
+  --augmentation 20 --max_products 1000 \
+  --n_steps 100 --n_samples 4 --time_samples 1 \
+  --batch_size 32 --device cuda --seed 42
+
+$PY scripts/generate_forward_guidance_data.py \
+  --input_data /path/to/train_multiterm_validity.pt \
+  --output_data /path/to/train_multiterm_beam.pt \
+  --checkpoint new_checkpoints/MIT_mixed_augm_model_average_20.pt \
+  --vocab_file "$DATA/example.vocab.src" \
+  --reward_mode beam_reconstruction --forward_beam_size 5 \
+  --canonicalize_source --batch_size 8 --device cuda
+```
+
+第一条命令的 `batch_size` 是同时处理的 product 数，实际终点 batch 为
+`batch_size × n_samples`；RTX 3090 的当前实测中 32 比 64 更快。第二条命令只读取保存的
+product/terminal，不读取反应 target；输出报告中的 `variable_reward_group_fraction` 是判断
+多终点监督是否比旧单终点数据更有信息量的关键指标。本地 guidance `.pt` 数据和 checkpoint
+体积较大，默认不提交 Git。
+
 ## 5. 分离运行采样和打分
 
 需要调试中间文件时使用 `sample_retro.py`：

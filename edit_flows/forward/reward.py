@@ -127,6 +127,7 @@ def forward_beam_reconstruction_rank(
     forbid_unk: bool = False,
     canonicalize_source: bool = False,
     cache: MutableMapping[str, Sequence[str]] | None = None,
+    stats: MutableMapping[str, int] | None = None,
 ) -> Tensor:
     """Return the 1-based forward-beam rank of each requested product.
 
@@ -145,6 +146,9 @@ def forward_beam_reconstruction_rank(
     normalized: list[tuple[str, str] | None] = []
     pending: dict[str, list[int]] = {}
     generated: dict[str, Sequence[str]] = {}
+    valid_input_count = 0
+    unique_valid_sources: set[str] = set()
+    cached_sources: set[str] = set()
     for index, (reactants, product) in enumerate(
         zip(reactants_global, products_global)
     ):
@@ -160,8 +164,11 @@ def forward_beam_reconstruction_rank(
             normalized.append(None)
             continue
         normalized.append((source, target))
+        valid_input_count += 1
+        unique_valid_sources.add(source)
         if cache is not None and source in cache:
             generated[source] = cache[source]
+            cached_sources.add(source)
         else:
             pending.setdefault(source, []).append(index)
 
@@ -183,6 +190,17 @@ def forward_beam_reconstruction_rank(
             generated[source] = canonical_beam
             if cache is not None:
                 cache[source] = canonical_beam
+
+    if stats is not None:
+        stats.update({
+            "input_count": len(reactants_global),
+            "valid_input_count": valid_input_count,
+            "invalid_input_count": len(reactants_global) - valid_input_count,
+            "unique_valid_source_count": len(unique_valid_sources),
+            "generated_source_count": len(pending),
+            "pre_cached_source_count": len(cached_sources),
+            "deduplicated_input_count": valid_input_count - len(pending),
+        })
 
     for index, pair in enumerate(normalized):
         if pair is None:
@@ -209,6 +227,7 @@ def forward_beam_reconstruction_reward(
     reciprocal_rank: bool = True,
     miss_reward: float = 0.0,
     cache: MutableMapping[str, Sequence[str]] | None = None,
+    stats: MutableMapping[str, int] | None = None,
 ) -> Tensor:
     """Map forward product reconstruction ranks to a finite reward."""
 
@@ -225,6 +244,7 @@ def forward_beam_reconstruction_reward(
         forbid_unk=forbid_unk,
         canonicalize_source=canonicalize_source,
         cache=cache,
+        stats=stats,
     )
     reward = torch.full(ranks.shape, float(miss_reward), dtype=torch.float32)
     matched = ranks > 0

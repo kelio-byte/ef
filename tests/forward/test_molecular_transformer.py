@@ -116,12 +116,14 @@ def test_forward_beam_reconstruction_rank_and_reward_use_source_cache() -> None:
 
     scorer = FakeBeamScorer()
     cache = {}
+    stats = {}
     ranks = forward_beam_reconstruction_rank(
         scorer,
         ["C C", "C C"],
         ["C O", "C"],
         beam_size=2,
         cache=cache,
+        stats=stats,
     )
     rewards = forward_beam_reconstruction_reward(
         scorer,
@@ -133,6 +135,8 @@ def test_forward_beam_reconstruction_rank_and_reward_use_source_cache() -> None:
     assert ranks.tolist() == [1, 2]
     assert rewards.tolist() == [1.0, 0.5]
     assert scorer.calls == 1
+    assert stats["generated_source_count"] == 1
+    assert stats["deduplicated_input_count"] == 1
 
 
 def test_forward_beam_reconstruction_can_canonicalize_equivalent_sources() -> None:

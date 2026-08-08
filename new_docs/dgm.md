@@ -942,6 +942,32 @@ Top-1/3/10”的进入门槛，但还没有证明 learned guidance 有效。下�
 product 至少 4 个独立 Euler 终点、每终点 1 个随机中间时间，先审计 product 内 reward range、
 高低 reward 与正确性的关系和生成成本；只有数据门槛通过才训练新的 guidance。
 
+##### 多终点 guidance pilot（2026-08-08）
+
+数据脚本保持 ordinary Euler 不变，使用 `n_samples=4, time_samples=1, n_steps=100`。train
+取前 1,000 个 original products，validation 取独立 split 的 reaction 0–199；validation
+seed=4242，且不与后续 accuracy A/B 的 reaction 200–399、400–599 重叠。RTX 3090 上先比较
+product batch 32/64：前者为 **26.90 records/s、0.55/1.26GB allocated/reserved**，后者为
+**24.72 records/s、0.86/2.27GB**，因此正式 pilot 选择 32。
+
+| split | products/records | Euler wall | reward wall | 多终点组 | reward 可变组 | 平均 reward range | beam hit |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| train | 1,000 / 4,000 | 121.7s | 113.7s | 85.2% | 453（45.3%） | 0.4085 | 56.75% |
+| validation | 200 / 800 | 25.2s | 23.4s | 85.0% | 88（44.0%） | 0.3925 | 60.75% |
+
+旧数据每个 product 只有一个终点，40,003 个组中 reward 可变组为 0；新数据在两个 split 上
+都稳定达到约 44–45%，因此通过“同一条件下存在可学习 reward 对比”的数据门槛。reward 脚本
+现会分别记录合法/非法输入、唯一 canonical source、真实生成数和去重复用数，不再把非法输入
+误写为 cache hit；同时记录组大小、unique terminal 和 reward range。
+
+随后在 pilot 上训练 500 steps（8 epochs，batch 64），wall **112.3s**、峰值
+allocated/reserved **2.02/2.88GB**。完整 validation loss 在 step 100/200/300/400/500 为
+**0.9495/0.9368/0.7825/0.7384/0.7728**，所以选择 step 400 的 `guidance_best.pt`。held-out
+有效 action 行为 698/800，全局 reward–selected-H Pearson **0.6474**；reward>0/等于0 的
+selected-H 均值为 **0.6308/0.2596**。同 product 的 216 个 unequal-reward pair 上，H 排序
+正确率 **61.11%**（随机为 50%）。这通过了小规模可学习性门槛，但尚未证明采样 Top-k 提升；
+下一步固定 ordinary Euler validation-A，先测保守 `β=0.10`，再决定是否扩大正式数据。
+
 **方法限制。** `apply_action_guidance()` 当前在每个位置保持基础模型的总 edit rate，只在
 该位置内部重分配 insert/substitute/delete/token。因此它不能把编辑概率从错误位置移到正确
 位置，也不能增强低 rate 位置的纠错或抑制某位置的全部编辑；这保证数值稳定，但不是 exact
@@ -1012,7 +1038,7 @@ parameterization、归一化或现有 sampler。该接口与映射测试均通�
 | 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | balanced action-level 训练、held-out 校准和成本测量完成 |
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 机制通过；validation-200 validity reward 未提升 Top-k，默认关闭 |
 | 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 暂缓，等待更有信息量的 forward reward |
-| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分；guided Top-k 门槛通过 | teacher-forced guidance 未通过；新 forward-beam reward 在独立 validation-B 的 AUC、Top-1/3/10 与效率门槛通过，下一步重建多终点 guidance 数据 |
+| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分；guided Top-k 门槛通过 | forward-beam reward、独立 validation-B rerank、多终点数据和 pilot 可学习性已通过；等待 ordinary Euler guided Top-k A/B |
 | 8 | 严格 Z-space DGM | GAP/变长动作映射明确；synthetic 和 identity-limit 测试通过；才可使用 exact DGM 表述 | DG-0 映射审计、DG-1 action-weight identity、固定坐标 toy 已通过；高比例非双射插入使完整 exact sampler 暂未开始 |
 
 任何阶段只达到“代码能运行”而没有达到对应栏的正确性和对照门槛，都不记为通过。

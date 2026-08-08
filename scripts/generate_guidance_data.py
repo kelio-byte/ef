@@ -170,6 +170,8 @@ def generate(args: argparse.Namespace) -> dict:
             f"output already exists: {output}; pass --overwrite to replace it"
         )
     device = torch.device(args.device)
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
     (
         checkpoint_data, cfg, model, token2id, id2token,
         sample_scheduler, train_scheduler, use_origin_mask,
@@ -282,7 +284,17 @@ def generate(args: argparse.Namespace) -> dict:
                 f"{len(products)} | elapsed {elapsed:.1f}s | ETA {eta:.1f}s",
                 flush=True,
             )
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
     generation_elapsed = time.perf_counter() - generation_started
+    peak_cuda_allocated = (
+        int(torch.cuda.max_memory_allocated(device))
+        if device.type == "cuda" else 0
+    )
+    peak_cuda_reserved = (
+        int(torch.cuda.max_memory_reserved(device))
+        if device.type == "cuda" else 0
+    )
     metadata = {
         "schema_version": 1,
         "checkpoint": str(Path(args.checkpoint).resolve()),
@@ -301,6 +313,9 @@ def generate(args: argparse.Namespace) -> dict:
         "train_scheduler": train_scheduler.name,
         "model_vocab": checkpoint_data.get("model_vocab", len(token2id)),
         "generation_wall_seconds": generation_elapsed,
+        "generation_records_per_second": len(records) / generation_elapsed,
+        "peak_cuda_allocated_bytes": peak_cuda_allocated,
+        "peak_cuda_reserved_bytes": peak_cuda_reserved,
         "batch_count": total_batches,
     }
     save_guidance_dataset(output, records, metadata=metadata)
@@ -312,6 +327,9 @@ def generate(args: argparse.Namespace) -> dict:
         "reward_mean": float(reward_values.mean().item()) if records else 0.0,
         "reward_positive": int(reward_values.sum().item()) if records else 0,
         "wall_seconds": generation_elapsed,
+        "records_per_second": len(records) / generation_elapsed,
+        "peak_cuda_allocated_bytes": peak_cuda_allocated,
+        "peak_cuda_reserved_bytes": peak_cuda_reserved,
     }
     print(summary)
     return summary

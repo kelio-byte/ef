@@ -93,6 +93,7 @@ def run(args: argparse.Namespace) -> dict:
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
     cache: dict[str, list[str]] = {}
+    generation_stats: dict[str, int] = {}
     started = time.perf_counter()
     ranks = forward_beam_reconstruction_rank(
         scorer,
@@ -105,6 +106,7 @@ def run(args: argparse.Namespace) -> dict:
         forbid_unk=args.forbid_unk,
         canonicalize_source=args.canonicalize_source,
         cache=cache,
+        stats=generation_stats,
     )
     if device.type == "cuda":
         torch.cuda.synchronize(device)
@@ -156,6 +158,7 @@ def run(args: argparse.Namespace) -> dict:
         "batch_size": args.batch_size,
         "canonicalize_source": args.canonicalize_source,
         "unique_generated_sources": len(cache),
+        "generation_input_stats": generation_stats,
         "reconstruction_rank_counts": rank_counts,
         "reconstruction_hit_rate": float((ranks > 0).float().mean()),
         "correct_candidate_count": int(positive.sum()),
