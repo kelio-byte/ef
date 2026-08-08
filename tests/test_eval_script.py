@@ -65,6 +65,18 @@ def test_sample_command_carries_current_euler_beam_settings():
     assert "--euler_beam_share_identical_forwards" in rendered
 
 
+def test_sample_command_carries_optional_guidance_settings():
+    args = _args(
+        "--sampler", "euler",
+        "--guidance_checkpoint", "guidance.pt",
+        "--guidance_beta", "0.1",
+    )
+    command = eval_script.build_sample_command(args)
+    rendered = " ".join(command)
+    assert "--guidance_checkpoint guidance.pt" in rendered
+    assert "--guidance_beta 0.1" in rendered
+
+
 def test_score_command_defaults_to_top10_diagnostics():
     args = _args()
     command = eval_script.build_score_command(

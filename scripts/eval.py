@@ -75,6 +75,17 @@ def build_parser() -> argparse.ArgumentParser:
     sampling.add_argument("--device", default="cuda")
     sampling.add_argument("--seed", type=int, default=42)
     sampling.add_argument("--scheduler", choices=["cubic", "linear"])
+    sampling.add_argument(
+        "--guidance_checkpoint",
+        default=None,
+        help="Optional action-level guidance checkpoint (ordinary Euler only)",
+    )
+    sampling.add_argument(
+        "--guidance_beta",
+        type=float,
+        default=1.0,
+        help="Exponent applied to action guidance weights",
+    )
     sampling.add_argument("--n_branches", type=int, default=3)
     sampling.add_argument("--n_children", type=int, default=2)
     sampling.add_argument("--n_runs", type=int, default=3)
@@ -201,6 +212,11 @@ def build_sample_command(args: argparse.Namespace) -> list[str]:
     _add_value(command, "--data_dir", args.data_dir)
     _add_value(command, "--vocab_file", args.vocab_file)
     _add_value(command, "--scheduler", args.scheduler)
+    if args.guidance_checkpoint is not None:
+        command.extend((
+            "--guidance_checkpoint", args.guidance_checkpoint,
+            "--guidance_beta", str(args.guidance_beta),
+        ))
     _add_value(
         command,
         "--euler_beam_initial_seed_groups",

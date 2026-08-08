@@ -132,6 +132,9 @@ def run(args: argparse.Namespace) -> dict:
     epochs_completed = 0
     last_train_metrics: dict[str, float] = {}
     last_val_metrics: dict[str, float] = {}
+    best_validation_loss = float("inf")
+    best_validation_step = 0
+    best_checkpoint_path = output_dir / "guidance_best.pt"
     stop = False
     for epoch in range(args.epochs):
         if stop:
@@ -184,6 +187,28 @@ def run(args: argparse.Namespace) -> dict:
                         f"validation step {global_step} | "
                         f"loss {last_val_metrics['loss']:.6f}", flush=True,
                     )
+                    if last_val_metrics["loss"] < best_validation_loss:
+                        best_validation_loss = last_val_metrics["loss"]
+                        best_validation_step = global_step
+                        torch.save({
+                            "schema_version": 1,
+                            "checkpoint_type": "best_validation",
+                            "selection_metric": "validation/loss",
+                            "model_state_dict": model.state_dict(),
+                            "config": config,
+                            "train_metadata": train_dataset.metadata,
+                            "val_metadata": val_dataset.metadata,
+                            "global_step": global_step,
+                            "epochs_completed": epoch + 1,
+                            "best_validation_loss": best_validation_loss,
+                            "best_validation_step": best_validation_step,
+                            "last_train_metrics": last_train_metrics,
+                            "last_val_metrics": last_val_metrics,
+                            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+                        }, best_checkpoint_path)
+                    writer.add_scalar(
+                        "validation/best_loss", best_validation_loss, global_step,
+                    )
             if args.max_steps > 0 and global_step >= args.max_steps:
                 stop = True
                 break
@@ -214,6 +239,13 @@ def run(args: argparse.Namespace) -> dict:
         "peak_memory_reserved_bytes": peak_memory_reserved,
         "last_train_metrics": last_train_metrics,
         "last_val_metrics": last_val_metrics,
+        "best_validation_loss": (
+            best_validation_loss if best_validation_step else None
+        ),
+        "best_validation_step": best_validation_step or None,
+        "best_checkpoint": (
+            str(best_checkpoint_path) if best_validation_step else None
+        ),
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     checkpoint_path = output_dir / "guidance_final.pt"
@@ -230,6 +262,13 @@ def run(args: argparse.Namespace) -> dict:
         "peak_memory_reserved_bytes": peak_memory_reserved,
         "last_train_loss": last_train_metrics.get("loss"),
         "last_validation_loss": last_val_metrics.get("loss"),
+        "best_validation_loss": (
+            best_validation_loss if best_validation_step else None
+        ),
+        "best_validation_step": best_validation_step or None,
+        "best_checkpoint": (
+            str(best_checkpoint_path) if best_validation_step else None
+        ),
     }
     print(summary)
     return summary

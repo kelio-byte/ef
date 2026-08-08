@@ -143,8 +143,8 @@ def guidance_action_loss(
         )
         selected_rows = total_selected > 0
         corr = _safe_pearson_correlation(
-            reward,
-            selected_guidance,
+            reward[selected_rows],
+            selected_guidance[selected_rows],
         )
         metrics = {
             "loss": float(loss.item()),
@@ -160,6 +160,7 @@ def guidance_action_loss(
             "background_loss_weight": float(background_loss_weight),
             "reward_mean": float(reward.float().mean().item()),
             "selected_action_fraction": float(selected.item()),
+            "selected_row_fraction": float(selected_rows.float().mean().item()),
             "selected_guidance_mean": float(
                 selected_guidance[selected_rows].mean().item()
                 if selected_rows.any() else 0.0
