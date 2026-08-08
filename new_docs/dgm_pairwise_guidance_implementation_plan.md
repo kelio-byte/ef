@@ -2,7 +2,7 @@
 
 > 日期：2026-08-08
 > 执行对象：后续 GPT-Luna / 项目维护者
-> 状态：P0–P3 代码实现、CPU 定向测试和 CLI smoke 已完成；P4 GPU smoke 待执行
+> 状态：P0–P4 代码实现与 smoke 已完成；P5 1k pilot 待执行
 > 研究路线：继续改进 learned action-level approximate DGM；本阶段不做 terminal reranker
 > 校准，也不进入 exact Z-space 重写。
 
@@ -433,6 +433,18 @@ GPU smoke 只取极小 record/step，验证：
 - `β=0` 仍与无 guidance 的 Euler 输出 byte-level 相同。
 
 P4 通过条件：targeted tests 全过、无新增 full-suite failure、GPU smoke 全过。
+
+#### P4 当前实现记录（2026-08-08）
+
+- guidance/forward 定向回归：**53 passed**；全量 pytest：**285 passed, 17 failed**。17 个 failure
+  均为既有 `tests/sampling/test_beam.py` 的 `EditCandidate(log_u_real)` API 和 controlled-model
+  长度问题，本任务没有新增 failure。
+- RTX 3090 CUDA 1-step pairwise smoke 通过，缩小模型 peak allocated/reserved 为
+  **60.4/86.0 MB**，CUDA evaluator 也能输出有限指标。
+- 用同一 seed、`n_steps=2`、20 条 augmentation 做实际 `sample_retro.py` 对照，baseline 与
+  `guidance_beta=0` predictions SHA256 完全一致（`32c12c…f8b5d45`）；因此新 guidance 接口
+  的 identity-limit 在真实 CUDA sampler 上成立。
+- 该 smoke 只验证正确性和调用链，不提供 pairwise 准确率结论；现在进入 P5 1k pilot。
 
 ### P5：1k pilot，禁止直接上 10k
 

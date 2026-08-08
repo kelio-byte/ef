@@ -1434,7 +1434,13 @@ P0–P3 已完成，尚未运行 GPU pilot：
 - P3 定向回归为 **53 passed**。缩小模型的 1-step CPU pairwise、guarded checkpoint、旧默认
   路径和 checkpoint loader smoke 均通过；当前没有 Top-k 或 pairwise accuracy 实验结论。
 
-当前正在进入 P4：先做 CUDA smoke（验证显存、梯度、checkpoint 和 `β=0` identity），再按预注册
-`lambda_pair=0/0.25/1.0` 在 1k 数据上训练。只有两个 seed 的 shared-anchor pair accuracy 相对
-control 平均提升至少 3 个百分点、Bregman guardrail 和效率门槛同时通过，才扩大到 10k；在此
-之前不扫描其它 lambda、不接 Euler-Beam。
+P4 CUDA smoke 已完成：RTX 3090 上缩小模型 1-step 训练/validation、CUDA evaluator 和真实
+`sample_retro.py` 调用均通过；同 seed、`n_steps=2`、20 条 augmentation 的 baseline 与
+`guidance_beta=0` predictions SHA256 完全一致（`32c12c…f8b5d45`）。定向回归为 **53 passed**；
+全量测试为 **285 passed, 17 failed**，17 个 failure 均为既有 beam 测试 API/controlled-model
+问题。
+
+当前进入 P5：按预注册 `lambda_pair=0/0.25/1.0` 在 1k 数据上训练。只有两个 seed 的
+shared-anchor pair accuracy 相对 control 平均提升至少 3 个百分点、Bregman guardrail 和效率
+门槛同时通过，才扩大到 10k；在此之前不扫描其它 lambda、不接 Euler-Beam。P4 smoke 不提供
+pairwise 准确率结论。
