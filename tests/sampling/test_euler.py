@@ -4,6 +4,7 @@ import torch.nn as nn
 from edit_flows.sampling.euler import (
     _compute_model_time,
     _event_probability,
+    get_euler_step_times,
     _sample_edit_actions,
     get_adaptive_h,
     sample_euler,
@@ -28,6 +29,11 @@ class TestGetAdaptiveH:
         h_mid = get_adaptive_h(0.1, t_mid, scheduler)
         h_end = get_adaptive_h(0.1, t_end, scheduler)
         assert h_end.item() < h_mid.item()
+
+    def test_step_times_use_actual_adaptive_endpoint(self):
+        times = get_euler_step_times(100, CubicScheduler())
+        assert abs(times[50] - 0.5) < 1e-6
+        assert times[-1] >= 1.0
 
 
 class TestEventProbability:

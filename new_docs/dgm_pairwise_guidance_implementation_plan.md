@@ -574,6 +574,11 @@ P5b 结论：不是继续调 lambda 或换 seed，而是先修正数据定义。
 4/4 组 `state` 相同、4/4 组 `time` 相同，4/4 组的两个 terminal 不同。该 smoke 只验证 continuation
 正确性和批量效率，不提供准确率结论。
 
+随后发现 adaptive endpoint 可能使 `n_steps=100` 的轨迹包含 101 个增量，不能用
+`anchor_index / actual_steps` 近似时间。新增 `get_euler_step_times()` 复现真实 step schedule，
+并要求 trajectory/time 长度一致；修正后的 full-step smoke 的第 50 步时间为 **0.49999979**。
+修正前生成的 `train_shared_anchor1000_validity.pt` 不进入任何 reward 或训练实验，必须覆盖重生成。
+
 下一步实验顺序固定为：
 
 1. 用该脚本在隔离目录生成 1k products、每组 4 children 的 validity 数据；

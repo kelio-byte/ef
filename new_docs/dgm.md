@@ -1460,4 +1460,6 @@ P5c 已完成最小实现：`sample_euler` 支持从中间 state/time continuati
 `scripts/generate_shared_anchor_guidance.py` 以 prefix 一次、批量 continuation 多个 terminal。
 真实 checkpoint 的 CUDA smoke（4 products、2 children、4 steps）耗时 **0.799s**，峰值
 allocated/reserved **234/247MB**；4/4 组 state/time 完全相同且 terminal 均有两个不同结果。
-这只是数据结构和效率 smoke，下一步才在隔离的 1k shared-anchor 数据上重新比较 pairwise。
+这只是数据结构和效率 smoke，下一步才在隔离的 1k shared-anchor 数据上重新比较 pairwise。另对
+adaptive endpoint 做了 correctness 修正：第 50 个 state 的真实时间由 `get_euler_step_times()`
+计算（full-step smoke 为 0.49999979），不再用轨迹长度近似；修正前生成的 1k 文件作废。

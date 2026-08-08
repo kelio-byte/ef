@@ -283,6 +283,36 @@ def get_adaptive_h(
     return h_adapt
 
 
+def get_euler_step_times(
+    n_steps: int,
+    scheduler: KappaScheduler,
+    *,
+    device: Optional[torch.device] = None,
+) -> list[float]:
+    """Return the exact scalar time at each Euler trajectory state.
+
+    ``sample_euler`` uses an adaptive final step, so a trajectory can contain
+    one more increment than ``n_steps`` due to floating-point endpoint
+    handling.  Callers that resume from a recorded trajectory must use these
+    times rather than ``index / len(trajectory)``.
+    """
+    if n_steps < 1:
+        raise ValueError("n_steps must be positive")
+    time_device = device or torch.device("cpu")
+    t = torch.zeros(1, 1, device=time_device, dtype=torch.float32)
+    times = [0.0]
+    max_iterations = max(10 * n_steps, 100)
+    for _ in range(max_iterations):
+        if bool((t >= 1.0).all().item()):
+            return times
+        adapt_h = get_adaptive_h(1.0 / n_steps, t, scheduler)
+        t = t + adapt_h
+        times.append(float(t.item()))
+    raise RuntimeError(
+        "Euler adaptive schedule did not reach t=1 within the iteration guard"
+    )
+
+
 def _compute_model_time(
     t: Tensor,
     sample_scheduler: KappaScheduler,

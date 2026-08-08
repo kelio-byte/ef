@@ -23,7 +23,7 @@ import torch
 
 from edit_flows.guidance.data import make_guidance_record, save_guidance_dataset
 from edit_flows.guidance.rewards import retro_tokenized_validity_reward
-from edit_flows.sampling.euler import sample_euler
+from edit_flows.sampling.euler import get_euler_step_times, sample_euler
 
 try:  # Works both as ``python scripts/foo.py`` and as a test import.
     from scripts.generate_guidance_data import (
@@ -97,6 +97,13 @@ def generate(args: argparse.Namespace) -> dict:
         [token2id.get(token, unk_id) for token in product.split()]
         for product in products
     ]
+    step_times = get_euler_step_times(args.n_steps, sample_scheduler)
+    if anchor_index >= len(step_times) - 1:
+        raise RuntimeError(
+            f"Euler produced only {len(step_times) - 1} steps, cannot use "
+            f"anchor step {anchor_index}"
+        )
+    anchor_time = step_times[anchor_index]
 
     records = []
     started = time.perf_counter()
@@ -128,13 +135,12 @@ def generate(args: argparse.Namespace) -> dict:
             use_origin_mask=False,
         )
         actual_steps = len(trajectory) - 1
-        if anchor_index >= actual_steps:
+        if actual_steps != len(step_times) - 1:
             raise RuntimeError(
-                f"Euler produced only {actual_steps} steps, cannot use "
-                f"anchor step {anchor_index}"
+                "trajectory/time schedule length mismatch: "
+                f"trajectory={actual_steps}, schedule={len(step_times) - 1}"
             )
         anchor_state = trajectory[anchor_index].to(device)
-        anchor_time = anchor_index / actual_steps
 
         # Repeat the anchor and product in one batch.  This is the critical
         # vectorization point: model calls are per continuation batch, not per
