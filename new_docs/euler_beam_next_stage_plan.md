@@ -2483,7 +2483,7 @@ steps、seed42 的固定预算对照中：
 | guidance off | 51.0% | 66.5% | 72.0% | 77.0% | 83.5% | 86.5% | 11.675/11.225/12.425% | 2.474 | 253.0s |
 | forward guidance, β=1.00 | 50.0% | 67.0% | 71.5% | 77.0% | 80.5% | 83.0% | 11.850/11.500/11.775% | 2.271 | 379.2s |
 | forward guidance, β=0.25 | 52.5% | 65.5% | 71.5% | 78.5% | 82.5% | 85.5% | 11.325/11.825/12.525% | 2.380 | 380.1s |
-| forward guidance, β=0.10 (充分训练) | 53.0% | 66.0% | 71.5% | 77.0% | 83.0% | 86.0% | 11.975/11.500/12.850% | 2.494 | 380.0s |
+| forward guidance, β=0.10 (2,500-step) | 53.0% | 66.0% | 71.5% | 77.0% | 83.0% | 86.0% | 11.975/11.500/12.850% | 2.494 | 380.0s |
 
 为排除 adapter 欠训练，又保持上述所有采样条件不变，将同一架构训练到 2,500 steps（两遍
 train data）。训练 wall **644.5s**、峰值显存 allocated/reserved **2.24/5.11GB**，
@@ -2494,10 +2494,10 @@ sampling wall **378.8s**。相对于 pilot，Top-1 再升 1.0 个百分点，但
 Oracle 分别再降 2.0、1.0、0.5 个百分点；继续训练没有恢复覆盖。
 
 β=0.25 虽然 Top-1 比 baseline 高 1.5 个百分点，但 Top-3、Top-10、Oracle 分别低
-0.5、1.0、1.0 个百分点；β=1.0 的 Top-10/Oracle 下降 3.0/3.5 个百分点。充分训练
+0.5、1.0、1.0 个百分点；β=1.0 的 Top-10/Oracle 下降 3.0/3.5 个百分点。2,500-step
 adapter 的 β=0.10 将 Top-1 提高 2.0 个百分点，但 Top-3/Top-10 各低 0.5、Oracle 低
 0.5 个百分点。guided wall 约为 baseline 的 **1.50×**。因此 forward reward 的“可学习”
-门槛通过，固定预算准确率门槛未通过；不接入默认 Euler-Beam/SMC。pilot、充分训练和
+门槛通过，固定预算准确率门槛未通过；不接入默认 Euler-Beam/SMC。pilot、2,500-step 和
 β=0.10 都未通过，后续应转向独立 reward 校准、终点/候选级的受约束使用，或严格 Z-space
 研究，并在不重叠 validation 上复核，不使用 test 调 β。
 
@@ -2672,7 +2672,7 @@ Euler guidance off/on。
 - ordinary Euler guidance identity 与 validation-200 对照代码：`2a5a078`
 - validation-200 validity guidance 结论：`8bf9c8f`
 - Molecular Transformer 兼容加载、tokenizer、forward reward adapter：`8ae00b9`
-- forward guidance data、pilot/充分训练/β 对照文档：`7514e1e`, `f2a1489`, `39be0dd`, `c9bf3bd`
+- forward guidance data、pilot/2,500-step/β 对照文档：`7514e1e`, `f2a1489`, `39be0dd`, `c9bf3bd`
 - DG-0 Z-space 映射、DG-1 action-weight identity、fixed-coordinate toy：`b22f2d7`, `32aaa0f`, `3553b9e`
 - 可复现 Z-space 审计脚本与最终记录：`f382dd8`
 
@@ -2772,11 +2772,11 @@ Record final Top-k and performance validation
 
 代码/数据资产：`7514e1e`（forward guidance data）；pilot checkpoint 和三组采样结果均
 保存在 `/root/autodl-tmp/dgm_guidance_runs/` 外部实验目录，未写入 Git。结果已在本文和
-`new_docs/dgm.md` 中登记；pilot/充分训练/低强度复核的文档提交分别为 `f2a1489`、
+`new_docs/dgm.md` 中登记；pilot/2,500-step/低强度复核的文档提交分别为 `f2a1489`、
 `39be0dd`、`c9bf3bd`。
 
 通过项：Molecular Transformer 兼容加载、官方 tokenizer、reactants→product 方向、批量
-缓存、forward reward/H 的可学习性。pilot、2,500-step 充分训练和 β=0.10 低强度复核都未通过在
+缓存、forward reward/H 的可学习性。pilot、2,500-step 和 β=0.10 低强度复核都未通过在
 200 个完整 validation reaction 的固定预算上同时保持覆盖和 Top-3/10/Oracle 的门槛。
 当前默认采样配置不变，forward reward 仅作为后续校准和诊断资产。
 
@@ -2808,3 +2808,50 @@ Z-state transition，或明确采用 action-level approximate guidance。该审�
 该 DG-1 接口不改变 rate parameterization、采样归一化或默认 sampler，为后续 fixed-Z
 实验提供唯一可测试的 action-weight 入口。新增固定坐标 toy 的 `q(z)∝p(z)R(z)` 经验分布
 测试通过，说明密度比代数本身正确；当前阻塞来自变长 X-space 坐标映射，而不是 DGM 代数。
+
+### 34.M Guidance baseline 全审计与 5,000-step 复核（2026-08-08）
+
+状态：`[x]` baseline/数据/reward/loss/inference 调用链审计；`[x]` 5,000-step 单变量训练；
+`[x]` validation-200 `β=0.10/0.25`；`[x]` 诊断修复、best checkpoint 和统一 eval 参数；
+`[ ]` 新 reward qualification 与多终态 guidance 数据。
+
+Baseline 的 checkpoint、`use_origin_mask=False`、seed、`[4000,8000)` 输入区间、augmentation、
+12,000 行预测、`target_offset=200` 和评分 SHA 均对齐；guidance-off 与 `β=0` 已有字节级
+identity。没有发现 baseline 指标被错误计算。这里的 baseline 是 ordinary Euler 隔离对照，
+不是最终 Euler-Beam R9K1M2 方法基线。
+
+核心问题按优先级为：
+
+1. 当前 40,003 个 train product 每个只有 1 个终态，`time_samples=2` 只复制同一 reward，
+   product 内 reward 对比为零；
+2. Molecular Transformer teacher-forced score 对 validation 单终态 correctness 的 AUC 仅
+   **0.5639**，raw rerank 也已显著伤害 Top-1；
+3. action mask 高度偏向 insert，含 delete 的 validation 行仅 **1.63%**，13.17% 行没有
+   任何目标 action；
+4. 旧 Pearson 把无目标行的零值混入。修正后 2,500-step 全 validation selected-only
+   Pearson 为 **0.665**，不是旧日志的 0.521；
+5. 当前 sampler 每个位置保持原总 edit rate，guidance 不能在位置间转移编辑概率，也不能
+   改变某位置的总 hazard；这是稳定的 action-level 近似，不是 exact DGM；
+6. inference 每步重复编码不变 product；training 每 epoch 在 CPU 重算 alignment/mask，均有
+   明确效率优化空间。
+
+5,000-step 训练 wall **1,277.3s**，峰值 allocated/reserved **2.24/5.12GB**；validation
+loss 在 step 4,500 最低 **0.317587**，final 为 **0.321113**，selected-only Pearson final
+**0.6801**。因此训练脚本新增 `guidance_best.pt`，并修正相关性统计；`scripts/eval.py` 现可
+透传 `--guidance_checkpoint/--guidance_beta`。相关定向测试 **36 passed**，1-step CPU
+checkpoint smoke 同时生成并读取 best/final 成功。最终扩大后的相关测试集合为 **70 passed**；
+全量回归为 **266 passed / 17 failed**，17 项仍全部来自既有 `tests/sampling/test_beam.py`
+的 `log_u_real`/`log_u` API 漂移及一个受影响的 controlled-model 长度用例，与本阶段改动无关。
+
+| 配置 | Top-1 | Top-3 | Top-10 | Oracle | invalid@1 | sampling wall |
+|---|---:|---:|---:|---:|---:|---:|
+| off | 51.0% | 72.0% | 83.5% | 86.5% | 11.675% | 253.0s |
+| 5k, β=0.10 | 52.5% | 71.0% | 82.0% | 87.5% | 11.200% | 380.4s |
+| 5k, β=0.25 | 54.0% | 70.5% | 82.0% | 85.0% | 12.375% | 381.3s |
+
+结论：更长训练能提高 action reward 相关性，但没有消除 Top-1 与 Top-3/10/Oracle 的权衡，
+当前数据不再跑 10k。下一阶段先提高并独立验证 reward：优先尝试 forward beam 重建 product
+或基于 train 正例/Euler 负例的 contrastive calibration，并在 validation-B 设门槛；通过后
+才生成每 product 至少 4 个独立终态、每终态 1 个随机时间的数据。随后用 best checkpoint
+做 5k，并对 per-position rate preservation 与 per-sample global rate preservation 做单变量
+消融；ordinary Euler 在 validation-A/B 通过后才接 R9K1M2。

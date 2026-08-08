@@ -6,16 +6,17 @@
 
 ## 0. 环境和路径
 
-项目当前使用的 Python 环境是 `/root/autodl-tmp/ef/bin/python`。建议每次打开终端后先设置变量：
+项目当前使用 Conda 环境 `ef`。建议每次打开终端后先激活并设置变量：
 
 ```bash
 cd /root/autodl-tmp/edit_flows
-export PY=/root/autodl-tmp/ef/bin/python
+source /root/miniconda3/etc/profile.d/conda.sh
+conda activate ef
+export PY=python
 export DATA='datasets/USPTO_50K_PtoR_aug20_#global#'
 ```
 
-不要依赖 `source /root/autodl-tmp/ef/bin/activate`：当前环境没有标准的 `activate` 文件，直接使用
-`$PY` 最稳定。
+新机器的 Conda 安装路径如果不同，用 `conda info --base` 找到对应的 `etc/profile.d/conda.sh`。
 
 常用数据文件：
 
@@ -205,6 +206,29 @@ $PY scripts/eval.py \
 - `--process_number`：打分阶段的 CPU 进程数，过大可能与采样抢 CPU；
 - `--save_file`、`--save_accurate_indices`：保存详细结果及命中样本索引。
 
+### 4.5 DGM / Guidance 对照（当前仅 ordinary Euler）
+
+`eval.py` 可以把独立 guidance checkpoint 透传给 `sample_retro.py`：
+
+```bash
+$PY scripts/eval.py \
+  --checkpoint new_checkpoints/checkpoint_step600000.pt \
+  --products_file "$DATA/val/src-val.txt" \
+  --targets "$DATA/val/tgt-val.txt" \
+  --output_dir results/dgm_val200_beta010 \
+  --sampler euler --n_samples 3 --n_steps 100 \
+  --batch_size 64 --device cuda --seed 42 \
+  --start_product 4000 --max_products 4000 --augmentation 20 \
+  --guidance_checkpoint /path/to/guidance_best.pt \
+  --guidance_beta 0.10 --n_best 10
+```
+
+先加 `--dry_run` 检查内部命令；上例会自动推导为 validation reaction 200–399、
+`target_offset=200`。当前 guidance 只支持 `--sampler euler`，尚未通过综合准确率门槛，默认
+推理不要添加这两个参数。guidance 训练使用 `scripts/train_guidance.py`；有 validation 时会
+同时保存 `guidance_final.pt` 和按最低 validation loss 选择的 `guidance_best.pt`，正式采样
+优先使用后者。训练/数据生成的完整研究协议见 `new_docs/dgm.md`。
+
 ## 5. 分离运行采样和打分
 
 需要调试中间文件时使用 `sample_retro.py`：
@@ -390,4 +414,4 @@ A6000 使用通用 CUDA 路径，与 3090 可运行同一代码。为了复现�
 确认流程后，再用短 smoke test 比较 `num_workers=2/4/8` 的实际 step throughput；worker 数量主要消耗
 CPU/RAM，不能仅凭 GPU 显存大小决定。
 
-最后更新：2026-08-06
+最后更新：2026-08-08
