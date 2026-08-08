@@ -968,6 +968,18 @@ selected-H 均值为 **0.6308/0.2596**。同 product 的 216 个 unequal-reward 
 正确率 **61.11%**（随机为 50%）。这通过了小规模可学习性门槛，但尚未证明采样 Top-k 提升；
 下一步固定 ordinary Euler validation-A，先测保守 `β=0.10`，再决定是否扩大正式数据。
 
+validation-A reaction 200–399 的固定预算采样结果为：Top-1/2/3/5/10
+**49.5/67.0/72.5/79.5/84.0%**、Oracle **86.5%**、wall **372.2s**；对应 baseline 为
+**51.0/66.5/72.0/77.0/83.5%**、Oracle **86.5%**、wall **253.0s**。因此 pilot 改善
+Top-2/3/5/10（其中 Top-5 +2.5 点），但 Top-1 降 1.5 点，未通过默认方法的综合门槛。
+它证明 action-level sampler 能利用部分新信号，却不足以支持在 200 个反应上继续扫描 β。
+
+下一步扩大到 train 10,000 products / 40,000 records；这是 batch 64 下训练 5,000 steps 约
+8 epochs 的中等规模，而不是直接生成 full-40k products。已有 validation-800 reward 对照中，
+beam batch 8/16/32 wall 为 **23.40/19.01/19.36s**，rank/reward 逐项相同，因此后续固定
+`batch_size=16`。按 pilot 吞吐估算 10k 的 Euler/reward 分别约 20/16 分钟；只有更大数据的
+held-out calibration 与 validation-A/B 通过后，才考虑 full-40k 或 Euler-Beam。
+
 **方法限制。** `apply_action_guidance()` 当前在每个位置保持基础模型的总 edit rate，只在
 该位置内部重分配 insert/substitute/delete/token。因此它不能把编辑概率从错误位置移到正确
 位置，也不能增强低 rate 位置的纠错或抑制某位置的全部编辑；这保证数值稳定，但不是 exact
@@ -1038,7 +1050,7 @@ parameterization、归一化或现有 sampler。该接口与映射测试均通�
 | 4 | 训练 guidance model | loss 有效下降；`H>0`；held-out reward 与 `H` 有稳定相关/校准；训练和推理成本可接受 | balanced action-level 训练、held-out 校准和成本测量完成 |
 | 5 | 普通 Euler 接入 | guidance off/constant 严格回归 baseline；guided log-prob 与采样分布一致；无非法概率 | 机制通过；validation-200 validity reward 未提升 Top-k，默认关闭 |
 | 6 | Euler-Beam/SMC 接入 | 固定总预算下 Top-1 不明显下降，Top-3/10 或 Oracle 在不重叠 validation 稳定改善；ESS 不系统坍缩 | 暂缓，等待更有信息量的 forward reward |
-| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分；guided Top-k 门槛通过 | forward-beam reward、独立 validation-B rerank、多终点数据和 pilot 可学习性已通过；等待 ordinary Euler guided Top-k A/B |
+| 7 | forward reward | Molecular Transformer 方向/tokenization/权重加载通过已知反应 smoke；validation forward 指标可接受；reward 可批量评分；guided Top-k 门槛通过 | forward-beam reward、多终点数据和 pilot 可学习性通过；1k pilot 提升 Top-2～10 但 Top-1 -1.5，现扩大到 10k products 复核，默认仍关闭 |
 | 8 | 严格 Z-space DGM | GAP/变长动作映射明确；synthetic 和 identity-limit 测试通过；才可使用 exact DGM 表述 | DG-0 映射审计、DG-1 action-weight identity、固定坐标 toy 已通过；高比例非双射插入使完整 exact sampler 暂未开始 |
 
 任何阶段只达到“代码能运行”而没有达到对应栏的正确性和对照门槛，都不记为通过。

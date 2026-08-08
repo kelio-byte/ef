@@ -276,14 +276,15 @@ $PY scripts/generate_forward_guidance_data.py \
   --checkpoint new_checkpoints/MIT_mixed_augm_model_average_20.pt \
   --vocab_file "$DATA/example.vocab.src" \
   --reward_mode beam_reconstruction --forward_beam_size 5 \
-  --canonicalize_source --batch_size 8 --device cuda
+  --canonicalize_source --batch_size 16 --device cuda
 ```
 
 第一条命令的 `batch_size` 是同时处理的 product 数，实际终点 batch 为
 `batch_size × n_samples`；RTX 3090 的当前实测中 32 比 64 更快。第二条命令只读取保存的
 product/terminal，不读取反应 target；输出报告中的 `variable_reward_group_fraction` 是判断
 多终点监督是否比旧单终点数据更有信息量的关键指标。本地 guidance `.pt` 数据和 checkpoint
-体积较大，默认不提交 Git。
+体积较大，默认不提交 Git。正向 beam reward 的 batch 8/16/32 实测中 16 最快，故当前推荐 16；
+这与前一条 Euler 数据生成的 product batch 32 是两个不同参数，不要混淆。
 
 ## 5. 分离运行采样和打分
 
