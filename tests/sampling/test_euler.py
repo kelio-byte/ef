@@ -45,6 +45,29 @@ class TestEventProbability:
 
 
 class TestSampleEuler:
+    def test_explicit_zero_start_time_matches_baseline(self, dummy_model):
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+        torch.manual_seed(1234)
+        baseline, _ = sample_euler(
+            dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
+        )
+        torch.manual_seed(1234)
+        explicit, _ = sample_euler(
+            dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
+            start_time=0.0,
+        )
+        assert torch.equal(baseline, explicit)
+
+    def test_start_time_one_is_a_noop(self, dummy_model):
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+        result, trajectory = sample_euler(
+            dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
+            start_time=1.0, record_trajectory=True,
+        )
+        assert torch.equal(result, x_0)
+        assert len(trajectory) == 1
+        assert torch.equal(trajectory[0], x_0)
+
     def test_guidance_beta_zero_matches_baseline(self, dummy_model):
         class ConstantGuidance(nn.Module):
             def __init__(self):

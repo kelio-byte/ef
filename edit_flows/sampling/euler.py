@@ -336,6 +336,8 @@ def sample_euler(
     guidance_product: Optional[Tensor] = None,
     guidance_beta: float = 1.0,
     guidance_rate_normalization: str = "per_position",
+    start_time: Optional[Tensor | float] = None,
+    initial_origin_mask: Optional[Tensor] = None,
 ) -> tuple:
     from edit_flows.analysis.first_step import extract_oracle_event_set
     from edit_flows.sampling.oracle import compute_oracle_model_output
@@ -362,10 +364,42 @@ def sample_euler(
 
     x_t = x_0.to(device)
     if use_origin_mask:
-        origin_mask = torch.ones_like(x_t, dtype=torch.bool, device=device)
+        if initial_origin_mask is None:
+            origin_mask = torch.ones_like(x_t, dtype=torch.bool, device=device)
+        else:
+            if initial_origin_mask.shape != x_t.shape:
+                raise ValueError(
+                    "initial_origin_mask must have the same shape as x_0"
+                )
+            origin_mask = initial_origin_mask.to(device=device, dtype=torch.bool)
     else:
+        if initial_origin_mask is not None:
+            raise ValueError(
+                "initial_origin_mask requires use_origin_mask=True"
+            )
         origin_mask = None
-    t = torch.zeros(batch_size, 1, device=device)
+    if start_time is None:
+        t = torch.zeros(batch_size, 1, device=device)
+    elif isinstance(start_time, Tensor):
+        t = start_time.to(device=device, dtype=torch.float32)
+        if t.ndim == 0:
+            t = t.expand(batch_size).reshape(batch_size, 1)
+        elif t.ndim == 1 and t.shape[0] == batch_size:
+            t = t.unsqueeze(1)
+        elif t.ndim == 2 and t.shape == (batch_size, 1):
+            pass
+        else:
+            raise ValueError(
+                "start_time must be scalar, [batch], or [batch, 1], got "
+                f"{tuple(t.shape)}"
+            )
+    else:
+        t = torch.full(
+            (batch_size, 1), float(start_time),
+            dtype=torch.float32, device=device,
+        )
+    if not torch.isfinite(t).all() or (t < 0).any() or (t > 1).any():
+        raise ValueError("start_time must be finite values in [0, 1]")
     default_h = 1.0 / n_steps
 
     trajectory: List[Tensor] = []
