@@ -1484,3 +1484,19 @@ P5f pilot 已完成：best step 400，Bregman 0.78580，pair acc 56.65%，global
 within-group Pearson 0.1165，wall 228.6s，peak allocated/reserved 2.06/3.44GB。它比未加校准的
 lambda=.25（within Pearson 0.0667）有所修复，但仍低于 control 0.1490，联合门槛失败；因此不
 进入 seed43、10k 或 sampling A/B。
+
+随后按用户请求，对 P5f 的 `guidance_best.pt`（step 400）和 `guidance_final.pt`（step 500）做了
+一次严格配对的 ordinary-Euler Top-k 诊断。数据为未参与 guidance 训练的 validation-A，原始
+reaction 200--399（200 个完整反应）；两次均固定基础 checkpoint、seed=42、`n_steps=100`、
+`n_samples=3`、batch=64、`guidance_beta=0.10`、`per_position`、augmentation=20、
+`legacy_best_rank`、`beam_size=3` 和 `n_best=10`。
+
+| checkpoint | Top-1 | Top-2 | Top-3 | Top-5 | Top-10 | Oracle | invalid@1/2/3 | true unique | sampling wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `guidance_best.pt`（step 400） | 51.0% | 64.5% | 69.0% | 75.0% | 79.0% | **86.5%** | 12.200/11.775/11.825% | **12.070** | 369.4s |
+| `guidance_final.pt`（step 500） | **52.0%** | **67.0%** | **71.0%** | **77.5%** | **80.5%** | 83.5% | **11.600/11.600/13.400%** | 11.935 | 377.8s |
+
+final 在该 split 上的 Top-k 排序优于 best，但 Oracle 低 3 个百分点、真实候选覆盖略低，且采样
+耗时高约 2.3%。因此不能简单地说 final 在所有方面更好：best 更偏向覆盖，final 更偏向已生成候选
+的排序。由于这只是用户要求的 checkpoint 诊断，而非预注册的主模型选择实验，仍保留
+`guidance_best.pt` 作为按验证规则选择的正式 checkpoint；未据此启动 test、10k 或 Euler-Beam。

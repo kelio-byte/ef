@@ -676,6 +676,27 @@ calibration 项相对 P5d 的 lambda=.25（within Pearson 0.0667）确实缓解�
 的 1.94×。因此 P5f 仍未通过联合门槛，不运行 seed43、10k 或 sampling A/B。下一步若继续，
 需要在“rank 优先”和“score calibration 优先”之间明确研究目标，不能再无依据叠加权重。
 
+#### 用户请求的 best/final checkpoint 采样诊断（2026-08-08）
+
+虽然 P5f 未通过进入 sampling A/B 的预注册门槛，但为直接回答 checkpoint 选择问题，额外在
+validation-A（`src-val` 原始 reaction 200--399，200 个完整反应）进行了一个严格配对诊断。
+两次均固定基础 checkpoint `new_checkpoints/checkpoint_step600000.pt`、seed=42、ordinary Euler、
+`n_steps=100`、`n_samples=3`、batch=64、`guidance_beta=0.10`、`per_position`、augmentation=20、
+`legacy_best_rank`、`beam_size=3`、`n_best=10`；只替换 guidance checkpoint。输出和 metadata 保存在
+`/root/autodl-tmp/dgm_guidance_runs/topk_ab_best/` 与 `topk_ab_final/`，不进入 Git。
+
+| checkpoint | Top-1 | Top-2 | Top-3 | Top-5 | Top-10 | Oracle | invalid@1/2/3 | true unique | sampling wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| P5f `guidance_best.pt` (step 400) | 51.0% | 64.5% | 69.0% | 75.0% | 79.0% | **86.5%** | 12.200/11.775/11.825% | **12.070** | 369.4s |
+| P5f `guidance_final.pt` (step 500) | **52.0%** | **67.0%** | **71.0%** | **77.5%** | **80.5%** | 83.5% | **11.600/11.600/13.400%** | 11.935 | 377.8s |
+
+final 在该 validation-A 上的 Top-k 排序更好、Top-1--10 均高于 best（Top-1 +1.0pp、Top-10
++1.5pp），但 Oracle 低 3.0pp、真实候选数略少，第三个独立样本的 invalid 也更高；采样约慢
+2.3%。这说明 validation loss/Bregman、pairwise 选择和最终 Top-k 覆盖不是同一个目标，不能据此
+事后把 final 改成主 checkpoint。该结果仅作为诊断，未改变 P5f 未通过的状态，也不启动 test、10k
+或 Euler-Beam；后续若以 Top-k 为主目标，必须在新的独立 validation split 上预先定义 checkpoint
+选择规则并复核 best/final 的排序--覆盖权衡。
+
 ### P6：10k 训练
 
 只有 P5 通过才执行。使用：
