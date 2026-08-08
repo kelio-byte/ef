@@ -2,7 +2,7 @@
 
 > 日期：2026-08-08
 > 执行对象：后续 GPT-Luna / 项目维护者
-> 状态：P0–P5、P5b、P5c、P5d、P5e 已完成；P5d 排序改善但校准未通过，P6 暂缓
+> 状态：P0–P5、P5b、P5c、P5d、P5e、P5f 已完成；P5f 部分改善但联合门槛未通过，P6 暂缓
 > 研究路线：继续改进 learned action-level approximate DGM；本阶段不做 terminal reranker
 > 校准，也不进入 exact Z-space 重写。
 
@@ -633,7 +633,7 @@ rank accuracy，但当前 `mean(log H)` 排序目标会牺牲与 reward 的连�
 诊断不改变 P5d 的 gate 结论；下一步只研究一个 score-aware calibration 项，禁止继续扫描旧
 lambda 或直接扩大到 10k。
 
-#### P5f：score-aware calibration 小型验证协议（待执行）
+#### P5f：score-aware calibration 小型验证协议与结果（2026-08-08）
 
 P5e 表明 rank loss 单独使用会损害连续校准，因此新增一个默认关闭的 centered/normalized
 within-group calibration loss。它对同一 anchor 的 candidate `mean(log H)` 和 reward 分别去
@@ -660,6 +660,21 @@ steps = 500, batch = 64, same architecture and guard as P5d
 4. 无 NaN、wall 不超过 control 的 2.5 倍。
 
 任一条件失败都不进入 10k 或 sampling A/B；只记录校准项是否改善了 rank/score 的权衡。
+
+#### P5f 实验结果（2026-08-08）
+
+5-step smoke 正常（无 NaN、final checkpoint 可写），正式 500-step pilot 的 best checkpoint 为
+step 400。完整 validation evaluator 结果：
+
+| run | Bregman | pair acc | global Pearson | within-group Pearson | wall | peak allocated/reserved |
+|---|---:|---:|---:|---:|---:|---:|
+| P5d control | 0.69165 | 55.15% | 0.1135 | **0.1490** | 118.0s | 2.03/3.44GB |
+| P5f λ=.25 + cal=.10 | 0.78580 | **56.65%** | 0.0966 | 0.1165 | 228.6s | 2.06/3.44GB |
+
+calibration 项相对 P5d 的 lambda=.25（within Pearson 0.0667）确实缓解了校准退化，并使 pair acc
+高于 control 1.50pp；但仍未达到 control 的 within Pearson 0.1490，且训练 wall 约为 control
+的 1.94×。因此 P5f 仍未通过联合门槛，不运行 seed43、10k 或 sampling A/B。下一步若继续，
+需要在“rank 优先”和“score calibration 优先”之间明确研究目标，不能再无依据叠加权重。
 
 ### P6：10k 训练
 
