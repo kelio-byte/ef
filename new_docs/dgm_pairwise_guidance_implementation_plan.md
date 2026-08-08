@@ -587,6 +587,34 @@ P5b 结论：不是继续调 lambda 或换 seed，而是先修正数据定义。
 4. 在同一新数据上运行 grouped control 与 pairwise λ=0.25/1.0 的短 pilot；只有新 pilot 通过预注册
    +3pp 门槛，才恢复 P6 10k。
 
+#### P5d：corrected shared-anchor 1k pilot（2026-08-08）
+
+修正 adaptive-time 后重新生成的隔离数据为：train 1,000 products/4,000 records，validation
+200 products/800 records；每组 4 children，`n_steps=100`、anchor step=50、真实
+`anchor_time=0.49999979`，并用同一 Molecular Transformer forward-beam reward。两份数据均通过
+anchor audit：所有组的 state/time 唯一数均为 1。生成 wall 为 train **121.6s**、validation
+**25.3s**；forward reward wall 为 **106.6s/18.0s**。
+
+在相同 500 steps、batch=64、seed=42、完整 validation 的三组训练结果如下。pairwise checkpoint
+仍按 control Bregman 的 1.15× guard 选择；control 按 validation loss 选择。
+
+| run | best step | Bregman | shared-anchor pair acc | Pearson | wall | peak allocated/reserved |
+|---|---:|---:|---:|---:|---:|---:|
+| lambda=0 control | 500 | 0.69165 | **55.15%** | 0.1135 | 118.0s | 2.03/3.44GB |
+| lambda=0.25 | 100 | 0.76427 | **59.66%** | -0.0118 | 143.7s | 2.04/3.44GB |
+| lambda=1.0 | 300 | 0.77967 | 53.65% | 0.0645 | 156.3s | 2.04/3.44GB |
+
+lambda=0.25 的 pair accuracy 相对 control 提升 4.51pp 且 Bregman guard 通过，但 Pearson 下降
+0.125，超过预注册允许的 0.03；lambda=1.0 的 pair accuracy 反而低于 control。因此 P5d
+是**排序改善、校准失败的部分结果**，没有满足联合 gate，不运行 seed43、10k、Top-k 或 Euler
+采样 A/B。该结果不能解释为 end-to-end 准确率提升：尚未将任何 guidance checkpoint 接入
+ordinary Euler 做反应级评估。
+
+诊断含义：真实 shared anchor 修复了 P5b 的数据语义问题，pairwise loss 确实能提高 held-out
+rank accuracy，但当前 `mean(log H)` 排序目标会牺牲与 reward 的连续校准（尤其 lambda=.25）。
+后续若继续，应明确选择“校准优先的 score-aware ranking”或“纯 rank 优先”研究目标；在目标未
+重新定义前，不再盲目扫描 lambda。
+
 ### P6：10k 训练
 
 只有 P5 通过才执行。使用：

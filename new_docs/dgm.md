@@ -1463,3 +1463,10 @@ allocated/reserved **234/247MB**；4/4 组 state/time 完全相同且 terminal �
 这只是数据结构和效率 smoke，下一步才在隔离的 1k shared-anchor 数据上重新比较 pairwise。另对
 adaptive endpoint 做了 correctness 修正：第 50 个 state 的真实时间由 `get_euler_step_times()`
 计算（full-step smoke 为 0.49999979），不再用轨迹长度近似；修正前生成的 1k 文件作废。
+
+修正后完成新的 1k shared-anchor pilot（train 1,000/4,000，validation 200/800，所有组 state/time
+完全共享）。control 的 pair accuracy 为 **55.15%**；lambda=.25 为 **59.66%**（+4.51pp），但
+Pearson 从 0.1135 降到 -0.0118；lambda=1.0 为 **53.65%**。Bregman 分别为 0.69165、0.76427、
+0.77967，pairwise 两组均在 1.15× guard 内，但只有 lambda=.25 的 rank 提升，且 Pearson gate
+失败。因此这是“rank 改善、连续校准恶化”的部分结果，不启动 seed43、10k 或 sampling A/B；不能
+宣称 end-to-end Top-k 提升。
