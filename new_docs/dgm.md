@@ -1455,3 +1455,9 @@ P5b 新增 `scripts/audit_guidance_anchors.py` 及单元测试，审计结果写
 `/root/autodl-tmp/dgm_guidance_runs/anchor_audit_val200.json`。下一步先隔离实现真正的
 shared-anchor 数据生成（公共 `x_t` 后独立 continuation），并验证每组 state/time 完全一致；在
 此之前不扩大到 10k、不做 Top-k 或 Euler 采样 A/B。
+
+P5c 已完成最小实现：`sample_euler` 支持从中间 state/time continuation，新增
+`scripts/generate_shared_anchor_guidance.py` 以 prefix 一次、批量 continuation 多个 terminal。
+真实 checkpoint 的 CUDA smoke（4 products、2 children、4 steps）耗时 **0.799s**，峰值
+allocated/reserved **234/247MB**；4/4 组 state/time 完全相同且 terminal 均有两个不同结果。
+这只是数据结构和效率 smoke，下一步才在隔离的 1k shared-anchor 数据上重新比较 pairwise。

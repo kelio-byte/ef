@@ -2,7 +2,7 @@
 
 > 日期：2026-08-08
 > 执行对象：后续 GPT-Luna / 项目维护者
-> 状态：P0–P5、P5b 已完成；P5 正确实现但未通过收益门槛，P6 暂缓
+> 状态：P0–P5、P5b、P5c 实现与 smoke 已完成；P5 正确实现但未通过收益门槛，新的 1k pilot 待做，P6 暂缓
 > 研究路线：继续改进 learned action-level approximate DGM；本阶段不做 terminal reranker
 > 校准，也不进入 exact Z-space 重写。
 
@@ -560,6 +560,27 @@ P5b 结论：不是继续调 lambda 或换 seed，而是先修正数据定义。
 覆盖；下一子阶段应新增隔离的 shared-anchor 数据生成路径：先采样一个公共 `x_t`，再从该状态
 独立继续 Euler 得到多个 terminal，并在记录中保存 anchor provenance。只有新数据审计达到每组
 时间/state 全相同，才重新进行 1k pilot；P6 的 10k、Top-k 和采样 A/B 继续暂停。
+
+#### P5c：真实 shared-anchor continuation 实现与 smoke（2026-08-08）
+
+为避免复制 Euler 主循环，`sample_euler` 新增可选 `start_time` 和 `initial_origin_mask` 参数；默认
+不传参数时通过 byte-level 等价测试。新增隔离脚本 `scripts/generate_shared_anchor_guidance.py`：
+每个 product 先执行一次 prefix 到固定 interior step，再将 exact state 批量复制为
+`n_children` 行，用一次向量化 continuation 得到多个 terminal；旧数据生成脚本和历史 `.pt` 不
+覆盖。`tests/guidance/test_shared_anchor_data.py` 验证配置边界。
+
+真实 `checkpoint_step600000.pt` 的 CUDA smoke：4 products、`n_steps=4`、`anchor_time=0.5`、
+`n_children=2`、batch=4，wall **0.799s**，peak allocated/reserved **234/247MB**。结构审计为
+4/4 组 `state` 相同、4/4 组 `time` 相同，4/4 组的两个 terminal 不同。该 smoke 只验证 continuation
+正确性和批量效率，不提供准确率结论。
+
+下一步实验顺序固定为：
+
+1. 用该脚本在隔离目录生成 1k products、每组 4 children 的 validity 数据；
+2. 用已有 `generate_forward_guidance_data.py` 附加 Molecular Transformer forward-beam reward；
+3. 用 `audit_guidance_anchors.py` 验证所有组 `state/time` 唯一数为 1；
+4. 在同一新数据上运行 grouped control 与 pairwise λ=0.25/1.0 的短 pilot；只有新 pilot 通过预注册
+   +3pp 门槛，才恢复 P6 10k。
 
 ### P6：10k 训练
 
