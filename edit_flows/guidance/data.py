@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import torch
 from torch import Tensor
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 
 from edit_flows.core.alignment import opt_align_xs_to_zs
 from edit_flows.core.scheduler import KappaScheduler
@@ -250,3 +250,105 @@ class GuidanceDataset(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         return self.records[index]
+
+
+class ProductGroupBatchSampler(Sampler[list[int]]):
+    """Yield batches that contain complete product groups.
+
+    Guidance records are stored one record per sampled terminal.  For the
+    multi-terminal data used by pairwise guidance, all records with one
+    ``source_index`` must be visible in the same batch.  This sampler groups
+    record indices before shuffling, so a group can never be split across two
+    batches.  The default DataLoader path remains unchanged; callers opt into
+    this sampler through ``batch_sampler``.
+    """
+
+    def __init__(
+        self,
+        data_source,
+        *,
+        batch_size: int,
+        group_size: int = 4,
+        shuffle: bool = True,
+        seed: int = 42,
+        drop_last: bool = False,
+    ) -> None:
+        if batch_size < 1 or group_size < 1:
+            raise ValueError("batch_size and group_size must be positive")
+        if batch_size % group_size:
+            raise ValueError(
+                "batch_size must be divisible by group_size, got "
+                f"batch_size={batch_size}, group_size={group_size}"
+            )
+        if seed < 0:
+            raise ValueError("seed must be non-negative")
+        self.batch_size = int(batch_size)
+        self.group_size = int(group_size)
+        self.groups_per_batch = self.batch_size // self.group_size
+        self.shuffle = bool(shuffle)
+        self.seed = int(seed)
+        self.drop_last = bool(drop_last)
+        self.epoch = 0
+
+        groups: dict[int, list[int]] = {}
+        for index in range(len(data_source)):
+            record = data_source[index]
+            try:
+                source_index = int(record["source_index"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    "every guidance record must contain an integer source_index"
+                ) from exc
+            groups.setdefault(source_index, []).append(index)
+        invalid = {
+            source_index: len(indices)
+            for source_index, indices in groups.items()
+            if len(indices) != self.group_size
+        }
+        if invalid:
+            preview = list(sorted(invalid.items()))[:5]
+            raise ValueError(
+                "all product groups must have exactly group_size records; "
+                f"invalid groups (first five)={preview}"
+            )
+        self._groups = [groups[key] for key in sorted(groups)]
+
+    @property
+    def group_count(self) -> int:
+        """Number of complete product groups available to the sampler."""
+        return len(self._groups)
+
+    def set_epoch(self, epoch: int) -> None:
+        """Set the deterministic epoch offset used when shuffling groups."""
+        if epoch < 0:
+            raise ValueError("epoch must be non-negative")
+        self.epoch = int(epoch)
+
+    def __iter__(self):
+        if self.shuffle and len(self._groups) > 1:
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(self.seed + self.epoch)
+            order = torch.randperm(len(self._groups), generator=generator).tolist()
+        else:
+            order = list(range(len(self._groups)))
+
+        group_limit = len(order)
+        if self.drop_last:
+            group_limit = (
+                group_limit // self.groups_per_batch
+            ) * self.groups_per_batch
+        for start in range(0, group_limit, self.groups_per_batch):
+            selected = order[start:start + self.groups_per_batch]
+            if not selected:
+                continue
+            batch: list[int] = []
+            for group_index in selected:
+                batch.extend(self._groups[group_index])
+            yield batch
+
+    def __len__(self) -> int:
+        if self.drop_last:
+            return len(self._groups) // self.groups_per_batch
+        return (
+            len(self._groups) + self.groups_per_batch - 1
+        ) // self.groups_per_batch

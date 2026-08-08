@@ -6,6 +6,7 @@ import pytest
 from edit_flows.core.scheduler import LinearScheduler
 from edit_flows.guidance.data import (
     GuidanceDataset,
+    ProductGroupBatchSampler,
     collate_guidance_records,
     make_guidance_record,
     load_guidance_dataset,
@@ -113,3 +114,59 @@ def test_guidance_record_requires_bos_and_finite_reward():
         make_guidance_record(**{**kwargs, "product_tokens": [4]})
     with pytest.raises(ValueError, match="finite"):
         make_guidance_record(**{**kwargs, "reward": float("nan")})
+
+
+def _group_records(group_count=3, group_size=4):
+    return [
+        {"source_index": source_index}
+        for source_index in range(group_count)
+        for _ in range(group_size)
+    ]
+
+
+def _batch_source_groups(batch, records):
+    return {
+        int(records[index]["source_index"])
+        for index in batch
+    }
+
+
+def test_product_group_batch_sampler_keeps_complete_groups_and_tail():
+    records = _group_records(group_count=3)
+    sampler = ProductGroupBatchSampler(
+        records, batch_size=8, group_size=4, shuffle=False,
+    )
+    batches = list(sampler)
+    assert len(sampler) == 2
+    assert [len(batch) for batch in batches] == [8, 4]
+    assert all(len(_batch_source_groups(batch, records)) == 2 for batch in batches[:1])
+    assert len(_batch_source_groups(batches[1], records)) == 1
+    assert sorted(index for batch in batches for index in batch) == list(range(12))
+
+
+def test_product_group_batch_sampler_shuffle_is_seed_and_epoch_reproducible():
+    records = _group_records(group_count=8)
+    first = ProductGroupBatchSampler(
+        records, batch_size=8, group_size=4, seed=123,
+    )
+    second = ProductGroupBatchSampler(
+        records, batch_size=8, group_size=4, seed=123,
+    )
+    assert list(first) == list(second)
+    first.set_epoch(1)
+    assert list(first) != list(second)
+    second.set_epoch(1)
+    assert list(first) == list(second)
+
+
+def test_product_group_batch_sampler_drop_last_and_invalid_inputs():
+    records = _group_records(group_count=3)
+    sampler = ProductGroupBatchSampler(
+        records, batch_size=8, group_size=4, drop_last=True,
+    )
+    assert len(sampler) == 1
+    assert [len(batch) for batch in sampler] == [8]
+    with pytest.raises(ValueError, match="divisible"):
+        ProductGroupBatchSampler(records, batch_size=6, group_size=4)
+    with pytest.raises(ValueError, match="exactly group_size"):
+        ProductGroupBatchSampler(records[:-1], batch_size=8, group_size=4)
