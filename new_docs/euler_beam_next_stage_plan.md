@@ -2855,3 +2855,5 @@ checkpoint smoke 同时生成并读取 best/final 成功。最终扩大后的相
 才生成每 product 至少 4 个独立终态、每终态 1 个随机时间的数据。随后用 best checkpoint
 做 5k，并对 per-position rate preservation 与 per-sample global rate preservation 做单变量
 消融；ordinary Euler 在 validation-A/B 通过后才接 R9K1M2。
+
+本阶段代码/测试提交为 `610540e`；实验结论、DGM 主文档和指令更新提交为 `4003fac`。
