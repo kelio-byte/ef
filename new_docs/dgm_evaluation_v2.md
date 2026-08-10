@@ -141,7 +141,7 @@ python scripts/eval.py \
   --sampler euler --n_samples 3 --n_steps 100 \
   --batch_size 64 --device cuda --seed 42 \
   --augmentation 20 --start_product 0 --max_products 20000 \
-  --n_best 10 --diagnostics
+  --n_best 10
 ```
 
 评分始终报告 Top-1 至 Top-10、候选覆盖率、非法率、有效且去重后的候选数、采样耗时、评分耗时、总耗时与峰值显存。20 个 augmentation 汇总后的主指标之外，后续可增加一个固定单一表示的诊断实验，用来量化测试时增广本身带来的贡献；它不能替代主指标。
