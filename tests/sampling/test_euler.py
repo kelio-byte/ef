@@ -357,6 +357,59 @@ class TestSampleEuler:
 
         assert torch.equal(result_plain, result_recorded)
 
+    def test_guided_event_recording_keeps_pre_and_post_distributions(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setattr(
+            torch, "rand_like",
+            lambda x, **kwargs: torch.zeros_like(
+                x, dtype=kwargs.get("dtype", x.dtype),
+            ),
+        )
+
+        class ConstantGuidance(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.anchor = nn.Parameter(torch.zeros(()))
+
+            def forward(
+                self, product, state, time, product_padding, state_padding,
+            ):
+                batch, length = state.shape
+                insert = torch.ones(batch, length, 16, device=state.device)
+                substitute = torch.ones_like(insert)
+                delete = torch.ones(batch, length, 1, device=state.device)
+                return insert, substitute, delete
+
+        model = OriginMaskProbeModel(op="sub", target_token=9)
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+        guidance = ConstantGuidance()
+        _, _, events = sample_euler(
+            model,
+            x_0,
+            LinearScheduler(),
+            n_steps=2,
+            max_seq_len=16,
+            record_all_events=True,
+            guidance_model=guidance,
+            guidance_product=x_0,
+            guidance_beta=0.5,
+        )
+        assert len(events[0]) == 1
+        event = events[0][0]
+        for key in (
+            "log_rates_pre_guidance",
+            "log_ins_probs_pre_guidance",
+            "log_sub_probs_pre_guidance",
+            "guidance_insert",
+            "guidance_substitute",
+            "guidance_delete",
+        ):
+            assert key in event
+            assert isinstance(event[key], torch.Tensor)
+        assert event["guidance_beta"] == 0.5
+        assert event["guidance_rate_normalization"] == "per_position"
+
 
 class TestModelTimeMapping:
     def test_compute_model_time_same_scheduler_returns_t(self):

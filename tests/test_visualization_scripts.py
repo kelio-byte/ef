@@ -227,3 +227,22 @@ def test_first_step_navigation_has_one_description_per_link():
     )
     assert html.count("Ex#7 t=") == 2
     assert html.count("C C → C O") == 2
+
+
+def test_guidance_section_exposes_h_beta_factors():
+    guidance = torch.ones(2, 3, 5)
+    delete = torch.ones(2, 3, 1)
+    html = trajectory._build_guidance_section(
+        guidance,
+        guidance * 2,
+        delete,
+        0.5,
+        {0: "<pad>", 1: "C", 2: "O", 3: "N", 4: "F"},
+        2,
+        "per_position",
+    )
+    assert "GUIDANCE H^&beta;" in html
+    assert "beta=0.5" in html
+    assert "H ins" in html
+    assert "H sub" in html
+    assert "H del" in html

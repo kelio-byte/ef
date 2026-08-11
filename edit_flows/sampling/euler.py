@@ -774,6 +774,17 @@ def sample_euler(
             clamp_kappa=clamp_kappa, clamp_max=clamp_max,
         )
 
+        # Keep the base model action distribution separate from the guided
+        # distribution.  These fields are diagnostic-only and are populated
+        # for recorded events, so ordinary sampling cost and RNG consumption
+        # are unchanged when trajectory recording is disabled.
+        log_rates_pre_guidance = log_rates.detach().clone()
+        log_ins_probs_pre_guidance = log_ins_probs.detach().clone()
+        log_sub_probs_pre_guidance = log_sub_probs.detach().clone()
+        guidance_insert = None
+        guidance_substitute = None
+        guidance_delete = None
+
         if guidance_model is not None and guidance_beta > 0:
             guidance_product_pad_mask = guidance_product == pad_token
             guidance_insert, guidance_substitute, guidance_delete = guidance_model(
@@ -849,8 +860,25 @@ def sample_euler(
                             "origin_mask": origin_mask[sample_idx].cpu().clone() if use_origin_mask else None,
                             "log_rates": log_rates[sample_idx].detach().cpu().clone(),
                             "log_rates_raw": log_rates_raw[sample_idx].detach().cpu().clone(),
+                            "log_rates_pre_guidance": log_rates_pre_guidance[sample_idx].detach().cpu().clone(),
+                            "log_ins_probs_pre_guidance": log_ins_probs_pre_guidance[sample_idx].detach().cpu().clone(),
+                            "log_sub_probs_pre_guidance": log_sub_probs_pre_guidance[sample_idx].detach().cpu().clone(),
                             "log_ins_probs": log_ins_probs[sample_idx].detach().cpu().clone(),
                             "log_sub_probs": log_sub_probs[sample_idx].detach().cpu().clone(),
+                            "guidance_insert": (
+                                guidance_insert[sample_idx].detach().cpu().clone()
+                                if guidance_insert is not None else None
+                            ),
+                            "guidance_substitute": (
+                                guidance_substitute[sample_idx].detach().cpu().clone()
+                                if guidance_substitute is not None else None
+                            ),
+                            "guidance_delete": (
+                                guidance_delete[sample_idx].detach().cpu().clone()
+                                if guidance_delete is not None else None
+                            ),
+                            "guidance_beta": float(guidance_beta),
+                            "guidance_rate_normalization": guidance_rate_normalization,
                             "oracle_log_rates": oracle_out[0][sample_idx].detach().cpu().clone() if oracle_out is not None else None,
                             "oracle_log_ins_probs": oracle_out[1][sample_idx].detach().cpu().clone() if oracle_out is not None else None,
                             "oracle_log_sub_probs": oracle_out[2][sample_idx].detach().cpu().clone() if oracle_out is not None else None,
