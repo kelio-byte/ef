@@ -4,6 +4,7 @@ import pytest
 
 from scripts.generate_shared_anchor_guidance import (
     resolve_anchor_steps,
+    select_original_products,
     shared_anchor_group_index,
     validate_shared_anchor_config,
     validate_shared_anchor_steps,
@@ -64,6 +65,31 @@ def test_original_product_reader_keeps_one_row_per_augmentation_block(tmp_path):
         "reaction1_view0",
         "reaction2_view0",
     ]
+
+
+def test_original_product_selection_uses_reaction_block_indices():
+    selected, start, end = select_original_products(
+        ["reaction0", "reaction1", "reaction2", "reaction3"],
+        start_product=1,
+        max_products=2,
+    )
+    assert selected == ["reaction1", "reaction2"]
+    assert (start, end) == (1, 3)
+
+
+@pytest.mark.parametrize(
+    "start_product,max_products",
+    [(-1, 1), (4, 1), (0, 0)],
+)
+def test_original_product_selection_rejects_invalid_intervals(
+    start_product, max_products,
+):
+    with pytest.raises(ValueError):
+        select_original_products(
+            ["reaction0", "reaction1", "reaction2", "reaction3"],
+            start_product=start_product,
+            max_products=max_products,
+        )
 
 
 @pytest.mark.parametrize(

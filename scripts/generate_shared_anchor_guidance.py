@@ -124,6 +124,33 @@ def shared_anchor_group_index(
     return product_index * anchor_count + anchor_ordinal
 
 
+def select_original_products(
+    products: Sequence[str],
+    *,
+    start_product: int = 0,
+    max_products: int | None = None,
+) -> tuple[list[str], int, int]:
+    """Select a contiguous interval after augmentation blocks are collapsed.
+
+    The returned start/end indices refer to original reaction blocks in the
+    source file, not raw augmentation rows.  Keeping those absolute indices in
+    generated records makes later target-based *offline audits* unambiguous.
+    """
+
+    if start_product < 0:
+        raise ValueError("start_product must be non-negative")
+    if max_products is not None and max_products < 1:
+        raise ValueError("max_products must be >= 1")
+    if start_product >= len(products):
+        raise ValueError(
+            f"start_product={start_product} is outside {len(products)} original products"
+        )
+    end_product = len(products)
+    if max_products is not None:
+        end_product = min(end_product, start_product + max_products)
+    return list(products[start_product:end_product]), start_product, end_product
+
+
 def generate(args: argparse.Namespace) -> dict:
     anchor_indices = resolve_anchor_steps(args)
     requested_anchor_time = (
@@ -150,11 +177,14 @@ def generate(args: argparse.Namespace) -> dict:
             "shared-anchor generation currently requires use_origin_mask=False; "
             "the checkpoint must provide an origin-mask continuation state"
         )
-    products = _read_original_products(args.products_file, args.augmentation)
-    if args.max_products is not None:
-        if args.max_products < 1:
-            raise ValueError("max_products must be >= 1")
-        products = products[:args.max_products]
+    all_products = _read_original_products(args.products_file, args.augmentation)
+    # ``getattr`` keeps the programmatic ``generate(SimpleNamespace(...))``
+    # surface compatible with callers written before ``--start_product``.
+    products, selection_start, selection_end = select_original_products(
+        all_products,
+        start_product=getattr(args, "start_product", 0),
+        max_products=args.max_products,
+    )
     unk_id = token2id.get("<unk>", 2)
     product_ids = [
         [token2id.get(token, unk_id) for token in product.split()]
@@ -179,7 +209,8 @@ def generate(args: argparse.Namespace) -> dict:
     ):
         batch_products = products[batch_start:batch_start + args.batch_size]
         batch_ids = product_ids[batch_start:batch_start + args.batch_size]
-        batch_seed = _mix_seed(args.seed, batch_start, 0)
+        source_batch_start = selection_start + batch_start
+        batch_seed = _mix_seed(args.seed, source_batch_start, 0)
         torch.manual_seed(batch_seed)
         if device.type == "cuda":
             torch.cuda.manual_seed_all(batch_seed)
@@ -216,7 +247,7 @@ def generate(args: argparse.Namespace) -> dict:
                 args.n_children, dim=0,
             )
             continuation_seed = _mix_seed(
-                args.seed, batch_start, anchor_index + 100003,
+                args.seed, source_batch_start, anchor_index + 100003,
             )
             torch.manual_seed(continuation_seed)
             if device.type == "cuda":
@@ -237,7 +268,7 @@ def generate(args: argparse.Namespace) -> dict:
             rewards = retro_tokenized_validity_reward(terminal_text)
 
             for product_offset, _ in enumerate(batch_products):
-                product_index = batch_start + product_offset
+                product_index = source_batch_start + product_offset
                 source_index = shared_anchor_group_index(
                     product_index, anchor_ordinal, anchor_count,
                 )
@@ -291,6 +322,9 @@ def generate(args: argparse.Namespace) -> dict:
         "schema_version": 1,
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "products_file": str(Path(args.products_file).resolve()),
+        "source_product_count": len(all_products),
+        "selection_start_product": selection_start,
+        "selection_end_product_exclusive": selection_end,
         "product_count": len(products),
         "record_count": len(records),
         "augmentation": args.augmentation,
@@ -325,6 +359,8 @@ def generate(args: argparse.Namespace) -> dict:
         "output": str(output),
         "products": len(products),
         "records": len(records),
+        "selection_start_product": selection_start,
+        "selection_end_product_exclusive": selection_end,
         "anchor_steps": [index for index, _ in anchor_specs],
         "anchor_times": [time_value for _, time_value in anchor_specs],
         "reward_mean": float(torch.tensor([r["reward"] for r in records]).mean()),
@@ -343,6 +379,13 @@ def main() -> None:
     parser.add_argument("--data_dir", default=None)
     parser.add_argument("--vocab_file", default=None)
     parser.add_argument("--augmentation", type=int, default=20)
+    parser.add_argument(
+        "--start_product", type=int, default=0,
+        help=(
+            "First original reaction block after collapsing augmentation rows; "
+            "not a raw input-line offset."
+        ),
+    )
     parser.add_argument("--max_products", type=int, default=None)
     parser.add_argument("--n_steps", type=int, default=100)
     parser.add_argument("--n_children", type=int, default=4)

@@ -297,6 +297,10 @@ continuation batch 为 `batch_size × n_children`；RTX 3090 的当前实测中 
 数据和 checkpoint 体积较大，默认不提交 Git。正向 beam reward 的 batch 8/16/32 实测中 16 最快，
 故当前推荐 16；这与前一条 Euler 数据生成的 product batch 32 是两个不同参数，不要混淆。
 
+若要从同一 split 中构造一个**不重叠的完整反应区间**，使用 `--start_product`。它是在按
+`augmentation=20` 折叠之后的反应编号，不是输入文件行号；保存记录会保留这个绝对编号，供之后的
+离线 target 审计正确映射。例如 `--start_product 1000 --max_products 200` 选取原始反应 1000–1199。
+
 对已经生成的 guidance 终点做**只读 reward 正确性审计**（只限 train/validation；target 只用于离线
 评估，绝不能参与 reward 生成、采样或 test 调参）：
 

@@ -1,7 +1,7 @@
 # DGM reward 质量审计与下一步校准协议
 
 更新日期：2026-08-11  
-状态：已完成只读审计工具、单元测试和现有多时间点 guidance 数据的训练／held-out 检查；尚未训练新的 reward 或重新训练 guidance。
+状态：已完成只读审计工具、单元测试、现有多时间点数据的训练／held-out 检查，以及一个与其隔离的 200-reaction reward holdout；尚未训练新的 reward 或重新训练 guidance。
 
 ## 1. 为什么现在先检查 reward？
 
@@ -61,7 +61,30 @@
 2. 新建一个来自**训练 split 中未使用原始反应**的 200-reaction reward holdout（建议编号 1,000–1,199），以免复用当前 guidance validation 或方法开发集。
 3. 该 holdout 必须用同一共享状态／四后继流程产生候选，再离线标注；不读取 `evaluation_v2` 的 dev/confirm/final target，更不读取 test target。
 
-为安全选择这个连续反应块，生成器需要增加一个显式的“从第几个原始反应块开始”参数；它应在按 20 条 augmentation 折叠后生效，且必须有单元测试，避免把 20 个 SMILES 写法误当成 20 个反应。
+为安全选择这个连续反应块，生成器已增加显式的 `--start_product` 参数；它在按 20 条 augmentation 折叠后生效，且已有单元测试，避免把 20 个 SMILES 写法误当成 20 个反应。保存的记录使用原始训练文件中的**绝对反应编号**，因此离线审计能准确映射回对应 target，而不会把第 1,000 个块误当成新文件中的第 0 个块。
+
+### 4.1.1 独立 holdout 已构造（2026-08-11）
+
+实际使用训练 split 的原始反应块 **[1,000, 1,200)**：它与原有 guidance reward 训练数据的 [0, 1,000) 不重叠，也不使用 validation、开发集、确认集、最终集或 `src-test`。固定配置为 100 个 Euler 步、step 10/30/50/70/90 五个时间点、每个状态 4 条独立后续、batch 32、seed 42。
+
+| 项目 | 结果 |
+|---|---:|
+| 原始反应／终点记录／共享状态组 | 200 / 4,000 / 1,000 |
+| 轨迹构造耗时 | 69.57 s（57.49 records/s） |
+| forward-beam reward 耗时 | 40.48 s（857 个去重有效候选） |
+| 轨迹阶段峰值 CUDA allocated / reserved | 0.526 / 1.242 GiB |
+| 原始 forward reward 全局 AUC | 0.7073 |
+| 原始 forward reward 同组 AUC | 0.6836 |
+| 正确终点比例／非法终点比例 | 43.35% / 13.15% |
+| 有正确与错误候选同时出现的组比例 | 42.60% |
+| 错误终点取得正 reward 的比例 | 42.14% |
+
+因此该 holdout 支持“reward 有一定方向、但仍会给大量错误终点高分”的已有结论；它是后续校准器唯一允许用于通过／失败判断的数据，而不是用来反复挑选开发集参数。原始生成文件与 JSON 不提交 Git，SHA-256 分别为：
+
+```text
+reward_holdout_shared_train200_start1000_validity.pt  4b0fb8042a49814b3c4c2daa6d9f92613bd3d3d71a16322b252cc962fce0bdf9
+reward_holdout_shared_train200_start1000_beam.pt      a3a2a30f69d8a4a2a9893c016b6bed25360f9b4e3990555e210508adadfc21f7
+```
 
 ### 4.2 第一版校准器
 
@@ -103,4 +126,31 @@ python scripts/audit_guidance_reward_quality.py \
   --vocab_file "datasets/USPTO_50K_PtoR_aug20_#global#/example.vocab.src" \
   --augmentation 20 --score_field forward_beam_rank \
   --output_json /root/autodl-tmp/dgm_guidance_runs/reward_quality_shared_val200_t10_30_50_70_90.json
+```
+
+独立 holdout 的可复现构造命令如下。`--start_product 1000` 是**完整反应块**偏移，不是原始文本行偏移；审计时保持 `--target_start_product 0`（默认），因为记录中已经存储了绝对编号 1000–1199。
+
+```bash
+python scripts/generate_shared_anchor_guidance.py \
+  --checkpoint new_checkpoints/checkpoint_step600000.pt \
+  --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/train/src-train.txt" \
+  --output /root/autodl-tmp/dgm_guidance_runs/reward_holdout_shared_train200_start1000_validity.pt \
+  --augmentation 20 --start_product 1000 --max_products 200 \
+  --n_steps 100 --n_children 4 --anchor_steps 10 30 50 70 90 \
+  --batch_size 32 --device cuda --seed 42
+
+python scripts/generate_forward_guidance_data.py \
+  --input_data /root/autodl-tmp/dgm_guidance_runs/reward_holdout_shared_train200_start1000_validity.pt \
+  --output_data /root/autodl-tmp/dgm_guidance_runs/reward_holdout_shared_train200_start1000_beam.pt \
+  --checkpoint new_checkpoints/MIT_mixed_augm_model_average_20.pt \
+  --vocab_file "datasets/USPTO_50K_PtoR_aug20_#global#/example.vocab.src" \
+  --reward_mode beam_reconstruction --forward_beam_size 5 \
+  --canonicalize_source --batch_size 16 --device cuda
+
+python scripts/audit_guidance_reward_quality.py \
+  --data /root/autodl-tmp/dgm_guidance_runs/reward_holdout_shared_train200_start1000_beam.pt \
+  --targets_file "datasets/USPTO_50K_PtoR_aug20_#global#/train/tgt-train.txt" \
+  --vocab_file "datasets/USPTO_50K_PtoR_aug20_#global#/example.vocab.src" \
+  --augmentation 20 --score_field forward_beam_rank \
+  --output_json /root/autodl-tmp/dgm_guidance_runs/reward_quality_holdout_shared_train200_start1000.json
 ```
