@@ -223,6 +223,34 @@ class TestSampleEuler:
         assert not bool(actions["sub_mask"][0, 0])
         assert not bool(actions["del_mask"][0, 0])
 
+    def test_sampling_does_not_mutate_a_device_resident_input(self):
+        class ForcedSubstitutionModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.anchor = nn.Parameter(torch.zeros(()))
+
+            def forward(self, tokens, time_step, padding_mask, origin_mask=None):
+                batch, length = tokens.shape
+                log_rates = torch.full(
+                    (batch, length, 3), -1e9, device=tokens.device,
+                )
+                log_rates[:, 1, 1] = 20.0
+                log_ins = torch.log_softmax(
+                    torch.zeros(batch, length, 16, device=tokens.device), dim=-1,
+                )
+                log_sub = torch.full_like(log_ins, -1e9)
+                log_sub[:, :, 9] = 0.0
+                return log_rates, log_ins, log_sub
+
+        model = ForcedSubstitutionModel()
+        x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+        original = x_0.clone()
+        result, _ = sample_euler(
+            model, x_0, LinearScheduler(), n_steps=1, max_seq_len=16,
+        )
+        assert torch.equal(x_0, original)
+        assert int(result[0, 1].item()) == 9
+
     def test_empty_prior_generates(self, dummy_model):
         dummy_model.eval()
         scheduler = CubicScheduler()

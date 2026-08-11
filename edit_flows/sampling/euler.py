@@ -687,7 +687,10 @@ def sample_euler(
         guidance_product = guidance_product.to(device=device, dtype=torch.long)
         guidance_model.eval()
 
-    x_t = x_0.to(device)
+    # Later substitution updates are in-place.  Clone after device transfer so
+    # callers may safely retain an intermediate state for diagnostics or a
+    # second continuation without it being silently mutated by this rollout.
+    x_t = x_0.to(device).clone()
     if use_origin_mask:
         if initial_origin_mask is None:
             origin_mask = torch.ones_like(x_t, dtype=torch.bool, device=device)

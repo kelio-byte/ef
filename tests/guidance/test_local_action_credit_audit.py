@@ -61,3 +61,27 @@ def test_local_credit_audit_rejects_missing_transition_tokens():
     )
     with pytest.raises(ValueError, match="transition_tokens"):
         summarize_local_action_credit([record], vocab_size=16)
+
+
+def test_local_credit_audit_validates_atomic_proposal_transition_metadata():
+    records = [
+        _record(0, [BOS_TOKEN, 4, 9], 1.0),
+        _record(1, [BOS_TOKEN, 4, 8], 0.0),
+        _record(2, [BOS_TOKEN, 4, 9], 0.5),
+        _record(3, [BOS_TOKEN, 4, 8], 0.25),
+    ]
+    for record in records:
+        record.update({
+            "proposal_operation": "insert",
+            "proposal_position": 1,
+            "proposal_token": record["transition_tokens"][-1],
+        })
+    summary = summarize_local_action_credit(records, vocab_size=16)
+    metadata = summary["proposal_metadata"]
+    assert metadata["available"] is True
+    assert metadata["exact_transition_match_count"] == 4
+    assert metadata["mismatch_count"] == 0
+
+    records[0]["transition_tokens"] = [BOS_TOKEN, 4, 7]
+    mismatched = summarize_local_action_credit(records, vocab_size=16)
+    assert mismatched["proposal_metadata"]["mismatch_count"] == 1

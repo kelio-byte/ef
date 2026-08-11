@@ -160,6 +160,71 @@ def _group_rows(rows: Sequence[Mapping[str, Any]]) -> dict[int, list[Mapping[str
     return dict(groups)
 
 
+def _proposal_metadata_summary(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Check whether recorded atomic-proposal metadata recreates each state.
+
+    Sequence alignment can have legitimate ties, so this check intentionally
+    does *not* compare an optimal alignment to a stored proposal position.  It
+    instead applies the serialized insert/substitute/delete directly using the
+    same position convention as ``apply_ins_del_operations`` and checks exact
+    token-sequence equality.  It catches accidental mutation of a saved first
+    successor before a terminal rollout.
+    """
+
+    fields = {"proposal_operation", "proposal_position", "proposal_token"}
+    present = [fields.issubset(record) for record in records]
+    if not any(present):
+        return {
+            "available": False,
+            "record_count": len(records),
+            "exact_transition_match_count": None,
+            "mismatch_count": None,
+            "mismatch_examples": [],
+        }
+    if not all(present):
+        raise ValueError(
+            "proposal metadata must be present in every record or none"
+        )
+
+    matches = 0
+    mismatch_examples: list[dict[str, Any]] = []
+    for index, record in enumerate(records):
+        state = [int(token) for token in record["state_tokens"]]
+        transition = [int(token) for token in record["transition_tokens"]]
+        operation = str(record["proposal_operation"])
+        position = int(record["proposal_position"])
+        token = int(record["proposal_token"])
+        expected: list[int] | None = None
+        if 0 <= position < len(state):
+            if operation == "insert":
+                expected = state[:position + 1] + [token] + state[position + 1:]
+            elif operation == "substitute":
+                expected = list(state)
+                expected[position] = token
+            elif operation == "delete":
+                expected = state[:position] + state[position + 1:]
+        if expected == transition:
+            matches += 1
+            continue
+        if len(mismatch_examples) < 10:
+            mismatch_examples.append({
+                "record_index": index,
+                "proposal_operation": operation,
+                "proposal_position": position,
+                "proposal_token": token,
+                "state_tokens": state,
+                "expected_transition_tokens": expected,
+                "stored_transition_tokens": transition,
+            })
+    return {
+        "available": True,
+        "record_count": len(records),
+        "exact_transition_match_count": matches,
+        "mismatch_count": len(records) - matches,
+        "mismatch_examples": mismatch_examples,
+    }
+
+
 def _group_summary(
     groups: Mapping[int, Sequence[Mapping[str, Any]]],
     *,
@@ -306,6 +371,7 @@ def summarize_local_action_credit(
     return {
         "record_count": len(records),
         "anchor_sharing": summarize_anchor_sharing(records),
+        "proposal_metadata": _proposal_metadata_summary(records),
         "transition_actions": _action_summary(rows, "transition"),
         "terminal_alignment_actions": _action_summary(rows, "terminal"),
         "local_credit_groups": group_summary,
@@ -321,6 +387,7 @@ def audit(
     reward_tolerance: float = 1e-6,
     batch_size: int = 256,
     min_usable_group_fraction: float = 0.20,
+    require_exact_proposal_transition: bool = False,
 ) -> dict[str, Any]:
     """Load one data artifact and add provenance plus the predeclared gate."""
 
@@ -338,14 +405,31 @@ def audit(
     fraction = summary["local_credit_groups"][
         "locally_discriminative_group_fraction"
     ]
+    proposal_metadata = summary["proposal_metadata"]
+    proposal_transition_pass = (
+        proposal_metadata["available"]
+        and proposal_metadata["mismatch_count"] == 0
+    )
+    local_gate_pass = (
+        fraction is not None and fraction > min_usable_group_fraction
+    )
     summary.update({
         "data_path": str(Path(path).resolve()),
         "guidance_metadata": metadata,
         "vocab_size": int(resolved_vocab_size),
         "reward_tolerance": reward_tolerance,
         "predeclared_min_usable_group_fraction": min_usable_group_fraction,
+        "predeclared_proposal_transition_required": (
+            require_exact_proposal_transition
+        ),
+        "predeclared_proposal_transition_pass": proposal_transition_pass,
+        "predeclared_local_action_gate_pass": local_gate_pass,
         "predeclared_gate_pass": (
-            fraction is not None and fraction > min_usable_group_fraction
+            local_gate_pass
+            and (
+                proposal_transition_pass
+                if require_exact_proposal_transition else True
+            )
         ),
     })
     return summary
@@ -359,6 +443,14 @@ def main() -> None:
     parser.add_argument("--reward_tolerance", type=float, default=1e-6)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--min_usable_group_fraction", type=float, default=0.20)
+    parser.add_argument(
+        "--require_exact_proposal_transition",
+        action="store_true",
+        help=(
+            "Require serialized proposal metadata to exactly reconstruct every "
+            "transition_tokens sequence as part of the gate."
+        ),
+    )
     parser.add_argument("--output_json", default=None)
     args = parser.parse_args()
     summary = audit(
@@ -368,6 +460,7 @@ def main() -> None:
         reward_tolerance=args.reward_tolerance,
         batch_size=args.batch_size,
         min_usable_group_fraction=args.min_usable_group_fraction,
+        require_exact_proposal_transition=args.require_exact_proposal_transition,
     )
     text = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True)
     print(text)
