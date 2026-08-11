@@ -1,7 +1,7 @@
 # DGM 局部信用分配：一步后继监督方案
 
 更新日期：2026-08-11  
-状态：L0 已完成；L1（50 个未重叠训练反应的数据质量审计）待执行。
+状态：L0 已完成；L1 已完成但未通过预注册的数据可用性门槛；不得进入 L2。
 
 ## 1. 要解决的具体问题
 
@@ -105,6 +105,9 @@ non-no-op child：同一第一步编辑可能由于后续随机性走向不同�
 当前 action 提供可区分的训练方向。审计同时报告较宽松的“两个非空 child”比例和更严格的
 “两个不同 action mask 的平均 reward 有差异”比例；通过门槛使用后者。
 
+**状态：已完成，未通过（2026-08-11）。** 单个 Euler 数值步的实际编辑概率远低于预期，
+不训练 transition guidance，也不重建 train-1000/val-200。
+
 ### 阶段 L2：正式离线训练对照
 
 仅在 L1 通过后，重新生成原始训练反应 0–999 和原始 validation 反应 0–199 的同配置数据（5 个时间点 × 4 children），并使用同一 frozen raw forward-beam reward。训练两套完全相同的 2,000-step guidance：
@@ -125,13 +128,13 @@ non-no-op child：同一第一步编辑可能由于后续随机性走向不同�
 | 阶段 | 数据 | 方法 | 正确性／质量 | 效率 | 结论 |
 |---|---|---|---|---|---|
 | L0 | train 原始反应 1250--1251 | first-transition recording | 12 条旧字段逐条完全一致；6/6 group 同 state/time | 1.149s → 1.264s；峰值 GPU allocated/reserved 均为 228.9/243.3 MB | 通过，进入 L1 |
-| L1 | 50 train reactions | data audit | 待运行 | 待运行 | 待运行 |
+| L1 | train 原始反应 1200--1249 | 5 time × 4 child 的 local-action audit | 250/250 group 结构正确，但仅 1/250（0.4%）有两种不同非空 action 且 reward 有差异 | trajectory 21.20s，forward reward 10.41s，峰值 544/1,030 MB | 未通过；禁止进入 L2 |
 | L2 | train-1000 / val-200 | terminal vs transition target | 待运行 | 待运行 | 待运行 |
 | L3 | dev-unique1000 | ordinary Euler off/on | 待运行 | 待运行 | 待运行 |
 
 ## 7. 当前结论
 
-这是 P1/P2 endpoint reward 校准失败后唯一正在推进的下一项：它不声称“reward 更准确”，而检验“已有 reward 是否被赋给了正确时间尺度上的编辑”。L0 已确认记录机制不改变采样；在 L1 数据质量还未通过前，仍禁止重训 guidance、扫描 β、使用确认集或运行 `src-test`。
+这是 P1/P2 endpoint reward 校准失败后唯一正在推进的下一项：它不声称“reward 更准确”，而检验“已有 reward 是否被赋给了正确时间尺度上的编辑”。L0 已确认记录机制不改变采样；L1 已表明“紧邻的一个数值 Euler step”几乎全为 no-op，故 transition target 不能直接用于 guidance 训练。除非先提出并通过新的局部时间尺度／event conditioning 数据诊断，仍禁止重训 guidance、扫描 β、使用确认集或运行 `src-test`。
 
 ## 8. 阶段 L0 实现与验证记录（2026-08-11）
 
@@ -182,3 +185,59 @@ CPU clone，L1 会在真实 100-step 设置下重新记录效率。
 
 **L0 结论：通过。** 接下来只进行 L1 的数据结构与局部 action 可用性审计，不训练 guidance，
 不读取开发/测试 target，也不做 Top-k。
+
+## 9. 阶段 L1 数据质量审计记录（2026-08-11）
+
+### 固定数据和 reward 构造
+
+L1 使用训练 split 的原始完整反应块 `[1200, 1250)`。它与此前 guidance/reward 训练的
+`[0,1000)`、reward calibration holdout 的 `[1000,1200)`、L0 smoke 的 `[1250,1252)` 都不重叠；
+没有读取 validation 或 test target。配置在运行前固定为：100 个 Euler 数值步，anchor step
+10/30/50/70/90，每个共享 anchor 4 条 child、batch 32、seed 42，并记录每个 child 的第一数值步
+post-edit state。
+
+先得到 1,000 条记录／250 个 group 的 validity 文件，再在**同一固定终点**上附加既有的
+Molecular Transformer forward-beam=5 reciprocal-rank reward（canonical source、batch 16）。文件不进
+Git，SHA-256 为：
+
+```text
+local_credit_l1_train50_start1200_validity.pt  a3c52c3d881e79b4c8698116ddb68ac19ef605b78449ce9c6e1b2a8987a162c1
+local_credit_l1_train50_start1200_beam.pt      0a384760e6b9520cdb606cdeaa0bfd5c042263286b2403032fb35eba4b272a74
+local_credit_l1_train50_start1200_action_audit.json
+                                                78492aba89b9f59bc9729c429c6ffd40cea41b82b30f9ab61e5ace503158adef
+```
+
+轨迹生成 wall 为 **21.20 s**（47.18 records/s），峰值 CUDA allocated/reserved 为
+**544.2/1029.7 MB**；forward reward wall 为 **10.41 s**，1,000 个终点的 forward-beam hit rate 为
+67.9%，平均 reward 0.6157。此处 reward 只来自产物和已生成终点，未使用真实反应物。
+
+### 结构正确性
+
+审计确认 250/250 group 都恰有 4 条 record，250/250 group 的中间 state 和 time 分别完全一致；
+所有 1,500 个同 group pair 的 state 都一致。因此失败不是共享 anchor、字段写入、padding 或
+forward reward 附加错误造成的。
+
+### 关键结果：单数值步的编辑过于稀疏
+
+| anchor step | 真实一步 non-noop child | 有两种不同 action 且 reward 有差异的 group | 旧 terminal 对齐的 non-noop child |
+|---:|---:|---:|---:|
+| 10 | 0 / 200（0.0%） | 0 / 50（0.0%） | 193 / 200（96.5%） |
+| 30 | 3 / 200（1.5%） | 0 / 50（0.0%） | 190 / 200（95.0%） |
+| 50 | 7 / 200（3.5%） | 0 / 50（0.0%） | 188 / 200（94.0%） |
+| 70 | 14 / 200（7.0%） | 0 / 50（0.0%） | 183 / 200（91.5%） |
+| 90 | 27 / 200（13.5%） | 1 / 50（2.0%） | 103 / 200（51.5%） |
+| 合计 | **51 / 1000（5.1%）** | **1 / 250（0.4%）** | **857 / 1000（85.7%）** |
+
+一步 target 中的 53 个实际编辑有 49 个插入、4 个替换、0 个删除；其平均每条 record 的编辑数仅
+0.053。相比之下旧 terminal 对齐平均每条有 2.877 个编辑，正是它把未来整条路径混入当前标签的
+直接量化证据。
+
+这不是采样 bug：Euler 的 100 个数值步把连续时间切得很细，某一步通常发生“什么也不编辑”。在
+推理时这仍是正确的随机过程；但当前 action-mask Bregman/ranking 训练对 no-op 没有一个可加 reward
+的具体编辑，因此绝大多数 record 只提供 background 信号。直接用这份数据跑 2,000-step training 会
+把实验资源花在 94.9% 的无 action label 上，也无法公平比较 terminal/transition。
+
+**L1 结论：不通过。** 预注册门槛为严格 local-discriminative group 比例超过 20%，实测仅 0.4%。
+L2/L3 不启动。下一项只能是一个新的、先做小型数据诊断的方案：要么在当前状态显式按“发生编辑”
+条件采样多个 action proposal，要么定义经证明足够短的多数值步局部窗口；不能把更多训练步、更多
+β 扫描或更大训练集当作对这一数据缺陷的补救。

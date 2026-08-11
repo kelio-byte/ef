@@ -1542,6 +1542,8 @@ final 在该 split 上的 Top-k 排序优于 best，但 Oracle 低 3 个百分�
 L0 的 2-reaction CUDA smoke 已通过：打开记录不改变相同 seed 下任何旧字段、终点 token 或 reward，
 6/6 shared-anchor group 仍严格共享状态和时间，GPU 峰值内存不变。定向回归为 69 passed。下一阶段
 仅在与以往 reward/calibrator 划分不重叠的 50 个训练反应上审计“一步真实编辑是否足够多、是否带有
-组内 reward 差异”；在该 gate 通过之前不重新训练 adapter、不扫描 guidance 强度，也不做开发集
-Top-k 实验。完整方案、具体 hash 和 smoke 性能记录见
+组内 reward 差异”。该 gate 已完成但**失败**：100-step Euler 下 1,000 条 record 只有 51 条（5.1%）
+在紧邻数值步发生编辑，只有 1/250（0.4%）共享状态 group 同时有两种不同编辑及 reward 差异，远低于
+预注册的 20%。因此不重新训练 adapter、不扫描 guidance 强度，也不做开发集 Top-k 实验；下一步先
+比较 event-conditioned proposal 与短局部时间窗口这两种替代数据定义。完整方案、具体 hash 和结果见
 `new_docs/dgm_local_credit_assignment_plan.md`。
