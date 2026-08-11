@@ -297,8 +297,8 @@ normalization 的能力边界一致。若未来改用会改变总 rate 的推理
 |---|---|---|---|---|
 | E0 | helper 单元测试 + 2 reaction CUDA smoke | 100 steps，5 anchor，4 child | 每 child 恰有一个有效 state-changing action；不改普通 Euler；rollout 起始时间正确（已通过） | 不适用；进入 E1 |
 | E1 | 50-reaction 数据质量 pilot | 新的 train 原始块 `[1252,1302)`；同 L1 reward | group 完整共享；严格 local-discriminative group **>20%**；记录 action 类型、重复率、wall/显存（**已通过**） | 不进入正式数据／训练，记录负结果 |
-| E2 | 正式离线对照 | train `[0,1000)` / val `[0,200)`，除 target source 外固定（待开始） | event proposal candidate 通过 held-out Bregman guard，且同 group 的局部 ranking/correlation 有可解释提升 | 不做 Top-k |
-| E3 | frozen ordinary-Euler dev | 既有 1,000-reaction开发协议 | Top-1 不降且至少一项深层 Top-k/Oracle 改善 | 记录并关闭 E 支线 |
+| E2 | 正式离线对照 | train `[0,1000)` / val `[0,200)`，除 target source 外固定（**已完成，未通过**） | event proposal candidate 通过 held-out Bregman guard，且同 group 的局部 ranking/correlation 有可解释提升 | 不做 Top-k |
+| E3 | frozen ordinary-Euler dev | 既有 1,000-reaction开发协议（**未启动：E2 gate 未通过**） | Top-1 不降且至少一项深层 Top-k/Oracle 改善 | 记录并关闭 E 支线 |
 
 E1 只检查数据，不能因“每条都已有 action”便跳到 E2。由于 E 会额外增加每个 anchor 一次冻结模型
 前向，smoke 和 E1 必须报告总 wall、records/s、峰值显存；在没有实测前，不宣称它更快或更慢。
@@ -418,3 +418,53 @@ validation record，并固定 group/tie 规则。candidate 只有同时满足下
 
 这些阈值不是最终准确率结论，只是要求局部监督至少带来可超过浮动噪声的、同一评价目标下的改善。任一
 条件不通过时，记录两个模型的完整曲线和效率，但不做 Top-k、beta 扫描或 Euler-Beam 实验。
+
+### 10.8 E2 正式离线对照结果（2026-08-11）
+
+正式 event-conditioned train 数据含 20,000 record／5,000 个完整 group；validation 含 4,000
+record／1,000 个完整 group。两个 split 都通过正式 audit：train 为 **20,000/20,000**、validation 为
+**4,000/4,000** proposal-to-transition 精确重建，group 的 state/time 均完全共享。加入 forward reward 后，
+train/validation 严格局部可区分 group 比例分别为 **31.62%** 与 **33.00%**，均超过 E1 的 20% 数据门槛。
+train 的平均 reward 为 **0.5182**（非零 55.25%）；forward reward 去重后实际生成 5,380 个 source，wall
+249.72 s。validation 去重后生成 967 个 source，wall 47.65 s。event proposal 轨迹生成的 train/validation
+wall 分别为 347.83/69.87 s；这四个时间都是离线构造成本。
+
+两套 adapter 都按 10.7 的固定 Bregman-only 配置训练满 2,000 step（7 个 epoch），并且完整 config 的逐字段
+比较确认：除 `action_target_source`（terminal 对 transition）和输出目录外**没有任何差异**。control wall
+**861.59 s**，candidate wall **817.09 s**；两者峰值 CUDA allocated/reserved 都为约 **2.059/3.592 GB**。
+两者的 own validation best 都恰好在 **step 900**，而非 2,000 边界：control best loss 0.59250，candidate
+best loss 0.59151。因两种 own target 的 selected-action 数量不同，这两个 own loss 不用于方法胜负判断；它们
+只说明 500 step 不足以稳定选择 checkpoint，而 2,000 step 已覆盖各自的最佳点并揭示后续反弹。
+
+随后在同一个 transition-target validation、相同 4,000 record／1,000 group、相同 all-anchor/tie 规则下，
+对两个选出的 best checkpoint 做只读评分：
+
+| 指标 | terminal control | transition candidate | candidate − control | E2 门槛 |
+|---|---:|---:|---:|---:|
+| Bregman（越低越好） | 0.592684 | 0.591509 | −0.198% | 至少 −2%（≤ 0.580830） |
+| tie-aware pair accuracy | 55.328% | 53.689% | −1.639 pp | 至少 +3 pp（≥ 58.328%） |
+| reward–selected-score Pearson | 0.127743 | 0.120844 | −0.006899 | 至少 +0.05（≥ 0.177743） |
+
+**E2 结论：未通过。** candidate 的共同 Bregman 只得到 0.198% 的微小下降，远低于 2% guard，且两个局部
+排序指标均下降。因此目前证据不支持“将同一 terminal reward 赋给 event-conditioned 的第一原子编辑”比
+终点对齐更有可用的局部 ranking 信号。它不是采样正确性失败、数据缺少 action、训练步数不足或两组配置
+不一致：这些可能性已分别由 100% 重建审计、31–33% 可区分 group、step-900 best 和 config diff 排除。
+按预注册规则，**不运行 E3 的 ordinary-Euler Top-k，不扫描 guidance beta，不接 Euler-Beam**；E 支线在
+此版本关闭，不能将这两个 checkpoint 作为性能改进方法报告。
+
+本阶段正式 artifact SHA-256：
+
+```text
+event_proposal_e2_train1000_t10_30_50_70_90_beam.pt
+    514ccb0eee496021d97217757a0e80d5d56f6631bd972f75f0b42ff73e06c691
+event_proposal_e2_train1000_t10_30_50_70_90_action_audit.json
+    f960aaba9157942b4b3ab1b5018308b4fd4261adc771052b391c9b27800963a8
+event_proposal_e2_val200_t10_30_50_70_90_beam.pt
+    f6fa8fab78c36ca35a762400c95e935bc1fd9feeb930acc11b490d46d243cae0
+event_proposal_e2_val200_t10_30_50_70_90_action_audit.json
+    34a5685dd341c5923e8a174d94ca3608a13a9f5c6d9375574d1225a6c05dc3d4
+event_proposal_e2_control_terminal_2000_seed42/guidance_best.pt
+    38dd0ebaac528921ea99c38b3a6f91659411ed8a0d2e966a928d79c0b524701f
+event_proposal_e2_transition_2000_seed42/guidance_best.pt
+    cf051f8c3d09812302a6831276fbc45711624af0713f891750f8cda8ce9a275e
+```

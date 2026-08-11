@@ -1554,7 +1554,11 @@ Euler 默认路径不变的情况下，从当前基础 rate field 中**条件于
 2/1000 条历史数据；采样入口 clone 修复后，用相同 seed 重跑，终点和 reward 逐条不变，仅两条受污染的
 第一步后继被校正。
 
-下一步是 E2：重新构造 train-1000/validation-200 的**同一 event-conditioned**数据，并训练两个完全
-匹配的 2,000-step guidance 对照（终点对齐 control、一步 transition candidate）。只要 held-out 的
-Bregman guard 以及同组局部 ranking/correlation 都有可解释改善，才进入 frozen ordinary-Euler 的 Top-k
-开发集评估；完整方案、artifact hash 与门槛见 `new_docs/dgm_local_credit_assignment_plan.md`。
+E2 已在重新构造的 train-1000/validation-200 **同一 event-conditioned**数据上完成：两个完全匹配的
+2,000-step adapter（终点对齐 control、一步 transition candidate）均在 step 900 取得 own validation
+best，说明此前 500-step pilot 不足以稳定选点，但也没有证据显示需要超过 2,000 step。共同
+transition-target validation 的结果没有通过预注册 gate：candidate Bregman 仅比 control 低 **0.198%**
+（要求至少 2%），pair accuracy 反而低 **1.639 pp**，Pearson 低 **0.0069**。因此这条“把终点 reward
+归因到 event-conditioned 原子编辑”的实现没有产生足够的局部排序收益，按规则不运行 ordinary-Euler
+Top-k、beta 扫描或 Euler-Beam；完整数据审计、训练时间、config 等价性和 artifact hash 见
+`new_docs/dgm_local_credit_assignment_plan.md`。
