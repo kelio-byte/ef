@@ -242,7 +242,7 @@ L2/L3 不启动。下一项只能是一个新的、先做小型数据诊断的�
 条件采样多个 action proposal，要么定义经证明足够短的多数值步局部窗口；不能把更多训练步、更多
 β 扫描或更大训练集当作对这一数据缺陷的补救。
 
-## 10. 后续候选 E：按事件条件抽样的原子编辑 proposal（已预注册，尚未实现）
+## 10. 候选 E：按事件条件抽样的原子编辑 proposal（已实现；E1 已通过）
 
 ### 10.1 为什么优先验证它
 
@@ -296,8 +296,8 @@ normalization 的能力边界一致。若未来改用会改变总 rate 的推理
 | 阶段 | 工作 | 固定数据／配置 | 通过条件 | 不通过时的动作 |
 |---|---|---|---|---|
 | E0 | helper 单元测试 + 2 reaction CUDA smoke | 100 steps，5 anchor，4 child | 每 child 恰有一个有效 state-changing action；不改普通 Euler；rollout 起始时间正确（已通过） | 不适用；进入 E1 |
-| E1 | 50-reaction 数据质量 pilot | 新的 train 原始块 `[1252,1302)`；同 L1 reward | group 完整共享；严格 local-discriminative group **>20%**；记录 action 类型、重复率、wall/显存 | 不进入正式数据／训练，记录负结果 |
-| E2 | 正式离线对照 | train `[0,1000)` / val `[0,200)`，除 target source 外固定 | event proposal candidate 通过 held-out Bregman guard，且同 group 的局部 ranking/correlation 有可解释提升 | 不做 Top-k |
+| E1 | 50-reaction 数据质量 pilot | 新的 train 原始块 `[1252,1302)`；同 L1 reward | group 完整共享；严格 local-discriminative group **>20%**；记录 action 类型、重复率、wall/显存（**已通过**） | 不进入正式数据／训练，记录负结果 |
+| E2 | 正式离线对照 | train `[0,1000)` / val `[0,200)`，除 target source 外固定（待开始） | event proposal candidate 通过 held-out Bregman guard，且同 group 的局部 ranking/correlation 有可解释提升 | 不做 Top-k |
 | E3 | frozen ordinary-Euler dev | 既有 1,000-reaction开发协议 | Top-1 不降且至少一项深层 Top-k/Oracle 改善 | 记录并关闭 E 支线 |
 
 E1 只检查数据，不能因“每条都已有 action”便跳到 E2。由于 E 会额外增加每个 anchor 一次冻结模型
@@ -336,3 +336,53 @@ event_proposal_e0_smoke_action_audit.json
 该极小 smoke 的 40 个 proposal 都是插入，和 L1 自然事件中插入占多数的现象一致；样本太小且只用
 validity reward，不能据此判断操作多样性或方法效果。其唯一结论是 E0 的数据和时间语义正确，允许
 按预注册的 `[1252,1302)`、raw forward-beam E1 pilot 检查 action diversity 与 group reward 信号。
+
+### 10.6 E1 数据质量 pilot（2026-08-11）
+
+E1 使用训练 split 的原始完整反应 `[1252,1302)`；它与 L1 的 `[1200,1250)`、L0 的
+`[1250,1252)`、E0 的 `[1302,1304)` 均不重叠，也没有读取 validation/test target。运行前固定配置为
+冻结的 Edit Flows checkpoint、100 个 Euler 数值步、anchor step 10/30/50/70/90、每个共享 anchor 4 条
+child、batch 32、seed 42；终点使用同一个 canonicalized forward-beam（beam 5）倒数排名 reward。
+
+首次生成后，新加入的 proposal-to-transition 精确重建审计发现 **2/1000** 条 transition 不可由其记录的
+原子 action 重建。排查确认不是 proposal 的概率或 seed 问题，而是普通 Euler continuation 在输入已经位于
+GPU 时复用了该 tensor，并对其进行原地替换；于是被保存作监督目标的第一步后继在后续 rollout 中被改写。
+修复为在普通采样入口显式复制输入 state，并加入 GPU-resident input 不变性的回归测试（commit
+`68f89de`）。修复前的 validity、beam 和审计 artifact 均改名保留为
+`*_pre_input_clone_fix.*`，不用于任何训练或结果结论。
+
+在相同反应、seed 与配置下重跑后，1,000 条 record 的 product、共享 anchor、proposal 元数据、terminal
+tokens 和 validity reward 与修复前逐条完全一致；只有原先受污染的第 745、992 条
+`transition_tokens` 被纠正。这说明修复没有改变基础随机过程或终点 reward。正式 final audit 的结果为：
+
+- 250/250 个 group 具有 4 条 child，且全部严格共享相同 state/time；
+- 1,000/1,000 个 transition 可由记录的 operation、position、token 精确重建，且每条恰有一个非空原子编辑；
+- action 类型为 904 个插入、86 个替换、10 个删除；
+- forward-beam 重构命中率为 **65.8%**，平均 reward 为 **0.5811**；114/250（45.6%）group 的终点 reward
+  有变化；
+- 严格的“不同局部 action 且 action 平均 reward 不同”的 group 为 **98/250 = 39.2%**，超过预注册
+  20% 门槛；按 step 10/30/50/70/90 分别为 **48% / 44% / 44% / 36% / 24%**。
+
+事件 proposal 的生成 wall 为 **16.599 s**（60.24 records/s），峰值 CUDA
+allocated/reserved 为 **500.8 MB / 2.921 GB**；forward reward 另耗 **11.897 s**。这只是离线数据
+构造成本，不能被表述为线上推理更快或更慢。
+
+正式 artifact 的 SHA-256：
+
+```text
+event_proposal_e1_train50_start1252_validity.pt
+    500f9c874f457b5885f515f89e7d8007855b44f0e2e9f03dc2382f7aa4aaab12
+event_proposal_e1_train50_start1252_validity_action_audit.json
+    73f4adcd9ca0c5a6982512af71ef1f4193bcc7940b88096ba7b23abb21c3da77
+event_proposal_e1_train50_start1252_beam.pt
+    ef927ca238335ee463a5d21eeb11a6c0e9c35f39914e2d5b31fc8f8814477dc0
+event_proposal_e1_train50_start1252_action_audit.json
+    f631fbb5b35ca8c8b5efa25bd931a82015fc06d7e60bc3ec27c83a48dc629289
+```
+
+**E1 结论：通过。** L1 的失败来自自然数值步大多数没有编辑；E1 已验证在不改变普通 Euler 默认路径的
+前提下，按“发生有效编辑”条件抽取原子 action 能稳定提供可区分的局部监督。允许进入 E2，但 E2 必须在
+同一 event-conditioned 数据分布上训练两个 2,000-step 对照：终点对齐 control 与一步 transition
+candidate；两者的架构、seed、batch、optimizer、grouped batch、pairwise/calibration 设置和 checkpoint
+选择规则完全相同，唯一不同是哪些 action mask 获得同一条终点 reward。E2 的 held-out validation data
+也用同样的 event-conditioned 生成器构造，不能复用旧的自然-Euler guidance 文件。

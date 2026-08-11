@@ -1540,10 +1540,21 @@ final 在该 split 上的 Top-k 排序优于 best，但 Oracle 低 3 个百分�
 同步采用同一种 target，避免混用。
 
 L0 的 2-reaction CUDA smoke 已通过：打开记录不改变相同 seed 下任何旧字段、终点 token 或 reward，
-6/6 shared-anchor group 仍严格共享状态和时间，GPU 峰值内存不变。定向回归为 69 passed。下一阶段
-仅在与以往 reward/calibrator 划分不重叠的 50 个训练反应上审计“一步真实编辑是否足够多、是否带有
-组内 reward 差异”。该 gate 已完成但**失败**：100-step Euler 下 1,000 条 record 只有 51 条（5.1%）
-在紧邻数值步发生编辑，只有 1/250（0.4%）共享状态 group 同时有两种不同编辑及 reward 差异，远低于
-预注册的 20%。因此不重新训练 adapter、不扫描 guidance 强度，也不做开发集 Top-k 实验；下一步先
-比较 event-conditioned proposal 与短局部时间窗口这两种替代数据定义。完整方案、具体 hash 和结果见
-`new_docs/dgm_local_credit_assignment_plan.md`。
+6/6 shared-anchor group 仍严格共享状态和时间，GPU 峰值内存不变。定向回归为 69 passed。随后在与以往
+reward/calibrator 划分不重叠的 50 个训练反应上审计“一步真实编辑是否足够多、是否带有组内 reward
+差异”。该 natural-Euler gate **失败**：100-step Euler 下 1,000 条 record 只有 51 条（5.1%）在紧邻
+数值步发生编辑，只有 1/250（0.4%）共享状态 group 同时有两种不同编辑及 reward 差异，远低于预注册的
+20%。因此没有直接重训 adapter、扫描 guidance 强度或做开发集 Top-k。
+
+作为这个数据缺陷的最小替代，已实现并完成 event-conditioned atomic proposal 的 E0/E1：在保持普通
+Euler 默认路径不变的情况下，从当前基础 rate field 中**条件于发生一个有效编辑**抽取一个原子 action，
+再从同一数值步的终点时间继续普通 Euler。E1 在另一段 50 个训练反应上通过严格审计：1,000/1,000 个
+记录的第一步后继都能由保存的 action 精确重建，98/250（**39.2%**）共享状态组同时有不同局部 action
+和不同 forward reward，超过 20% 门槛。一次审计还捕获了 GPU 输入 tensor 被 continuation 原地改写的
+2/1000 条历史数据；采样入口 clone 修复后，用相同 seed 重跑，终点和 reward 逐条不变，仅两条受污染的
+第一步后继被校正。
+
+下一步是 E2：重新构造 train-1000/validation-200 的**同一 event-conditioned**数据，并训练两个完全
+匹配的 2,000-step guidance 对照（终点对齐 control、一步 transition candidate）。只要 held-out 的
+Bregman guard 以及同组局部 ranking/correlation 都有可解释改善，才进入 frozen ordinary-Euler 的 Top-k
+开发集评估；完整方案、artifact hash 与门槛见 `new_docs/dgm_local_credit_assignment_plan.md`。
