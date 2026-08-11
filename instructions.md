@@ -316,6 +316,24 @@ $PY scripts/audit_guidance_reward_quality.py \
 它报告全局 AUC 和同一共享状态组内 AUC，后者用于检查“从同一处境出发时 reward 是否更偏向真实
 正确的后继”。详见 `new_docs/dgm_reward_quality_protocol.md`；输出 JSON 是实验资产，不提交 Git。
 
+结构化 reward 校准 P1（当前结果**未通过 gate**，仅用于复现实验而不能直接重训 guidance）使用：
+
+```bash
+$PY scripts/train_reward_calibrator.py \
+  --train_data /root/autodl-tmp/dgm_guidance_runs/train_shared_anchor1000_t10_30_50_70_90_beam.pt \
+  --train_targets_file "$DATA/train/tgt-train.txt" \
+  --holdout_data /root/autodl-tmp/dgm_guidance_runs/reward_holdout_shared_train200_start1000_beam.pt \
+  --holdout_targets_file "$DATA/train/tgt-train.txt" \
+  --vocab_file "$DATA/example.vocab.src" \
+  --output_dir /root/autodl-tmp/dgm_guidance_runs/reward_calibration_p1_train1000_holdout_start1000 \
+  --augmentation 20 --l2 0.01 --max_steps 2000 --learning_rate 0.05 \
+  --bootstrap_samples 2000 --seed 42
+```
+
+该脚本只在离线训练/holdout 阶段读取 target 以拟合和评估小型校准器；输出候选文件只额外写入
+`calibrated_reward`，保留原始 `reward`，不保存每条候选的正确/错误标签。使用新的 reward 训练
+guidance 前，必须先通过协议中的全局与同组 AUC、固定候选预算误报率和同池 Top-k 三项 gate。
+
 ## 5. 分离运行采样和打分
 
 需要调试中间文件时使用 `sample_retro.py`：

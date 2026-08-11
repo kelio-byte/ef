@@ -180,4 +180,4 @@ correctness AUC 为 **0.6798 / 0.6971**，同一共享状态组内 AUC 为 **0.6
 42.40% 的共享状态组同时含正确与错误终点。因此它不足以作为正确性真值，也为“训练内排序改善却未提升 Top-1”提供了直接解释。
 
 该工具的单元测试与后续 reward 校准 gate 见
-`new_docs/dgm_reward_quality_protocol.md`。为避免把原有 1,000 条训练记录或开发集同时当作校准验证，已额外从训练 split 的原始反应块 1,000–1,199 构造隔离的 200-reaction holdout；其 raw forward reward 全局／同组 AUC 为 **0.7073 / 0.6836**。下一步是只在该 holdout 判定成败的、隔离且可证伪的低成本校准 pilot，而不是继续扫描 guidance 的 step 或 beta。
+`new_docs/dgm_reward_quality_protocol.md`。为避免把原有 1,000 条训练记录或开发集同时当作校准验证，已额外从训练 split 的原始反应块 1,000–1,199 构造隔离的 200-reaction holdout；其 raw forward reward 全局／同组 AUC 为 **0.7073 / 0.6836**。第一个结构化线性校准 P1 虽把全局 AUC 提至 **0.7655**，但同组 AUC 只有 **0.6843**，且相同候选池的 Top-1/Top-3 下降，因此已按 gate 拒绝，未进入 guidance 重训。唯一预注册的下一项是只追加 teacher-forced likelihood 的 P2，而不是继续扫描 guidance 的 step 或 beta。

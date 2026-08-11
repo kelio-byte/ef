@@ -96,6 +96,54 @@ reward_holdout_shared_train200_start1000_beam.pt      a3a2a30f69d8a4a2a9893c016b
 
 先训练一个小型线性或两层校准器，而不是立即重写 Molecular Transformer 或 Edit Flows。这样可以先回答“已有信号的组合能否改善 reward”，同时控制算力和过拟合风险。模型输出必须是单个可审计分数，并记录输入特征、数据范围和 checkpoint。
 
+#### 4.2.1 已冻结的 P1：结构化线性校准（已执行，不通过）
+
+为避免在 200-reaction holdout 上反复挑选特征，P1 在实现和运行前固定为**带 L2 正则的线性逻辑回归**。训练标签是“候选终点是否等于训练数据的真实反应物”；它只在训练阶段读取，模型输入绝不含 target。P1 的输入恰为下列七项、在未来生成一个候选终点后都可得到的数值：
+
+1. forward beam 的倒数排名（未重构为 0，rank 1 为 1）；
+2. 是否被 forward beam 重构到；
+3. 候选反应物能否被 RDKit 解析；
+4. 候选与输入产物的 token 长度相对差；
+5. 候选与输入产物的原子数相对差；
+6. 候选中的 SMILES 碎片数；
+7. 当前 Euler 时间。
+
+固定训练范围是原始训练反应 0–999 的既有 20,000 条终点记录；固定评估范围是新建的训练反应 1,000–1,199 的 4,000 条记录。所有连续特征只用训练范围计算均值和方差，逻辑回归使用固定 L2 `0.01`，不会用 holdout 调整正则、特征、阈值或 epoch。
+
+P1 先**不**加入 teacher-forced forward likelihood：它过去单独的 correctness AUC 仅约 0.564，且加入它会引入一次额外的正向模型计算。若 P1 不通过，才可把“在不改变其他特征和划分的情况下追加 likelihood”作为单独记录的 P2；两者不能混在同一次结果中声称成功。
+
+校准输出是“候选正确的估计概率”，用于连续排序。由于概率天然都大于 0，原协议中“错误终点得正分”的检查在 P1 中定义为：**在训练范围预先选取一个阈值，使校准器选中的候选比例等于 raw forward-beam 的正 reward 比例；冻结该阈值后，holdout 上错误候选被选中的比例不得高于 raw forward-beam。** 这样比较的是相同候选预算，而不是把“数值大于零”的字面定义误用到概率。
+
+#### 4.2.2 P1 结果（2026-08-11）：全局区分变好，但不适合本任务的局部排序
+
+P1 用 20,000 条训练终点拟合 2,000 个固定优化步，CPU wall 为 **18.01 s**；binary cross entropy 从 0.6706 收敛到 0.5672。它随后只在独立的 4,000 条／200-reaction holdout 上评估一次。校准器、带 `calibrated_reward` 的候选副本和 summary 都保存在本机，不提交 Git；后者又由现有只读审计工具独立复核，且确认副本不含任何 label、原 `reward` 完全未改写。
+
+| 指标 | raw forward-beam | P1 校准后 | 校准后 − raw |
+|---|---:|---:|---:|
+| 全局 correctness AUC | 0.7073 | **0.7655** | **+0.0583**，bootstrap 95% CI [+0.0322, +0.0820] |
+| 同一共享状态组内 AUC | 0.6836 | 0.6843 | +0.0007，CI [−0.0402, +0.0411] |
+| 固定候选预算下错误候选被选中比例 | **42.14%** | 42.28% | +0.13 pp，CI [−3.35, +3.33] pp |
+| 同一终点池重排 Top-1 | **41.5%** | 40.0% | −1.5 pp，CI [−9.0, +5.5] pp |
+| 同一终点池重排 Top-3 | **76.5%** | 73.0% | −3.5 pp，CI [−7.5, +0.5] pp |
+| 同一终点池重排 Top-10 / Oracle | 83.0% / 83.0% | 83.0% / 83.0% | 0 / 0 |
+
+这不是“校准器完全没学到东西”：它确实在跨所有产物的候选对上提升了 AUC。但 DGM action guidance 最需要的是**同一产物、同一中间状态下的几条后继谁更好**；该指标没有达到预注册的 +0.02，而且候选池内真实的 Top-1/Top-3 排序更差。因此 P1 **不通过**全部门槛，不重建 guidance 数据、不重训 guidance、不运行开发集或 test。
+
+本次实验文件的 SHA-256：
+
+```text
+calibrator.pt                 f19627ad3909c6d2deb2bfc4873258b91f67b7f5de6dda49b6289f386f7429a9
+holdout_calibrated.pt         3b915ee81fcf9b6ad8d33e6b7c81bff7f40e4efb769ea685ce8568107a544e7f
+summary.json                  1711ca200a7f2f98775bc0bf5b6bfbd24e0d818d6a0b6e9a3553b6680027e222
+audit_calibrated_reward.json  a33f0253a7cd6b119e00b67a6f6187fd532dbab97476f3cd92c899e99a8a754a
+```
+
+#### 4.2.3 唯一允许的后续校准假设 P2：追加 teacher-forced likelihood（尚未执行）
+
+P2 在 P1 结果确认前已经写入 4.2.1，因此不属于事后扫描。它只改变一件事：用同一个冻结的正向 Molecular Transformer，为每个“候选反应物 → 输入产物”计算长度归一化 teacher-forced log likelihood，并把它作为第八个特征追加到 P1 的七个特征后。数据划分、候选记录、L2、逻辑回归、训练步数、阈值规则、bootstrap、通过门槛和同候选池重排均保持不变。
+
+P2 的 likelihood 必须作为新字段附加到 `.pt` 副本中，不能覆盖 raw forward-beam reward；虽然该分数过去单独 AUC 较弱，它或许能在 beam rank 相同的候选之间提供连续的 tie-break 信息。P2 若仍未同时满足第 4.3 节全部门槛，就停止 reward 校准支线，不再增加特征、扫描正则或重跑开发集。
+
 ### 4.3 通过门槛
 
 在新的 200-reaction reward holdout 上，与原始 forward-beam reward 同时比较。只有全部条件满足才允许用新 reward 重建 guidance 数据：
@@ -106,7 +154,7 @@ reward_holdout_shared_train200_start1000_beam.pt      a3a2a30f69d8a4a2a9893c016b
 4. 计算成本、非法候选处理和所有输入输出哈希完整记录；
 5. 不根据 `evaluation_v2/dev_unique1000_aug20` 的结果挑特征、阈值或 checkpoint。
 
-若校准 pilot 未通过，就记录负结果并停止这条 reward 校准支线；不能把训练时长、beta 或分支数混入补救。若通过，才重建训练 reward、重新训练 guidance，并在冻结配置后回到 1,000-reaction development protocol 做一次 ordinary-Euler 检验。
+P1 已经未通过。因为 P2 在 P1 运行**前**已经被限定为“只追加 likelihood 的一次独立假设”，允许按上节执行一次；除此之外，不能把训练时长、beta、分支数、正则或更多特征混入补救。只有某个候选通过全部门槛，才重建训练 reward、重新训练 guidance，并在冻结配置后回到 1,000-reaction development protocol 做一次 ordinary-Euler 检验。
 
 ## 5. 当前可复现命令
 
@@ -153,4 +201,18 @@ python scripts/audit_guidance_reward_quality.py \
   --vocab_file "datasets/USPTO_50K_PtoR_aug20_#global#/example.vocab.src" \
   --augmentation 20 --score_field forward_beam_rank \
   --output_json /root/autodl-tmp/dgm_guidance_runs/reward_quality_holdout_shared_train200_start1000.json
+```
+
+P1 的完整可复现命令（**已运行且不通过，不要把输出直接作为 guidance reward**）：
+
+```bash
+python scripts/train_reward_calibrator.py \
+  --train_data /root/autodl-tmp/dgm_guidance_runs/train_shared_anchor1000_t10_30_50_70_90_beam.pt \
+  --train_targets_file "datasets/USPTO_50K_PtoR_aug20_#global#/train/tgt-train.txt" \
+  --holdout_data /root/autodl-tmp/dgm_guidance_runs/reward_holdout_shared_train200_start1000_beam.pt \
+  --holdout_targets_file "datasets/USPTO_50K_PtoR_aug20_#global#/train/tgt-train.txt" \
+  --vocab_file "datasets/USPTO_50K_PtoR_aug20_#global#/example.vocab.src" \
+  --output_dir /root/autodl-tmp/dgm_guidance_runs/reward_calibration_p1_train1000_holdout_start1000 \
+  --augmentation 20 --l2 0.01 --max_steps 2000 --learning_rate 0.05 \
+  --bootstrap_samples 2000 --seed 42
 ```
