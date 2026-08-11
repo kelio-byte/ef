@@ -297,6 +297,21 @@ continuation batch 为 `batch_size × n_children`；RTX 3090 的当前实测中 
 数据和 checkpoint 体积较大，默认不提交 Git。正向 beam reward 的 batch 8/16/32 实测中 16 最快，
 故当前推荐 16；这与前一条 Euler 数据生成的 product batch 32 是两个不同参数，不要混淆。
 
+对已经生成的 guidance 终点做**只读 reward 正确性审计**（只限 train/validation；target 只用于离线
+评估，绝不能参与 reward 生成、采样或 test 调参）：
+
+```bash
+$PY scripts/audit_guidance_reward_quality.py \
+  --data /root/autodl-tmp/dgm_guidance_runs/val_shared_anchor200_t10_30_50_70_90_beam.pt \
+  --targets_file "$DATA/val/tgt-val.txt" \
+  --vocab_file "$DATA/example.vocab.src" \
+  --augmentation 20 --score_field forward_beam_rank \
+  --output_json /root/autodl-tmp/dgm_guidance_runs/reward_quality_shared_val200_t10_30_50_70_90.json
+```
+
+它报告全局 AUC 和同一共享状态组内 AUC，后者用于检查“从同一处境出发时 reward 是否更偏向真实
+正确的后继”。详见 `new_docs/dgm_reward_quality_protocol.md`；输出 JSON 是实验资产，不提交 Git。
+
 ## 5. 分离运行采样和打分
 
 需要调试中间文件时使用 `sample_retro.py`：

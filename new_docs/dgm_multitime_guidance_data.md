@@ -167,3 +167,17 @@
 候选质量没有出现异常坍缩：平均非法率为 **11.983%**，仅比基线 11.805% 高 **0.178** 个百分点；每反应有效候选数为 **52.810**（基线 52.917），去重后的真实候选数为 **11.700**（基线 11.643），Oracle 均为 86.6%。采样耗时 **1,884.9 s**，比基线多 614.0 s（**+48.3%**）；峰值 CUDA allocated/reserved 为 0.802 / 15.527 GB（基线 0.750 / 14.332 GB）。
 
 **结论。** 延长训练解决了训练内排序不足，却没有把这一改善转化为固定 ordinary-Euler 推理中的 Top-1 提升；本次仍不满足进入确认集的首要门槛。不会在这个已使用的开发集上继续扫描 `guidance_beta`、从 step 1,300/1,700 等中间点事后选 checkpoint，或把多个 seed 的候选池合并。下一步若继续 DGM 方向，应检验 reward 的正确性区分能力和终点 reward 向动作集合分配的近似，而不是仅仅继续增加训练步数。
+
+## 10. reward 正确性审计（2026-08-11）
+
+为把“reward 有无方向”从“guidance 是否学会 reward”中分离，新增长度很小的只读工具
+`scripts/audit_guidance_reward_quality.py`。它在候选已经生成后才读取对应训练／validation target，
+将终点和 target canonicalize 后得到离线正确／错误标签；标签不会写回 `.pt`、不会用于采样，也不允许在 test 上使用。
+
+对本文件的 20,000 条 train 记录和 4,000 条 held-out validation 记录，forward-beam reward 的全局
+correctness AUC 为 **0.6798 / 0.6971**，同一共享状态组内 AUC 为 **0.6965 / 0.7308**。这说明 reward
+在真正可比的四条后继中有稳定方向；但 held-out 中 **46.05%** 的错误终点仍得到正 reward，且仅
+42.40% 的共享状态组同时含正确与错误终点。因此它不足以作为正确性真值，也为“训练内排序改善却未提升 Top-1”提供了直接解释。
+
+该工具的单元测试与后续 reward 校准 gate 见
+`new_docs/dgm_reward_quality_protocol.md`。下一步是一个隔离、可证伪的低成本校准 pilot，而不是继续扫描 guidance 的 step 或 beta。
