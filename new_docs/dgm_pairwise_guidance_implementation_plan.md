@@ -2,7 +2,7 @@
 
 > 日期：2026-08-08
 > 执行对象：后续 GPT-Luna / 项目维护者
-> 状态：P0–P5、P5b、P5c、P5d、P5e、P5f 已完成；P5f 部分改善但联合门槛未通过，P6 暂缓。2026-08-11 在新的 1,000 反应开发集上重跑后，共享中间状态 guidance 的 Top-10 有 +1.4 个百分点信号，但 Top-1 为 −2.0 个百分点（配对 95% 区间 [−3.9, −0.2]），仍未获得进入确认集的资格。
+> 状态：P0–P5、P5b、P5c、P5d、P5e、P5f 已完成；P5f 部分改善但联合门槛未通过，P6 暂缓。2026-08-11 在新的 1,000 反应开发集上，原共享中间状态 guidance 的 Top-10 有 +1.4 个百分点信号但 Top-1 为 −2.0 个百分点（配对 95% 区间 [−3.9, −0.2]）。后续五时间点、排序／校准 follow-up 虽通过训练级门槛，端到端 Top-1 仍为 −1.8 个百分点（[−3.7, 0.0]），故同样不进入确认集；详情见 `new_docs/dgm_multitime_guidance_data.md` 与 `new_docs/dgm_evaluation_v2.md`。
 > 研究路线：继续改进 learned action-level approximate DGM；本阶段不做 terminal reranker
 > 校准，也不进入 exact Z-space 重写。
 
