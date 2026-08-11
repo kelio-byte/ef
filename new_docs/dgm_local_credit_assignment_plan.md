@@ -295,10 +295,44 @@ normalization 的能力边界一致。若未来改用会改变总 rate 的推理
 
 | 阶段 | 工作 | 固定数据／配置 | 通过条件 | 不通过时的动作 |
 |---|---|---|---|---|
-| E0 | helper 单元测试 + 2 reaction CUDA smoke | 100 steps，5 anchor，4 child | 每 child 恰有一个有效 state-changing action；不改普通 Euler；rollout 起始时间正确 | 修正实现，不训练 |
+| E0 | helper 单元测试 + 2 reaction CUDA smoke | 100 steps，5 anchor，4 child | 每 child 恰有一个有效 state-changing action；不改普通 Euler；rollout 起始时间正确（已通过） | 不适用；进入 E1 |
 | E1 | 50-reaction 数据质量 pilot | 新的 train 原始块 `[1252,1302)`；同 L1 reward | group 完整共享；严格 local-discriminative group **>20%**；记录 action 类型、重复率、wall/显存 | 不进入正式数据／训练，记录负结果 |
 | E2 | 正式离线对照 | train `[0,1000)` / val `[0,200)`，除 target source 外固定 | event proposal candidate 通过 held-out Bregman guard，且同 group 的局部 ranking/correlation 有可解释提升 | 不做 Top-k |
 | E3 | frozen ordinary-Euler dev | 既有 1,000-reaction开发协议 | Top-1 不降且至少一项深层 Top-k/Oracle 改善 | 记录并关闭 E 支线 |
 
 E1 只检查数据，不能因“每条都已有 action”便跳到 E2。由于 E 会额外增加每个 anchor 一次冻结模型
 前向，smoke 和 E1 必须报告总 wall、records/s、峰值显存；在没有实测前，不宣称它更快或更慢。
+
+### 10.5 E0 实现与 CUDA smoke（2026-08-11）
+
+新增 `sample_event_conditioned_atomic_actions` 和
+`sample_event_conditioned_euler_transition`：前者从当前 state 的 base action-rate mass 中为每行
+抽出一项有效、会改变 token 序列的原子编辑；后者使用与普通 Euler 相同的时间映射、cross-scheduler
+rate correction、rate parameterization 和 adaptive time increment，应用这一个编辑后返回该数值步的
+真实结束时间。普通 `sample_euler` 没有调用这两个函数，默认采样路径不变。
+
+新增独立脚本 `scripts/generate_event_conditioned_guidance.py`，以避免修改已有 natural shared-anchor
+生成器。它记录 proposal 的类型、位置、token、基础 log-rate/log-probability 和 rollout 起始时间，
+并在 metadata 中明确标注 `event_conditioned_atomic_rate`、被排除的结构 token 以及时间语义，防止
+与 L0/L1 的自然数值步数据混用。
+
+自动化验证：相关 Euler/guidance 定向测试 **67 passed**。其中覆盖了同 seed proposal 可复现、每行
+恰有一个 action、BOS/PAD/结构 token 与 no-op substitute 均不会被抽到、无有效 action 会显式失败，
+以及 transition 不原地修改输入且其 time advance 正确。
+
+真实 smoke 使用冻结 checkpoint、训练原始反应 `[1302,1304)`、100 steps、anchor
+10/30/50/70/90、4 child、batch=2、seed=42；只使用 cheap validity reward，不附加 forward beam。
+生成 40 record／10 group，wall **4.391 s**（9.11 records/s），峰值 CUDA allocated/reserved
+**234.4/247.5 MB**。审计确认：10/10 group 共享 state/time；40/40 transition 都与起始 state
+不同、action mask 都恰为 1 个编辑、40/40 rollout start time 都等于相应 adaptive Euler step 的
+真实终点。文件 SHA-256：
+
+```text
+event_proposal_e0_smoke_validity.pt     17527c4339efa332d080bdefbccd18274c6d466e8c996160626326c76be8880e
+event_proposal_e0_smoke_action_audit.json
+                                        c6e8d1e84ae7979107a9da4a41258f571000e38b22ed4bf15e58e591fa2d6440
+```
+
+该极小 smoke 的 40 个 proposal 都是插入，和 L1 自然事件中插入占多数的现象一致；样本太小且只用
+validity reward，不能据此判断操作多样性或方法效果。其唯一结论是 E0 的数据和时间语义正确，允许
+按预注册的 `[1252,1302)`、raw forward-beam E1 pilot 检查 action diversity 与 group reward 信号。

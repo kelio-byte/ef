@@ -8,7 +8,12 @@ from edit_flows.core.rate_scale import apply_rate_parameterization, get_rate_sca
 from edit_flows.core.scheduler import KappaScheduler
 from edit_flows.guidance.sampling import apply_action_guidance
 from edit_flows.sampling.ops import apply_ins_del_operations
-from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
+from edit_flows.utils.tokens import (
+    BOS_TOKEN,
+    GAP_TOKEN,
+    PAD_TOKEN,
+    UNK_TOKEN,
+)
 
 
 def _event_probability(mu: Tensor, mode: str) -> Tensor:
@@ -92,6 +97,166 @@ def _sample_edit_actions(
         "sub_tokens": sub_tokens,
         "ins_probs": ins_probs,
         "sub_probs": sub_probs,
+    }
+
+
+def sample_event_conditioned_atomic_actions(
+    x_t: Tensor,
+    log_rates: Tensor,
+    log_ins_probs: Tensor,
+    log_sub_probs: Tensor,
+    *,
+    max_seq_len: int = 512,
+    pad_token: int = PAD_TOKEN,
+    bos_token: int = BOS_TOKEN,
+    forbidden_token_ids: tuple[int, ...] = (
+        PAD_TOKEN, BOS_TOKEN, GAP_TOKEN, UNK_TOKEN,
+    ),
+) -> dict[str, Tensor]:
+    """Draw one valid, state-changing atomic edit per row from base rates.
+
+    Ordinary Euler may apply zero or multiple edits in one numerical step.
+    This helper instead samples the *identity* of one edit conditional on an
+    edit occurring, using its instantaneous base-rate mass.  It is intended
+    for offline event-conditioned proposal data, not as a replacement for
+    :func:`sample_euler`.
+
+    The action support excludes structural tokens, BOS/PAD positions, no-op
+    substitutions, and insertions that would exceed ``max_seq_len``.  The
+    returned masks contain exactly one action per batch row; an all-invalid
+    row raises rather than silently emitting a no-op.
+    """
+    if x_t.ndim != 2:
+        raise ValueError("x_t must have shape [batch, length]")
+    if log_rates.ndim != 3 or log_rates.shape[:2] != x_t.shape or log_rates.shape[-1] != 3:
+        raise ValueError("log_rates must have shape [batch, length, 3]")
+    if (
+        log_ins_probs.ndim != 3
+        or log_ins_probs.shape[:2] != x_t.shape
+        or log_sub_probs.shape != log_ins_probs.shape
+    ):
+        raise ValueError(
+            "insert/substitute log probabilities must have shape "
+            "[batch, length, vocab]"
+        )
+    if max_seq_len < 1:
+        raise ValueError("max_seq_len must be positive")
+    if x_t.shape[1] < 1:
+        raise ValueError("event-conditioned proposals require a BOS-containing state")
+    if not all(torch.isfinite(value).all() for value in (
+        log_rates, log_ins_probs, log_sub_probs,
+    )):
+        raise ValueError("event-conditioned action inputs must be finite")
+
+    batch_size, sequence_length = x_t.shape
+    vocab_size = log_ins_probs.shape[-1]
+    device = x_t.device
+    if vocab_size < 1:
+        raise ValueError("event-conditioned proposals require a positive vocabulary")
+
+    editable_positions = x_t != pad_token
+    editable_positions = editable_positions.clone()
+    editable_positions[:, 0] = False
+    sequence_lengths = (x_t != pad_token).sum(dim=1)
+    insert_positions = editable_positions & (
+        sequence_lengths.unsqueeze(1) < max_seq_len
+    )
+
+    allowed_tokens = torch.ones(vocab_size, dtype=torch.bool, device=device)
+    for token in (*forbidden_token_ids, pad_token, bos_token):
+        if 0 <= int(token) < vocab_size:
+            allowed_tokens[int(token)] = False
+
+    negative_infinity = float("-inf")
+    log_insert = log_rates[:, :, 0:1] + log_ins_probs
+    log_insert = log_insert.masked_fill(
+        ~insert_positions.unsqueeze(-1), negative_infinity,
+    )
+    log_insert = log_insert.masked_fill(
+        ~allowed_tokens.view(1, 1, -1), negative_infinity,
+    )
+
+    log_substitute = log_rates[:, :, 1:2] + log_sub_probs
+    log_substitute = log_substitute.masked_fill(
+        ~editable_positions.unsqueeze(-1), negative_infinity,
+    )
+    log_substitute = log_substitute.masked_fill(
+        ~allowed_tokens.view(1, 1, -1), negative_infinity,
+    )
+    token_indices = torch.arange(vocab_size, device=device).view(1, 1, -1)
+    log_substitute = log_substitute.masked_fill(
+        token_indices == x_t.unsqueeze(-1), negative_infinity,
+    )
+
+    log_delete = log_rates[:, :, 2:3].masked_fill(
+        ~editable_positions.unsqueeze(-1), negative_infinity,
+    )
+    log_actions = torch.cat((log_insert, log_substitute, log_delete), dim=-1)
+    flat_actions = log_actions.reshape(batch_size, -1)
+    log_normalizer = torch.logsumexp(flat_actions, dim=-1)
+    invalid_rows = ~torch.isfinite(log_normalizer)
+    if invalid_rows.any():
+        rows = torch.nonzero(invalid_rows, as_tuple=False).squeeze(-1).tolist()
+        raise ValueError(
+            "event-conditioned proposal has no valid state-changing action "
+            f"for rows {rows[:10]}"
+        )
+    selected_flat = torch.multinomial(
+        torch.softmax(flat_actions, dim=-1), num_samples=1, replacement=True,
+    ).squeeze(-1)
+    selected_log_rate = flat_actions.gather(
+        1, selected_flat.unsqueeze(1),
+    ).squeeze(1)
+    selected_log_probability = selected_log_rate - log_normalizer
+
+    action_width = 2 * vocab_size + 1
+    positions = torch.div(selected_flat, action_width, rounding_mode="floor")
+    action_kind = selected_flat.remainder(action_width)
+    insert_selected = action_kind < vocab_size
+    substitute_selected = (action_kind >= vocab_size) & (
+        action_kind < 2 * vocab_size
+    )
+    delete_selected = action_kind == 2 * vocab_size
+    tokens = torch.full(
+        (batch_size,), -1, dtype=torch.long, device=device,
+    )
+    tokens[insert_selected] = action_kind[insert_selected]
+    tokens[substitute_selected] = (
+        action_kind[substitute_selected] - vocab_size
+    )
+
+    batch_indices = torch.arange(batch_size, device=device)
+    insert_mask = torch.zeros_like(x_t, dtype=torch.bool)
+    substitute_mask = torch.zeros_like(x_t, dtype=torch.bool)
+    delete_mask = torch.zeros_like(x_t, dtype=torch.bool)
+    insert_mask[batch_indices[insert_selected], positions[insert_selected]] = True
+    substitute_mask[
+        batch_indices[substitute_selected], positions[substitute_selected]
+    ] = True
+    delete_mask[batch_indices[delete_selected], positions[delete_selected]] = True
+    insert_tokens = torch.full_like(x_t, pad_token)
+    substitute_tokens = torch.full_like(x_t, pad_token)
+    insert_tokens[insert_mask] = tokens[insert_selected]
+    substitute_tokens[substitute_mask] = tokens[substitute_selected]
+    return {
+        "ins_mask": insert_mask,
+        "del_mask": delete_mask,
+        "sub_mask": substitute_mask,
+        "ins_tokens": insert_tokens,
+        "sub_tokens": substitute_tokens,
+        "position": positions,
+        "operation": torch.where(
+            insert_selected,
+            torch.zeros_like(action_kind),
+            torch.where(
+                substitute_selected,
+                torch.ones_like(action_kind),
+                torch.full_like(action_kind, 2),
+            ),
+        ),
+        "token": tokens,
+        "log_rate": selected_log_rate,
+        "log_probability": selected_log_probability,
     }
 
 
@@ -338,6 +503,116 @@ def _compute_model_time(
 
     kappa = sample_scheduler(t)
     return train_scheduler.inverse(kappa)
+
+
+@torch.no_grad()
+def sample_event_conditioned_euler_transition(
+    model,
+    x_t: Tensor,
+    scheduler: KappaScheduler,
+    *,
+    n_steps: int = 100,
+    max_seq_len: int = 512,
+    pad_token: int = PAD_TOKEN,
+    bos_token: int = BOS_TOKEN,
+    use_rate_reparam: bool = False,
+    clamp_kappa: bool = False,
+    clamp_max: float = 50.0,
+    time_input: str = "t",
+    train_scheduler: Optional[KappaScheduler] = None,
+    start_time: Tensor | float | None = None,
+) -> tuple[Tensor, Tensor, dict[str, Tensor]]:
+    """Force one base-rate-conditioned atomic edit, then advance Euler time.
+
+    This is an offline-data primitive for event-conditioned guidance
+    proposals.  It uses the same frozen-model time mapping and rate
+    parameterization as :func:`sample_euler`, but replaces that numerical
+    step's natural zero-or-many edit draw with exactly one valid atomic edit
+    from :func:`sample_event_conditioned_atomic_actions`.  The returned
+    ``next_time`` is the normal adaptive Euler endpoint, suitable for a
+    subsequent ordinary-Euler rollout.
+    """
+    if n_steps < 1:
+        raise ValueError("n_steps must be positive")
+    device = next(model.parameters()).device
+    if x_t.ndim != 2:
+        raise ValueError("x_t must have shape [batch, length]")
+    batch_size = x_t.shape[0]
+    if batch_size < 1:
+        raise ValueError("x_t must contain at least one row")
+    x_current = x_t.to(device=device).clone()
+    if start_time is None:
+        t = torch.zeros(batch_size, 1, device=device)
+    elif isinstance(start_time, Tensor):
+        t = start_time.to(device=device, dtype=torch.float32)
+        if t.ndim == 0:
+            t = t.expand(batch_size).reshape(batch_size, 1)
+        elif t.ndim == 1 and t.shape[0] == batch_size:
+            t = t.unsqueeze(1)
+        elif t.ndim == 2 and t.shape == (batch_size, 1):
+            pass
+        else:
+            raise ValueError(
+                "start_time must be scalar, [batch], or [batch, 1], got "
+                f"{tuple(t.shape)}"
+            )
+    else:
+        t = torch.full(
+            (batch_size, 1), float(start_time),
+            dtype=torch.float32, device=device,
+        )
+    if not torch.isfinite(t).all() or (t < 0).any() or (t >= 1).any():
+        raise ValueError("start_time must be finite values in [0, 1)")
+
+    x_pad_mask = x_current == pad_token
+    t_model = _compute_model_time(t, scheduler, time_input, train_scheduler)
+    log_rates, log_ins_probs, log_sub_probs = model(
+        x_current, t_model, x_pad_mask,
+    )
+    if (
+        not use_rate_reparam
+        and train_scheduler is not None
+        and scheduler.name != train_scheduler.name
+    ):
+        k_sample = get_rate_scale(
+            t, scheduler, clamp_kappa=clamp_kappa, clamp_max=clamp_max,
+        )
+        k_train = get_rate_scale(
+            t_model, train_scheduler,
+            clamp_kappa=clamp_kappa, clamp_max=clamp_max,
+        )
+        log_rates = log_rates + torch.log(
+            k_sample / k_train.clamp_min(1e-2),
+        ).unsqueeze(1)
+    log_rates = apply_rate_parameterization(
+        log_rates,
+        t,
+        scheduler,
+        use_rate_reparam=use_rate_reparam,
+        clamp_kappa=clamp_kappa,
+        clamp_max=clamp_max,
+    )
+    actions = sample_event_conditioned_atomic_actions(
+        x_current,
+        log_rates,
+        log_ins_probs,
+        log_sub_probs,
+        max_seq_len=max_seq_len,
+        pad_token=pad_token,
+        bos_token=bos_token,
+    )
+    x_next = x_current.clone()
+    x_next[actions["sub_mask"]] = actions["sub_tokens"][actions["sub_mask"]]
+    x_next = apply_ins_del_operations(
+        x_next,
+        actions["ins_mask"],
+        actions["del_mask"],
+        actions["ins_tokens"],
+        max_seq_len=max_seq_len,
+        pad_token=pad_token,
+    )
+    next_time = t + get_adaptive_h(1.0 / n_steps, t, scheduler)
+    return x_next, next_time, actions
 
 
 @torch.no_grad()

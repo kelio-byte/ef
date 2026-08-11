@@ -7,10 +7,13 @@ from edit_flows.sampling.euler import (
     get_euler_step_times,
     _sample_edit_actions,
     get_adaptive_h,
+    sample_event_conditioned_atomic_actions,
+    sample_event_conditioned_euler_transition,
     sample_euler,
 )
 from edit_flows.core.rate_scale import get_rate_scale
 from edit_flows.core.scheduler import CubicScheduler, LinearScheduler
+from edit_flows.sampling.ops import apply_ins_del_operations
 from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 
 
@@ -49,6 +52,107 @@ class TestEventProbability:
         expected = torch.tensor([0.0, 0.5, 1.0])
         assert torch.allclose(out, expected)
 
+
+class TestEventConditionedAtomicActions:
+    @staticmethod
+    def _inputs(x_t, vocab_size=16):
+        batch, length = x_t.shape
+        log_rates = torch.zeros(batch, length, 3)
+        log_probs = torch.log_softmax(
+            torch.zeros(batch, length, vocab_size), dim=-1,
+        )
+        return log_rates, log_probs, log_probs.clone()
+
+    def test_draws_one_reproducible_state_changing_action_per_row(self):
+        x_t = torch.tensor([
+            [BOS_TOKEN, 4, 5, PAD_TOKEN],
+            [BOS_TOKEN, 6, PAD_TOKEN, PAD_TOKEN],
+        ])
+        log_rates, log_ins, log_sub = self._inputs(x_t)
+        torch.manual_seed(2026)
+        first = sample_event_conditioned_atomic_actions(
+            x_t, log_rates, log_ins, log_sub, max_seq_len=16,
+        )
+        torch.manual_seed(2026)
+        second = sample_event_conditioned_atomic_actions(
+            x_t, log_rates, log_ins, log_sub, max_seq_len=16,
+        )
+        for key in ("position", "operation", "token", "log_rate", "log_probability"):
+            assert torch.equal(first[key], second[key])
+
+        action_count = (
+            first["ins_mask"].sum(dim=1)
+            + first["sub_mask"].sum(dim=1)
+            + first["del_mask"].sum(dim=1)
+        )
+        assert torch.equal(action_count, torch.ones(2, dtype=torch.long))
+        for row in range(x_t.shape[0]):
+            position = int(first["position"][row].item())
+            operation = int(first["operation"][row].item())
+            token = int(first["token"][row].item())
+            assert position > 0
+            assert int(x_t[row, position].item()) != PAD_TOKEN
+            if operation in (0, 1):
+                assert token not in {0, 1, 2, 3}
+            if operation == 1:
+                assert token != int(x_t[row, position].item())
+
+        x_next = x_t.clone()
+        x_next[first["sub_mask"]] = first["sub_tokens"][first["sub_mask"]]
+        x_next = apply_ins_del_operations(
+            x_next,
+            first["ins_mask"],
+            first["del_mask"],
+            first["ins_tokens"],
+            max_seq_len=16,
+        )
+        for row in range(x_t.shape[0]):
+            before = x_t[row][x_t[row] != PAD_TOKEN].tolist()
+            after = x_next[row][x_next[row] != PAD_TOKEN].tolist()
+            assert before != after
+
+    def test_respects_a_single_available_atomic_action(self):
+        x_t = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+        log_rates = torch.full((1, 3, 3), -1e9)
+        log_ins = torch.full((1, 3, 16), -1e9)
+        log_sub = torch.full((1, 3, 16), -1e9)
+        log_rates[0, 1, 1] = 0.0
+        log_sub[0, 1, 9] = 0.0
+        actions = sample_event_conditioned_atomic_actions(
+            x_t, log_rates, log_ins, log_sub,
+        )
+        assert int(actions["position"][0].item()) == 1
+        assert int(actions["operation"][0].item()) == 1
+        assert int(actions["token"][0].item()) == 9
+
+    def test_rejects_rows_without_an_executable_edit(self):
+        x_t = torch.tensor([[BOS_TOKEN, PAD_TOKEN]])
+        log_rates, log_ins, log_sub = self._inputs(x_t)
+        with pytest.raises(ValueError, match="no valid state-changing action"):
+            sample_event_conditioned_atomic_actions(x_t, log_rates, log_ins, log_sub)
+
+    def test_transition_advances_time_without_mutating_input(self, dummy_model):
+        dummy_model.eval()
+        x_t = torch.tensor([[BOS_TOKEN, 4, 5, PAD_TOKEN]])
+        before = x_t.clone()
+        torch.manual_seed(77)
+        x_next, next_time, actions = sample_event_conditioned_euler_transition(
+            dummy_model,
+            x_t,
+            CubicScheduler(),
+            n_steps=4,
+            max_seq_len=32,
+            start_time=0.5,
+        )
+        assert torch.equal(x_t, before)
+        assert torch.allclose(next_time, torch.tensor([[0.75]]))
+        action_count = (
+            actions["ins_mask"].sum()
+            + actions["sub_mask"].sum()
+            + actions["del_mask"].sum()
+        )
+        assert int(action_count.item()) == 1
+        assert x_next.shape[0] == 1
 
 class TestSampleEuler:
     def test_explicit_zero_start_time_matches_baseline(self, dummy_model):
