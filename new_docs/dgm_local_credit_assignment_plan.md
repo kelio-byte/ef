@@ -468,3 +468,34 @@ event_proposal_e2_control_terminal_2000_seed42/guidance_best.pt
 event_proposal_e2_transition_2000_seed42/guidance_best.pt
     cf051f8c3d09812302a6831276fbc45711624af0713f891750f8cda8ce9a275e
 ```
+
+### 10.9 用户要求的 gate 后 Top-k 诊断（不改变 E2 结论，2026-08-11）
+
+E2 已按预注册规则关闭后，用户要求直接查看该 transition checkpoint 的端到端 Top-k。为避免将
+历史的 validation-A/B 再次当作方法证据，正式诊断改用 `dgm_evaluation_v2` 的
+`dev_unique1000_aug20`：1,000 个此前未使用的原始反应、每个反应 20 条 augmentation，每条
+augmentation 生成 3 条 ordinary-Euler 候选。基线预测已存在且与本次严格同配置，所以只新增运行
+candidate，避免无意义地重跑 GPU baseline。
+
+固定条件为基础 checkpoint `checkpoint_step600000.pt`、100 个 Euler step、`n_samples=3`、batch 64、
+seed 42、`beta=0.10`、逐位置归一化；candidate 使用上节列出的 transition `guidance_best.pt`（step
+900）。它不是 beta、checkpoint 或 seed 扫描，而是一次用户要求的 post-gate 诊断。评分按原始反应聚合，
+并以 5,000 次 reaction-level paired bootstrap 比较。
+
+| 指标 | ordinary Euler 基线 | transition guidance | candidate − baseline | 配对 95% CI（pp） |
+|---|---:|---:|---:|---:|
+| Top-1 | 58.2% | 55.7% | -2.5 | [-4.5, -0.6] |
+| Top-2 | 70.7% | 70.5% | -0.2 | [-1.7, +1.3] |
+| Top-3 | 75.5% | 75.1% | -0.4 | [-1.8, +1.1] |
+| Top-5 | 79.8% | 79.4% | -0.4 | [-1.8, +1.0] |
+| Top-10 | 83.5% | 83.2% | -0.3 | [-1.8, +1.2] |
+| Oracle-any | 86.6% | 86.2% | -0.4 | [-1.7, +0.9] |
+| 平均原始候选非法率 | 11.805% | 11.937% | +0.132 | — |
+| 采样 wall time | 1,270.9 s | 1,894.9 s | +624.0 s（+49.1%） | — |
+| 峰值 reserved 显存 | 14.33 GB | 16.78 GB | +2.45 GB | — |
+
+该检查不仅没有出现深层 Top-k 或候选覆盖收益，Top-1 还出现了方向明确的下降。因此它与 E2 的局部
+gate 失败一致，而不是推翻 E2 的反例；**不进入确认集，不运行最终验证或完整 src-test，也不围绕这个
+checkpoint 继续扫描 beta。** 结果文件位于
+`results/dgm_evaluation_v2/dev_event_proposal_e2_transition_beta010_seed42/`，其中
+`comparison_to_baseline.json` 保留全部逐反应配对统计。

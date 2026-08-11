@@ -1562,3 +1562,11 @@ transition-target validation 的结果没有通过预注册 gate：candidate Bre
 归因到 event-conditioned 原子编辑”的实现没有产生足够的局部排序收益，按规则不运行 ordinary-Euler
 Top-k、beta 扫描或 Euler-Beam；完整数据审计、训练时间、config 等价性和 artifact hash 见
 `new_docs/dgm_local_credit_assignment_plan.md`。
+
+用户随后要求做一次端到端 Top-k 检查。为避免复用已退役的 validation-A/B，实际使用新的
+`dev_unique1000_aug20`（1,000 个独立反应）并复用严格同配置的 Euler baseline：100 step、每条
+augmentation 3 条候选、batch 64、seed 42、`beta=0.10`、逐位置归一化。transition checkpoint 的
+Top-1/3/5/10 为 **55.7/75.1/79.4/83.2%**，而 baseline 为 **58.2/75.5/79.8/83.5%**；Top-1 差值
+为 **−2.5 pp**，reaction-level paired 95% 区间 **[−4.5, −0.6]**，并且采样慢 **49.1%**。这是一条
+明确的负向 post-gate 诊断，不改变原 gate 或启用确认集；默认采样仍关闭该 guidance。完整记录见
+`new_docs/dgm_local_credit_assignment_plan.md` 第 10.9 节和 `new_docs/dgm_evaluation_v2.md`。
