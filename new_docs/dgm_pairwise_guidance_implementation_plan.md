@@ -2,7 +2,7 @@
 
 > 日期：2026-08-08
 > 执行对象：后续 GPT-Luna / 项目维护者
-> 状态：P0–P5、P5b、P5c、P5d、P5e、P5f 已完成；P5f 部分改善但联合门槛未通过，P6 暂缓。2026-08-11 在新的 1,000 反应开发集上，原共享中间状态 guidance 的 Top-10 有 +1.4 个百分点信号但 Top-1 为 −2.0 个百分点（配对 95% 区间 [−3.9, −0.2]）。后续五时间点、排序／校准 follow-up 虽通过训练级门槛，端到端 Top-1 仍为 −1.8 个百分点（[−3.7, 0.0]），故同样不进入确认集；详情见 `new_docs/dgm_multitime_guidance_data.md` 与 `new_docs/dgm_evaluation_v2.md`。
+> 状态：P0–P5、P5b、P5c、P5d、P5e、P5f 已完成；P5f 部分改善但联合门槛未通过，P6 暂缓。2026-08-11 在新的 1,000 反应开发集上，原共享中间状态 guidance 的 Top-10 有 +1.4 个百分点信号但 Top-1 为 −2.0 个百分点（配对 95% 区间 [−3.9, −0.2]）。后续五时间点、排序／校准 follow-up 先在 500-step 训练后端到端 Top-1 为 −1.8 个百分点；为排除欠训练，固定其余一切条件延长到 2,000 step，训练级 pair accuracy 从 control 的 59.07% 提至 63.75%，但端到端 Top-1 仍为 −1.5 个百分点（[−3.3, +0.3]）。因此同样不进入确认集，P6 继续暂缓；详情见 `new_docs/dgm_multitime_guidance_data.md` 与 `new_docs/dgm_evaluation_v2.md`。
 > 研究路线：继续改进 learned action-level approximate DGM；本阶段不做 terminal reranker
 > 校准，也不进入 exact Z-space 重写。
 
@@ -696,6 +696,22 @@ final 在该 validation-A 上的 Top-k 排序更好、Top-1--10 均高于 best�
 事后把 final 改成主 checkpoint。该结果仅作为诊断，未改变 P5f 未通过的状态，也不启动 test、10k
 或 Euler-Beam；后续若以 Top-k 为主目标，必须在新的独立 validation split 上预先定义 checkpoint
 选择规则并复核 best/final 的排序--覆盖权衡。
+
+#### P5g：五时间点数据上的训练长度受控诊断（2026-08-11）
+
+五时间点共享状态数据后来提供了一个隔离的后续检验：500 个优化步只覆盖约两个 epoch，且候选在
+step 200 后变差。为避免把“欠训练”与“目标错误”混在一起，control 和候选只将最大优化步数从
+500 改为 2,000；数据、网络、seed、学习率、batch、pairwise/calibration 权重和完整 validation
+均保持冻结。control 的最佳点为 step 700（Bregman 0.5383、pair acc 59.07%、Pearson 0.2097）；候选
+的预注册 guarded best 为 step 1,600（Bregman 0.5573，小于 0.6190 guard；pair acc **63.75%**；
+Pearson 0.2174）。候选的训练耗时 1,775.1 s，是 control 835.4 s 的 2.12 倍。
+
+因此长训练明确通过**训练级**比较：它不是仅靠牺牲基础动作拟合获得更高排序。然而固定 ordinary
+Euler 开发集（1,000 个独立反应、100 step、每 augmentation 3 candidates、seed 42、beta 0.10）上的
+Top-1 仍为 56.7%，低于同协议 Euler 基线 58.2%（配对差 −1.5pp，95% CI [−3.3, +0.3]）。Top-3/5/10
+的点差为 +0.4/+0.7/+0.3pp，置信区间均跨 0，Oracle 同为 86.6%。这说明单纯延长训练不能把更好的
+离线动作排序转化为可确认的最终准确率；不启动 P6、P7 或 Euler-Beam，也不在该开发集扫描 beta、
+seed 或中间 checkpoint。
 
 ### P6：10k 训练
 
