@@ -8,6 +8,7 @@ from scripts.generate_shared_anchor_guidance import (
     validate_shared_anchor_config,
     validate_shared_anchor_steps,
 )
+from scripts.generate_guidance_data import _read_original_products
 
 
 def test_shared_anchor_config_maps_interior_time_to_step():
@@ -47,6 +48,22 @@ def test_anchor_group_indices_separate_times_for_one_product():
         for anchor_ordinal in range(5)
     }
     assert groups == set(range(15))
+
+
+def test_original_product_reader_keeps_one_row_per_augmentation_block(tmp_path):
+    """``--max_products`` is applied after collapsing augmentation blocks."""
+    products_file = tmp_path / "products.txt"
+    products_file.write_text(
+        "reaction0_view0\nreaction0_view1\n"
+        "reaction1_view0\nreaction1_view1\n"
+        "reaction2_view0\nreaction2_view1\n",
+    )
+
+    assert _read_original_products(str(products_file), augmentation=2) == [
+        "reaction0_view0",
+        "reaction1_view0",
+        "reaction2_view0",
+    ]
 
 
 @pytest.mark.parametrize(
