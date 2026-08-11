@@ -32,6 +32,12 @@ held-out 观测已通过最低门槛；阶段 5 ordinary Euler action-level adap
 41.0/73.0%。两次均未通过 gate，reward 校准支线已经关闭：不重训 guidance、不跑开发集，也不扫描更多
 endpoint 特征或超参数。协议、防泄漏规则和完整结果见 `new_docs/dgm_reward_quality_protocol.md`。
 
+**下一项已预注册。** P1/P2 的共同教训不是继续寻找更多 terminal feature，而是检查 terminal reward
+被分配给了错误时间尺度的编辑。新方案只把一条 continuation 的终点 reward 赋给它从共享中间状态出发
+实际发生的第一步编辑，而不再把“直到最终反应物的所有未来差异”都当作当前 action label。它更接近
+局部 DGM transition credit，但仍是 Monte-Carlo 近似；完整动机、实现边界、数据隔离和 L0–L3 gate
+见 `new_docs/dgm_local_credit_assignment_plan.md`。在 L0/L1 通过前不重训 guidance 或使用开发集。
+
 本文面向本项目的实际实现，说明如何把
 `Discrete Guidance Matching (DGM)` 适配到当前的 Edit Flows 推理流程。文中把
 论文中的严格公式和第一阶段可落地的工程近似明确区分，避免把一个启发式加权方法误称为
