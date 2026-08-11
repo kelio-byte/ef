@@ -1017,6 +1017,59 @@ def _first_divergence(
     return None
 
 
+def _summarize_trajectory_run(
+    run: dict,
+    id2token: Dict[int, str],
+    n_steps: int,
+) -> dict:
+    """Return JSON-safe per-path diagnostics for the paired-panel metadata."""
+    examples: List[dict] = []
+    for example_idx, (paths, finals, correctness) in enumerate(zip(
+        run["grouped_events"], run["grouped_finals"], run["path_correctness"],
+    )):
+        path_rows: List[dict] = []
+        for path_idx, (events, final, is_correct) in enumerate(zip(
+            paths, finals, correctness,
+        )):
+            insertions = substitutions = deletions = 0
+            event_steps = set()
+            for event in events:
+                event_steps.add(int(event["step_idx"]))
+                actions = event["actions"]
+                insertions += int(actions["ins_mask"].sum().item())
+                substitutions += int(actions["sub_mask"].sum().item())
+                deletions += int(actions["del_mask"].sum().item())
+            final_text = _decode_to_smiles(final, id2token)
+            final_canonical = _canonicalize_smiles(final_text)
+            path_rows.append({
+                "path_index": path_idx,
+                "target_match": bool(is_correct),
+                "valid_final": bool(final_canonical),
+                "final_canonical": final_canonical,
+                "event_count": len(events),
+                "active_step_count": len(event_steps),
+                "no_op_step_count": max(n_steps - len(event_steps), 0),
+                "first_event_step": min(event_steps) if event_steps else None,
+                "insertions": insertions,
+                "substitutions": substitutions,
+                "deletions": deletions,
+            })
+        examples.append({"local_example_index": example_idx, "paths": path_rows})
+    return {
+        "example_count": len(examples),
+        "path_count": sum(len(row["paths"]) for row in examples),
+        "target_match_path_count": sum(
+            int(path["target_match"])
+            for row in examples for path in row["paths"]
+        ),
+        "valid_final_path_count": sum(
+            int(path["valid_final"])
+            for row in examples for path in row["paths"]
+        ),
+        "examples": examples,
+    }
+
+
 def _build_paired_overview(
     example_ids: List[int],
     product_strs: List[str],
@@ -1415,6 +1468,37 @@ def main() -> None:
             "created_at_utc": datetime.utcnow().isoformat() + "Z",
             "html": os.path.abspath(out_path),
         }
+        trajectory_summary = {
+            "Euler": _summarize_trajectory_run(
+                base_run, id2token, args.n_steps,
+            ),
+        }
+        if guided_run is not None:
+            trajectory_summary["Guidance"] = _summarize_trajectory_run(
+                guided_run, id2token, args.n_steps,
+            )
+            paired_paths = []
+            for local_idx, example_id in enumerate(selected):
+                for path_idx in range(args.n_samples):
+                    paired_paths.append({
+                        "example_id": int(example_id),
+                        "path_index": path_idx,
+                        "euler_target_match": bool(
+                            base_run["path_correctness"][local_idx][path_idx]
+                        ),
+                        "guidance_target_match": bool(
+                            guided_run["path_correctness"][local_idx][path_idx]
+                        ),
+                        "first_exact_divergence_step": _first_divergence(
+                            base_run["initial_rows"][local_idx],
+                            base_run["grouped_events"][local_idx][path_idx],
+                            guided_run["initial_rows"][local_idx],
+                            guided_run["grouped_events"][local_idx][path_idx],
+                            args.n_steps,
+                        ),
+                    })
+            trajectory_summary["paired_paths"] = paired_paths
+        metadata["trajectory_summary"] = trajectory_summary
         metadata_path = os.path.splitext(out_path)[0] + ".metadata.json"
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2, sort_keys=True)
