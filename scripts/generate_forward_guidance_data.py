@@ -5,7 +5,8 @@ This script never reads reaction targets.  It only consumes the product and
 terminal proposal already stored in a guidance-data file, so it is safe for
 train/validation reward construction.  The original reward is preserved as
 ``validity_reward``.  Teacher-forced likelihood and forward-beam product
-reconstruction are separate, auditable reward modes.
+reconstruction are separate, auditable reward modes.  ``append_likelihood``
+adds a raw likelihood field without replacing an existing reward.
 """
 
 from __future__ import annotations
@@ -193,6 +194,42 @@ def attach_forward_rewards(
                 "max": float(reward.max()) if reward.numel() else None,
             },
         }
+    elif reward_mode == "append_likelihood":
+        # Keep the existing reward untouched.  This enables a controlled
+        # downstream calibration experiment without accidentally training on
+        # a different reward field.
+        cache: dict[tuple[str, str], float] = {}
+        raw = forward_log_likelihood_reward(
+            scorer,
+            reactants,
+            products,
+            batch_size=batch_size,
+            cache=cache,
+        )
+        output_records = []
+        for record, raw_value in zip(records, raw.tolist()):
+            updated = dict(record)
+            updated["forward_log_likelihood"] = float(raw_value)
+            output_records.append(updated)
+        # ``_group_reward_statistics`` remains useful provenance in every
+        # mode; for this non-destructive mode it summarizes the original one.
+        reward = torch.tensor(
+            [float(record.get("reward", 0.0)) for record in records],
+            dtype=torch.float32,
+        )
+        metadata = {
+            "forward_log_likelihood_attached": True,
+            "forward_log_likelihood_unique_pairs": len(cache),
+            "forward_log_likelihood_cache_hit_count": len(records) - len(cache),
+            "forward_log_likelihood_invalid_score": -20.0,
+        }
+        report = {
+            "forward_log_likelihood": {
+                "min": float(raw.min()) if raw.numel() else None,
+                "mean": float(raw.mean()) if raw.numel() else None,
+                "max": float(raw.max()) if raw.numel() else None,
+            },
+        }
     else:
         raise ValueError(f"unsupported reward_mode: {reward_mode}")
     reward_wall_seconds = time.perf_counter() - started
@@ -215,7 +252,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument(
         "--reward_mode",
-        choices=("likelihood", "beam_reconstruction"),
+        choices=("likelihood", "beam_reconstruction", "append_likelihood"),
         default="likelihood",
     )
     parser.add_argument("--reward_temperature", type=float, default=1.0)

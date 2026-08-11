@@ -49,6 +49,22 @@ def test_candidate_table_uses_only_record_features_and_target_labels():
     assert table.canonical_targets == {0: "CO", 1: "N"}
 
 
+def test_p2_appends_only_the_predeclared_likelihood_feature():
+    id2token = {0: "<pad>", 1: "<bos>", 2: "C", 3: "O", 4: "N"}
+    records = [
+        _record(0, 0, [1, 2, 3], [1, 2, 3], 1, 0.1),
+        _record(0, 0, [1, 2, 3], [1, 2], 0, 0.1),
+    ]
+    records[0]["forward_log_likelihood"] = -0.25
+    records[1]["forward_log_likelihood"] = -3.0
+    table = calibrator.build_candidate_table(
+        records, ["C O"], id2token, include_forward_log_likelihood=True,
+    )
+    assert table.feature_names == calibrator.P2_FEATURE_NAMES
+    assert table.features.shape == (2, len(calibrator.P2_FEATURE_NAMES))
+    assert table.features[:, -1].tolist() == pytest.approx([-0.25, -3.0])
+
+
 def test_linear_calibrator_scores_a_simple_separable_signal():
     features = torch.tensor([
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -106,3 +122,4 @@ def test_parser_defaults_are_frozen_for_p1():
     assert args.l2 == 0.01
     assert args.max_steps == 2000
     assert args.bootstrap_samples == 2000
+    assert args.include_forward_log_likelihood is False

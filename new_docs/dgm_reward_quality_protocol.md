@@ -138,11 +138,37 @@ summary.json                  1711ca200a7f2f98775bc0bf5b6bfbd24e0d818d6a0b6e9a35
 audit_calibrated_reward.json  a33f0253a7cd6b119e00b67a6f6187fd532dbab97476f3cd92c899e99a8a754a
 ```
 
-#### 4.2.3 唯一允许的后续校准假设 P2：追加 teacher-forced likelihood（尚未执行）
+#### 4.2.3 唯一允许的后续校准假设 P2：追加 teacher-forced likelihood（已执行，不通过）
 
 P2 在 P1 结果确认前已经写入 4.2.1，因此不属于事后扫描。它只改变一件事：用同一个冻结的正向 Molecular Transformer，为每个“候选反应物 → 输入产物”计算长度归一化 teacher-forced log likelihood，并把它作为第八个特征追加到 P1 的七个特征后。数据划分、候选记录、L2、逻辑回归、训练步数、阈值规则、bootstrap、通过门槛和同候选池重排均保持不变。
 
 P2 的 likelihood 必须作为新字段附加到 `.pt` 副本中，不能覆盖 raw forward-beam reward；虽然该分数过去单独 AUC 较弱，它或许能在 beam rank 相同的候选之间提供连续的 tie-break 信息。P2 若仍未同时满足第 4.3 节全部门槛，就停止 reward 校准支线，不再增加特征、扫描正则或重跑开发集。
+
+实际实现新增 `append_likelihood` 模式：它读取已有 beam reward 数据、仅新增长度归一化的 `forward_log_likelihood`，保留每条记录原有的 `reward`、`forward_beam_rank` 和 provenance。20,000 条训练记录／4,000 条 holdout 记录的特征附加分别耗时 **8.03 s / 2.45 s**，GPU batch 均为 16。holdout 上 likelihood 单独的全局／同组 AUC 为 **0.5596 / 0.5532**，符合它只能作为连续补充信号、不能替代 beam reward 的预期。
+
+P2 的逻辑回归仍为 2,000 个固定步，CPU wall **20.48 s**，训练 BCE 从 0.6706 降到 0.5655。其 holdout 结果为：
+
+| 指标 | raw forward-beam | P2 校准后 | 校准后 − raw |
+|---|---:|---:|---:|
+| 全局 correctness AUC | 0.7073 | **0.7598** | **+0.0526**，bootstrap 95% CI [+0.0262, +0.0784] |
+| 同一共享状态组内 AUC | 0.6836 | **0.7093** | **+0.0257**，CI [−0.0256, +0.0757] |
+| 固定候选预算下错误候选被选中比例 | 42.14% | **41.26%** | −0.88 pp，CI [−4.39, +2.53] pp |
+| 同一终点池重排 Top-1 | **41.5%** | 41.0% | −0.5 pp，CI [−8.0, +6.5] pp |
+| 同一终点池重排 Top-3 | **76.5%** | 73.0% | −3.5 pp，CI [−8.0, +1.0] pp |
+| 同一终点池重排 Top-10 / Oracle | 83.0% / 83.0% | 83.0% / 83.0% | 0 / 0 |
+
+P2 是比 P1 更有意义的诊断：它首次让 **同一共享状态内**的 AUC 点估计超过 +0.02，同时降低固定预算误报率。但它仍使终点池 Top-1/Top-3 下降，没有满足“Top-1 不低于 raw，且 Top-3/Top-10/coverage 至少一项提高”的硬门槛。因此 **P2 也拒绝**，不重建 guidance reward、不重训 guidance、不运行开发集或 test，reward 校准支线至此关闭。
+
+P2 相关文件 SHA-256：
+
+```text
+train_shared_anchor1000_t10_30_50_70_90_beam_likelihood.pt  20163e5b24fd7cacb1dca2331d088f3371de105c2402f68772ab2e8816c6a243
+reward_holdout_shared_train200_start1000_beam_likelihood.pt f0ff064afe8456f24cf351699ea05503c0e8a14039db08603cd49a96e612649c
+calibrator.pt                                               4cf6b8d33b67ef3e8281e61e6b331d948fbd315794d7a813c78852a8cd2305f9
+holdout_calibrated.pt                                       01eaae92616c39dc81a53ecbd7dc2ba4e28b242a12050da8be950388922b98f5
+summary.json                                                9f5f62d482d19f9814377aace01dc610562047ad930b3b1c17be7ac54a854baa
+audit_calibrated_reward.json                                55e16d0dc64b34c5e128649ecac98154dae05a524b3d4d943f9c1cb44fd54b5b
+```
 
 ### 4.3 通过门槛
 
@@ -154,7 +180,7 @@ P2 的 likelihood 必须作为新字段附加到 `.pt` 副本中，不能覆盖 
 4. 计算成本、非法候选处理和所有输入输出哈希完整记录；
 5. 不根据 `evaluation_v2/dev_unique1000_aug20` 的结果挑特征、阈值或 checkpoint。
 
-P1 已经未通过。因为 P2 在 P1 运行**前**已经被限定为“只追加 likelihood 的一次独立假设”，允许按上节执行一次；除此之外，不能把训练时长、beta、分支数、正则或更多特征混入补救。只有某个候选通过全部门槛，才重建训练 reward、重新训练 guidance，并在冻结配置后回到 1,000-reaction development protocol 做一次 ordinary-Euler 检验。
+P1 和 P2 都未通过；reward 校准支线已经关闭。不能再把训练时长、beta、分支数、正则或更多 endpoint 特征混入补救，也不能以 P2 的局部 AUC 点估计为理由重训 guidance。只有未来一个有独立建模动机、在本协议外预先定义的新方法，才可重新提出 reward／credit-assignment 实验。
 
 ## 5. 当前可复现命令
 
@@ -214,5 +240,27 @@ python scripts/train_reward_calibrator.py \
   --vocab_file "datasets/USPTO_50K_PtoR_aug20_#global#/example.vocab.src" \
   --output_dir /root/autodl-tmp/dgm_guidance_runs/reward_calibration_p1_train1000_holdout_start1000 \
   --augmentation 20 --l2 0.01 --max_steps 2000 --learning_rate 0.05 \
+  --bootstrap_samples 2000 --seed 42
+```
+
+P2 的复现先附加 likelihood（两个输出均为本地实验资产），再在同一配置下加一个显式开关：
+
+```bash
+python scripts/generate_forward_guidance_data.py \
+  --input_data /root/autodl-tmp/dgm_guidance_runs/train_shared_anchor1000_t10_30_50_70_90_beam.pt \
+  --output_data /root/autodl-tmp/dgm_guidance_runs/train_shared_anchor1000_t10_30_50_70_90_beam_likelihood.pt \
+  --checkpoint new_checkpoints/MIT_mixed_augm_model_average_20.pt \
+  --vocab_file "datasets/USPTO_50K_PtoR_aug20_#global#/example.vocab.src" \
+  --reward_mode append_likelihood --batch_size 16 --device cuda
+
+python scripts/train_reward_calibrator.py \
+  --train_data /root/autodl-tmp/dgm_guidance_runs/train_shared_anchor1000_t10_30_50_70_90_beam_likelihood.pt \
+  --train_targets_file "datasets/USPTO_50K_PtoR_aug20_#global#/train/tgt-train.txt" \
+  --holdout_data /root/autodl-tmp/dgm_guidance_runs/reward_holdout_shared_train200_start1000_beam_likelihood.pt \
+  --holdout_targets_file "datasets/USPTO_50K_PtoR_aug20_#global#/train/tgt-train.txt" \
+  --vocab_file "datasets/USPTO_50K_PtoR_aug20_#global#/example.vocab.src" \
+  --output_dir /root/autodl-tmp/dgm_guidance_runs/reward_calibration_p2_train1000_holdout_start1000 \
+  --augmentation 20 --include_forward_log_likelihood \
+  --l2 0.01 --max_steps 2000 --learning_rate 0.05 \
   --bootstrap_samples 2000 --seed 42
 ```

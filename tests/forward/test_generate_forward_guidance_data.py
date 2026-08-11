@@ -70,3 +70,27 @@ def test_reward_parser_keeps_likelihood_as_backward_compatible_default() -> None
     assert args.reward_mode == "likelihood"
     assert args.forward_beam_size == 5
     assert args.canonicalize_source is False
+
+
+def test_append_likelihood_preserves_existing_reward_fields() -> None:
+    class FakeLikelihoodScorer:
+        def score_batch(self, sources, targets, **kwargs):
+            assert len(sources) == len(targets) == 1
+            assert kwargs["reduction"] == "mean"
+            return torch.tensor([-1.25])
+
+    original = [_record([1, 4, 5], 0), _record([1, 4, 5], 1)]
+    records, metadata, report = guidance_script.attach_forward_rewards(
+        original,
+        {1: "<bos>", 4: "C", 5: "O"},
+        FakeLikelihoodScorer(),
+        reward_mode="append_likelihood",
+        batch_size=2,
+    )
+    assert [record["reward"] for record in records] == [1.0, 1.0]
+    assert all("validity_reward" not in record for record in records)
+    assert [record["forward_log_likelihood"] for record in records] == [-1.25, -1.25]
+    assert metadata["forward_log_likelihood_attached"] is True
+    assert metadata["forward_log_likelihood_unique_pairs"] == 1
+    assert metadata["forward_log_likelihood_cache_hit_count"] == 1
+    assert report["forward_log_likelihood"]["mean"] == -1.25

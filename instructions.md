@@ -334,6 +334,10 @@ $PY scripts/train_reward_calibrator.py \
 `calibrated_reward`，保留原始 `reward`，不保存每条候选的正确/错误标签。使用新的 reward 训练
 guidance 前，必须先通过协议中的全局与同组 AUC、固定候选预算误报率和同池 Top-k 三项 gate。
 
+`--reward_mode append_likelihood` 是 P2 专用的非破坏性前处理：它只为已有 beam-reward 数据附加
+`forward_log_likelihood`，不覆盖 `reward`。P2 也未通过 gate，因此该字段当前只保留为可复现实验资产，
+不能直接用于 guidance 训练或正式采样。
+
 ## 5. 分离运行采样和打分
 
 需要调试中间文件时使用 `sample_retro.py`：

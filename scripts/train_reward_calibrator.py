@@ -53,7 +53,7 @@ RDLogger.DisableLog("rdApp.*")
 
 
 # P1 is deliberately small and frozen before inspecting the isolated holdout.
-FEATURE_NAMES = (
+P1_FEATURE_NAMES = (
     "forward_beam_reciprocal_rank",
     "forward_beam_hit",
     "terminal_rdkit_valid",
@@ -62,6 +62,9 @@ FEATURE_NAMES = (
     "terminal_fragment_count",
     "euler_time",
 )
+P2_FEATURE_NAMES = (*P1_FEATURE_NAMES, "forward_log_likelihood")
+# Backward-compatible alias for tests/callers that explicitly select P1.
+FEATURE_NAMES = P1_FEATURE_NAMES
 
 
 @dataclass
@@ -74,10 +77,13 @@ class CandidateTable:
     source_indices: list[int]
     canonical_terminals: list[str]
     canonical_targets: dict[int, str]
+    feature_names: tuple[str, ...]
 
     def __post_init__(self) -> None:
         count = self.features.shape[0]
-        if self.features.ndim != 2 or self.features.shape[1] != len(FEATURE_NAMES):
+        if tuple(self.feature_names) not in (P1_FEATURE_NAMES, P2_FEATURE_NAMES):
+            raise ValueError("candidate feature schema is unsupported")
+        if self.features.ndim != 2 or self.features.shape[1] != len(self.feature_names):
             raise ValueError("candidate features have an unexpected shape")
         if self.labels.shape != (count,):
             raise ValueError("candidate labels have an unexpected shape")
@@ -137,8 +143,9 @@ def build_candidate_table(
     id2token: Mapping[int, str],
     *,
     target_start_product: int = 0,
+    include_forward_log_likelihood: bool = False,
 ) -> CandidateTable:
-    """Create P1 features and exact labels without mutating saved records.
+    """Create P1/P2 features and exact labels without mutating saved records.
 
     ``targets`` are used only here for calibration labels.  The feature vector
     itself comes exclusively from saved product/terminal tokens, the stored
@@ -153,6 +160,9 @@ def build_candidate_table(
     if any(not value for value in canonical_targets):
         raise ValueError("targets contain an invalid SMILES after canonicalization")
 
+    feature_names = (
+        P2_FEATURE_NAMES if include_forward_log_likelihood else P1_FEATURE_NAMES
+    )
     feature_rows: list[list[float]] = []
     labels: list[bool] = []
     product_indices: list[int] = []
@@ -198,7 +208,7 @@ def build_candidate_table(
         if previous_target != target:
             raise ValueError("one product index maps to inconsistent targets")
 
-        feature_rows.append([
+        row = [
             1.0 / rank if rank else 0.0,
             float(rank > 0),
             float(bool(canonical_terminal)),
@@ -207,7 +217,18 @@ def build_candidate_table(
             abs(terminal_atoms - product_atoms) / max(product_atoms, 1),
             float(terminal_fragments),
             time_value,
-        ])
+        ]
+        if include_forward_log_likelihood:
+            try:
+                likelihood = float(record["forward_log_likelihood"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    "P2 requires forward_log_likelihood on every record"
+                ) from exc
+            if not math.isfinite(likelihood):
+                raise ValueError("forward_log_likelihood must be finite")
+            row.append(likelihood)
+        feature_rows.append(row)
         labels.append(bool(canonical_terminal and canonical_terminal == target))
         product_indices.append(product_index)
         try:
@@ -223,6 +244,7 @@ def build_candidate_table(
         source_indices=source_indices,
         canonical_terminals=canonical_terminals,
         canonical_targets=targets_by_product,
+        feature_names=feature_names,
     )
 
 
@@ -233,11 +255,16 @@ def fit_logistic_calibrator(
     l2: float,
     max_steps: int,
     learning_rate: float,
+    feature_names: Sequence[str] = FEATURE_NAMES,
+    method: str = "p1_structural_linear_logistic",
 ) -> dict[str, Any]:
     """Fit a standardized, L2-regularized logistic regression on CPU."""
 
-    if features.ndim != 2 or features.shape[1] != len(FEATURE_NAMES):
-        raise ValueError("features must have shape [N, len(FEATURE_NAMES)]")
+    feature_names = tuple(feature_names)
+    if feature_names not in (P1_FEATURE_NAMES, P2_FEATURE_NAMES):
+        raise ValueError("feature schema is unsupported")
+    if features.ndim != 2 or features.shape[1] != len(feature_names):
+        raise ValueError("features have an unexpected shape for the feature schema")
     if labels.shape != (features.shape[0],):
         raise ValueError("labels must have shape [N]")
     if features.shape[0] < 2:
@@ -285,8 +312,8 @@ def fit_logistic_calibrator(
 
     return {
         "schema_version": 1,
-        "method": "p1_structural_linear_logistic",
-        "feature_names": list(FEATURE_NAMES),
+        "method": str(method),
+        "feature_names": list(feature_names),
         "feature_mean": mean.detach().cpu(),
         "feature_std": std.detach().cpu(),
         "weight": weight.detach().cpu(),
@@ -303,8 +330,9 @@ def fit_logistic_calibrator(
 def predict_probability(features: torch.Tensor, state: Mapping[str, Any]) -> torch.Tensor:
     """Return calibrated correctness probabilities using a saved state."""
 
-    if list(state.get("feature_names", ())) != list(FEATURE_NAMES):
-        raise ValueError("calibrator feature schema does not match P1")
+    feature_names = tuple(state.get("feature_names", ()))
+    if feature_names not in (P1_FEATURE_NAMES, P2_FEATURE_NAMES):
+        raise ValueError("calibrator feature schema is unsupported")
     mean = torch.as_tensor(state["feature_mean"], dtype=torch.float32)
     std = torch.as_tensor(state["feature_std"], dtype=torch.float32)
     weight = torch.as_tensor(state["weight"], dtype=torch.float32)
@@ -666,7 +694,7 @@ def _add_prediction_field(
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    """Fit P1 on one training block and evaluate once on an isolated block."""
+    """Fit one frozen calibration feature set and evaluate it once."""
 
     if args.bootstrap_samples < 1:
         raise ValueError("bootstrap_samples must be positive")
@@ -682,13 +710,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         _read_original_targets(args.train_targets_file, args.augmentation),
         id2token,
         target_start_product=args.train_target_start_product,
+        include_forward_log_likelihood=args.include_forward_log_likelihood,
     )
     holdout_table = build_candidate_table(
         holdout_records,
         _read_original_targets(args.holdout_targets_file, args.augmentation),
         id2token,
         target_start_product=args.holdout_target_start_product,
+        include_forward_log_likelihood=args.include_forward_log_likelihood,
     )
+    if train_table.feature_names != holdout_table.feature_names:
+        raise ValueError("train and holdout feature schemas differ")
     overlap = set(train_table.product_indices).intersection(holdout_table.product_indices)
     if overlap:
         preview = sorted(overlap)[:10]
@@ -704,6 +736,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         l2=args.l2,
         max_steps=args.max_steps,
         learning_rate=args.learning_rate,
+        feature_names=train_table.feature_names,
+        method=(
+            "p2_structural_plus_likelihood_linear_logistic"
+            if args.include_forward_log_likelihood
+            else "p1_structural_linear_logistic"
+        ),
     )
     train_scores = predict_probability(train_table.features, state)
     holdout_scores = predict_probability(holdout_table.features, state)
@@ -774,7 +812,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     calibrated_metadata["reward_calibration"] = {
         "method": state["method"],
         "prediction_field": args.prediction_field,
-        "feature_names": list(FEATURE_NAMES),
+        "feature_names": list(train_table.feature_names),
         "calibrator_path": str(output_paths["calibrator"].resolve()),
         "operating_threshold": threshold,
         "training_record_count": state["training_record_count"],
@@ -789,7 +827,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     report = {
         "schema_version": 1,
         "method": state["method"],
-        "feature_names": list(FEATURE_NAMES),
+        "feature_names": list(train_table.feature_names),
         "prediction_field": args.prediction_field,
         "inputs": {
             "train_data": str(Path(args.train_data).resolve()),
@@ -862,6 +900,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--train_target_start_product", type=int, default=0)
     parser.add_argument("--holdout_target_start_product", type=int, default=0)
     parser.add_argument("--prediction_field", default="calibrated_reward")
+    parser.add_argument(
+        "--include_forward_log_likelihood", action="store_true",
+        help=(
+            "P2 only: require the non-destructively attached "
+            "forward_log_likelihood field as one additional feature."
+        ),
+    )
     parser.add_argument("--l2", type=float, default=0.01)
     parser.add_argument("--max_steps", type=int, default=2000)
     parser.add_argument("--learning_rate", type=float, default=0.05)

@@ -27,9 +27,10 @@ held-out 观测已通过最低门槛；阶段 5 ordinary Euler action-level adap
 匹配后，forward-beam reward 在 200 个 held-out 反应上有 0.6971 的全局正确性 AUC、0.7308 的同一
 共享状态组内 AUC，说明它有稳定但不充分的方向；46.05% 的错误终点仍得到正 reward。随后在一个完全
 隔离的 200-reaction 训练 holdout 上，P1 线性校准把**全局** AUC 从 0.7073 提到 0.7655，但同一共享状态
-组内 AUC 仅从 0.6836 到 0.6843，且同候选池 Top-1/Top-3 从 41.5/76.5% 降到 40.0/73.0%。P1 因而不进入
-guidance 重训或开发集；唯一预注册的下一步是单独添加 teacher-forced likelihood 的 P2，而非扫描 P1 或
-guidance 超参数。协议、防泄漏规则和完整结果见 `new_docs/dgm_reward_quality_protocol.md`。
+组内 AUC 仅从 0.6836 到 0.6843，且同候选池 Top-1/Top-3 从 41.5/76.5% 降到 40.0/73.0%。预注册的 P2
+仅追加 teacher-forced likelihood 后，同组 AUC 升至 0.7093、误报率略降，但同池 Top-1/Top-3 仍降至
+41.0/73.0%。两次均未通过 gate，reward 校准支线已经关闭：不重训 guidance、不跑开发集，也不扫描更多
+endpoint 特征或超参数。协议、防泄漏规则和完整结果见 `new_docs/dgm_reward_quality_protocol.md`。
 
 本文面向本项目的实际实现，说明如何把
 `Discrete Guidance Matching (DGM)` 适配到当前的 Edit Flows 推理流程。文中把
