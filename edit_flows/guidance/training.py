@@ -16,6 +16,29 @@ from edit_flows.guidance.ranking import (
 )
 
 
+_ACTION_TARGET_FIELDS = {
+    "terminal": "terminal_tokens",
+    "transition": "transition_tokens",
+}
+
+
+def _action_target_field(action_target_source: str) -> str:
+    """Resolve the serialized target field for one guidance objective.
+
+    ``terminal`` preserves the original endpoint-alignment objective.  The
+    optional ``transition`` mode instead labels only the sampled first Euler
+    transition from the shared current state.
+    """
+    try:
+        return _ACTION_TARGET_FIELDS[action_target_source]
+    except KeyError as exc:
+        choices = ", ".join(sorted(_ACTION_TARGET_FIELDS))
+        raise ValueError(
+            f"action_target_source must be one of {{{choices}}}, got "
+            f"{action_target_source!r}"
+        ) from exc
+
+
 def _safe_pearson_correlation(left: Tensor, right: Tensor) -> Tensor:
     """Return a finite batch Pearson correlation, or zero if undefined."""
     if left.ndim != 1 or right.ndim != 1 or left.shape != right.shape:
@@ -48,6 +71,7 @@ def guidance_action_loss(
     pairwise_anchor_rotation: int = 0,
     pairwise_all_anchors: bool = False,
     score_calibration_weight: float = 0.0,
+    action_target_source: str = "terminal",
 ) -> tuple[Tensor, dict[str, float]]:
     """Compute action-specific positive-guidance loss for one padded batch."""
     if (
@@ -65,8 +89,9 @@ def guidance_action_loss(
         or not torch.isfinite(torch.tensor(score_calibration_weight))
     ):
         raise ValueError("score_calibration_weight must be finite and non-negative")
+    action_target_field = _action_target_field(action_target_source)
     required = {
-        "product_tokens", "state_tokens", "terminal_tokens", "time", "reward",
+        "product_tokens", "state_tokens", "time", "reward", action_target_field,
     }
     missing = sorted(required.difference(batch))
     if missing:
@@ -78,14 +103,14 @@ def guidance_action_loss(
     device = next(model.parameters()).device
     product_tokens = batch["product_tokens"].to(device=device)
     state_tokens = batch["state_tokens"].to(device=device)
-    terminal_tokens = batch["terminal_tokens"]
+    action_target_tokens = batch[action_target_field]
     time_step = batch["time"].to(device=device)
     reward = batch["reward"].to(device=device)
     state_padding = state_tokens == model.pad_token
     product_padding = product_tokens == model.pad_token
     insert_mask, substitute_mask, delete_mask = build_action_target_masks(
         batch["state_tokens"].detach().cpu(),
-        terminal_tokens.detach().cpu(),
+        action_target_tokens.detach().cpu(),
         vocab_size=model.vocab_size,
         pad_token=model.pad_token,
     )
@@ -150,7 +175,7 @@ def guidance_action_loss(
         pairwise_loss, pairwise_metrics = shared_anchor_pairwise_loss(
             (guidance_insert, guidance_substitute, guidance_delete),
             state_tokens,
-            terminal_tokens,
+            action_target_tokens,
             batch["source_index"],
             reward,
             vocab_size=model.vocab_size,
@@ -167,7 +192,7 @@ def guidance_action_loss(
         calibration_loss, calibration_metrics = score_calibration_loss(
             (guidance_insert, guidance_substitute, guidance_delete),
             state_tokens,
-            terminal_tokens,
+            action_target_tokens,
             batch["source_index"],
             reward,
             vocab_size=model.vocab_size,
@@ -262,6 +287,7 @@ def train_guidance_step(
     pairwise_anchor_rotation: int = 0,
     pairwise_all_anchors: bool = False,
     score_calibration_weight: float = 0.0,
+    action_target_source: str = "terminal",
 ) -> dict[str, float]:
     """Run one optimizer step and return scalar diagnostics."""
     model.train()
@@ -276,6 +302,7 @@ def train_guidance_step(
         pairwise_anchor_rotation=pairwise_anchor_rotation,
         pairwise_all_anchors=pairwise_all_anchors,
         score_calibration_weight=score_calibration_weight,
+        action_target_source=action_target_source,
     )
     loss.backward()
     if max_grad_norm is not None:
@@ -301,6 +328,7 @@ def evaluate_guidance_step(
     pairwise_anchor_rotation: int = 0,
     pairwise_all_anchors: bool = False,
     score_calibration_weight: float = 0.0,
+    action_target_source: str = "terminal",
 ) -> dict[str, float]:
     """Evaluate guidance loss without changing parameters or RNG state."""
     was_training = model.training
@@ -315,6 +343,7 @@ def evaluate_guidance_step(
         pairwise_anchor_rotation=pairwise_anchor_rotation,
         pairwise_all_anchors=pairwise_all_anchors,
         score_calibration_weight=score_calibration_weight,
+        action_target_source=action_target_source,
     )
     if was_training:
         model.train()

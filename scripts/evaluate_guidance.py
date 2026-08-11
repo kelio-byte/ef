@@ -77,6 +77,15 @@ def evaluate(args: argparse.Namespace) -> dict:
         raise ValueError("batch_size and group_size must be positive")
     device = torch.device(args.device)
     dataset = GuidanceDataset(args.data)
+    if args.action_target_source == "transition":
+        missing = sum(
+            "transition_tokens" not in record for record in dataset.records
+        )
+        if missing:
+            raise ValueError(
+                "transition target evaluation requires transition_tokens in "
+                f"every record; missing {missing}/{len(dataset)}"
+            )
     sampler = ProductGroupBatchSampler(
         dataset,
         batch_size=args.batch_size,
@@ -110,6 +119,7 @@ def evaluate(args: argparse.Namespace) -> dict:
                 pairwise_group_size=args.group_size,
                 pairwise_all_anchors=args.all_anchors,
                 score_calibration_weight=args.score_calibration_weight,
+                action_target_source=args.action_target_source,
             )
             batch_size = int(batch["reward"].shape[0])
             record_count += batch_size
@@ -155,6 +165,7 @@ def evaluate(args: argparse.Namespace) -> dict:
         "batch_size": args.batch_size,
         "group_size": args.group_size,
         "all_anchors": args.all_anchors,
+        "action_target_source": args.action_target_source,
         "records": record_count,
         "groups": record_count // args.group_size,
         "batches": batch_count,
@@ -189,6 +200,11 @@ def main() -> None:
     parser.add_argument("--max_batches", type=int, default=0)
     parser.add_argument("--all_anchors", action="store_true")
     parser.add_argument("--score_calibration_weight", type=float, default=0.0)
+    parser.add_argument(
+        "--action_target_source",
+        choices=("terminal", "transition"),
+        default="terminal",
+    )
     evaluate(parser.parse_args())
 
 

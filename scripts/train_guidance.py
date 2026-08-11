@@ -95,6 +95,28 @@ def _pairwise_metric_weight(name: str, metrics: dict[str, float]) -> float:
     return 0.0
 
 
+def _require_action_target_records(
+    dataset: GuidanceDataset,
+    *,
+    source: str,
+    label: str,
+) -> None:
+    """Fail before training if a selected target representation is absent."""
+    if source == "terminal":
+        return
+    if source != "transition":
+        raise ValueError(f"unsupported action_target_source: {source!r}")
+    missing = sum(
+        "transition_tokens" not in record for record in dataset.records
+    )
+    if missing:
+        raise ValueError(
+            f"{label} guidance data is missing transition_tokens in "
+            f"{missing}/{len(dataset)} records; regenerate it with "
+            "--record_first_transition"
+        )
+
+
 def run(args: argparse.Namespace) -> dict:
     if args.batch_size < 1 or args.epochs < 1:
         raise ValueError("batch_size and epochs must be positive")
@@ -124,6 +146,13 @@ def run(args: argparse.Namespace) -> dict:
     device = torch.device(args.device)
     train_dataset = GuidanceDataset(args.train_data)
     val_dataset = GuidanceDataset(args.val_data) if args.val_data else None
+    _require_action_target_records(
+        train_dataset, source=args.action_target_source, label="train",
+    )
+    if val_dataset is not None:
+        _require_action_target_records(
+            val_dataset, source=args.action_target_source, label="validation",
+        )
     metadata_vocab = train_dataset.metadata.get("model_vocab")
     vocab_size = args.model_vocab or metadata_vocab
     if vocab_size is None:
@@ -265,6 +294,7 @@ def run(args: argparse.Namespace) -> dict:
                 pairwise_group_size=args.group_size,
                 pairwise_anchor_rotation=global_step % args.group_size,
                 score_calibration_weight=args.score_calibration_weight,
+                action_target_source=args.action_target_source,
             )
             global_step += 1
             last_train_metrics = metrics
@@ -297,6 +327,7 @@ def run(args: argparse.Namespace) -> dict:
                         pairwise_group_size=args.group_size,
                         pairwise_all_anchors=args.pairwise_all_val_anchors,
                         score_calibration_weight=args.score_calibration_weight,
+                        action_target_source=args.action_target_source,
                     )
                     val_batch_size = val_batch["reward"].shape[0]
                     val_count += val_batch_size
@@ -533,6 +564,15 @@ def main() -> None:
     parser.add_argument("--pairwise_temperature", type=float, default=1.0)
     parser.add_argument("--pairwise_equal_tolerance", type=float, default=1e-6)
     parser.add_argument("--score_calibration_weight", type=float, default=0.0)
+    parser.add_argument(
+        "--action_target_source",
+        choices=("terminal", "transition"),
+        default="terminal",
+        help=(
+            "Use endpoint action masks (legacy terminal) or masks for the "
+            "recorded first Euler transition."
+        ),
+    )
     parser.add_argument(
         "--pairwise_all_val_anchors",
         action="store_true",

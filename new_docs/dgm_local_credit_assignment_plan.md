@@ -1,7 +1,7 @@
 # DGM 局部信用分配：一步后继监督方案
 
 更新日期：2026-08-11  
-状态：方案已定义，尚未修改数据生成、guidance 训练或采样代码。
+状态：L0 已完成；L1（50 个未重叠训练反应的数据质量审计）待执行。
 
 ## 1. 要解决的具体问题
 
@@ -92,6 +92,8 @@ guidance 数据 collate 仅在所有记录都有 `transition_tokens` 时加入�
 
 通过条件：测试全绿、first transition 存在、关闭开关不改变终点采样、没有大于必要的 trajectory 内存增长。
 
+**状态：已完成（2026-08-11）。**
+
 ### 阶段 L1：小规模数据质量审计
 
 用 50 个未重叠训练反应构造五个时间点、四后继的一步后继数据，并附加**现有 raw forward-beam reward**。这里只审计数据结构与局部 action 可用性，不训练、不看开发集。
@@ -117,11 +119,61 @@ guidance 数据 collate 仅在所有记录都有 `transition_tokens` 时加入�
 
 | 阶段 | 数据 | 方法 | 正确性／质量 | 效率 | 结论 |
 |---|---|---|---|---|---|
-| L0 | 2 reaction smoke | first-transition recording | 待运行 | 待运行 | 待运行 |
+| L0 | train 原始反应 1250--1251 | first-transition recording | 12 条旧字段逐条完全一致；6/6 group 同 state/time | 1.149s → 1.264s；峰值 GPU allocated/reserved 均为 228.9/243.3 MB | 通过，进入 L1 |
 | L1 | 50 train reactions | data audit | 待运行 | 待运行 | 待运行 |
 | L2 | train-1000 / val-200 | terminal vs transition target | 待运行 | 待运行 | 待运行 |
 | L3 | dev-unique1000 | ordinary Euler off/on | 待运行 | 待运行 | 待运行 |
 
 ## 7. 当前结论
 
-这是 P1/P2 endpoint reward 校准失败后唯一正在推进的下一项：它不声称“reward 更准确”，而检验“已有 reward 是否被赋给了正确时间尺度上的编辑”。在 L0/L1 数据质量还未通过前，禁止重训 guidance、扫描 β、使用确认集或运行 `src-test`。
+这是 P1/P2 endpoint reward 校准失败后唯一正在推进的下一项：它不声称“reward 更准确”，而检验“已有 reward 是否被赋给了正确时间尺度上的编辑”。L0 已确认记录机制不改变采样；在 L1 数据质量还未通过前，仍禁止重训 guidance、扫描 β、使用确认集或运行 `src-test`。
+
+## 8. 阶段 L0 实现与验证记录（2026-08-11）
+
+### 实现内容
+
+- `sample_euler` 新增可选上限：记录轨迹时可只保留起点和指定数量的 post-edit
+  state。`max_recorded_trajectory_steps=1` 只保留 `x_t` 与真实
+  `x_(t+Δ)`，不增加模型前向，也不改变随机数调用。
+- shared-anchor 数据生成器新增默认关闭的 `--record_first_transition`。开启后，每个
+  child record 写入经过第一步实际 Euler 更新的 `transition_tokens`；旧默认文件不新增
+  字段，也不改变原有采样路径。
+- 数据读取只在一个 batch 的所有 record 都具有该字段时 collate 它；部分 record 缺失会
+  立即报错，避免静默混合两类监督数据。
+- guidance 训练和只读评估新增 `--action_target_source {terminal,transition}`，默认
+  `terminal` 完全保留旧的 endpoint 对齐。选择 `transition` 时，Bregman、同 group
+  pairwise ranking 和 score-calibration 三个 loss 都共同使用“当前状态到真实一步后继”的
+  action mask，而不是只有其中一项切换。
+
+### 自动化测试
+
+- 本次相关模块定向测试：**69 passed**，覆盖采样 cap、旧终点路径、可选字段的 collate、
+  transition target 的 Bregman/pairwise/calibration，以及原 `terminal` 默认 loss 回归。
+- 全仓库测试结果为 **330 passed, 18 failed**。其中 17 个失败来自本次未改动的
+  `tests/sampling/test_beam.py` 与当前 `EditCandidate` API/controlled-model 的既有不匹配；
+  另一个是已有的、仅在整套测试顺序下出现的 `guidance_beta=0` 随机敏感测试，单独运行通过。
+  `beam.py` 和其测试相对 L0 开始 commit 未变化，因此本阶段没有为让测试数字好看而改动
+  无关 Euler-Beam 代码。
+
+### 真实 CUDA smoke
+
+使用冻结的 `new_checkpoints/checkpoint_step600000.pt`，从训练集原始反应区间
+`[1250, 1252)` 生成 2 个反应、3 个 interior anchor、每个 anchor 2 个 child（共 12 条
+record），`n_steps=4`、batch=2、seed=42。两个输出分别为：
+
+- 旧模式：`/root/autodl-tmp/dgm_guidance_runs/local_credit_l0_base.pt`
+  （SHA256 `579f319a88f1935c801a8a5f848ea10b1928f542af7087445e0a8f7b53b15417`）；
+- 开启 first transition：
+  `/root/autodl-tmp/dgm_guidance_runs/local_credit_l0_transition.pt`
+  （SHA256 `ab576f15f5a7720f5fb097c0239a4845989bf115220fe8824d0f0538a7b0132f`）。
+
+逐条比较显示 product/state/terminal token、time、reward、group/sample index 和两种 seed
+全部完全相同；旧文件没有 `transition_tokens`，新文件 12/12 都有且均以 BOS 开头。6/6 个
+shared-anchor group 的 state/time 严格相同。12 条中 6 条第一步为 no-op（一步后继与 anchor
+相同），5 条后续没有再变化而使一步后继已等于终点；这是短 4-step smoke 的结构事实，不将其
+解释为正式数据分布结论。开启记录的 wall 为 1.264s，旧模式为 1.149s，峰值 GPU
+allocated/reserved 在两次均为 228.9/243.3 MB；这个极小任务的约 10% wall 差异主要包含启动和
+CPU clone，L1 会在真实 100-step 设置下重新记录效率。
+
+**L0 结论：通过。** 接下来只进行 L1 的数据结构与局部 action 可用性审计，不训练 guidance，
+不读取开发/测试 target，也不做 Top-k。

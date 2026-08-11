@@ -132,6 +132,7 @@ def make_guidance_record(
     time_index: int,
     sample_seed: int,
     coupling_seed: int,
+    transition_tokens: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Create a serializable, validated guidance record."""
     if not 0.0 <= float(time_step) <= 1.0:
@@ -145,13 +146,19 @@ def make_guidance_record(
     product = [int(token) for token in product_tokens]
     state = [int(token) for token in state_tokens]
     terminal = [int(token) for token in terminal_tokens]
+    transition = (
+        [int(token) for token in transition_tokens]
+        if transition_tokens is not None else None
+    )
     if not product or product[0] != BOS_TOKEN:
         raise ValueError("product_tokens must begin with BOS_TOKEN")
     if not state or state[0] != BOS_TOKEN:
         raise ValueError("state_tokens must begin with BOS_TOKEN")
     if not terminal or terminal[0] != BOS_TOKEN:
         raise ValueError("terminal_tokens must begin with BOS_TOKEN")
-    return {
+    if transition is not None and (not transition or transition[0] != BOS_TOKEN):
+        raise ValueError("transition_tokens must begin with BOS_TOKEN")
+    record = {
         "product_tokens": product,
         "state_tokens": state,
         "terminal_tokens": terminal,
@@ -163,6 +170,9 @@ def make_guidance_record(
         "sample_seed": int(sample_seed),
         "coupling_seed": int(coupling_seed),
     }
+    if transition is not None:
+        record["transition_tokens"] = transition
+    return record
 
 
 def save_guidance_dataset(
@@ -217,7 +227,12 @@ def collate_guidance_records(records: Sequence[Mapping[str, Any]]) -> dict[str, 
     product_tokens = _pad_record_sequences(records, "product_tokens")
     state_tokens = _pad_record_sequences(records, "state_tokens")
     terminal_tokens = _pad_record_sequences(records, "terminal_tokens")
-    return {
+    has_transition = ["transition_tokens" in record for record in records]
+    if any(has_transition) and not all(has_transition):
+        raise ValueError(
+            "transition_tokens must be present in either every record or none"
+        )
+    batch = {
         "product_tokens": product_tokens,
         "state_tokens": state_tokens,
         "terminal_tokens": terminal_tokens,
@@ -237,6 +252,12 @@ def collate_guidance_records(records: Sequence[Mapping[str, Any]]) -> dict[str, 
             [int(record["time_index"]) for record in records], dtype=torch.long,
         ),
     }
+    if all(has_transition):
+        transition_tokens = _pad_record_sequences(records, "transition_tokens")
+        if (transition_tokens[:, 0] != BOS_TOKEN).any():
+            raise ValueError("transition_tokens must begin with BOS_TOKEN")
+        batch["transition_tokens"] = transition_tokens
+    return batch
 
 
 class GuidanceDataset(Dataset):

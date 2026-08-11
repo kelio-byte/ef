@@ -350,6 +350,7 @@ def sample_euler(
     pad_token: int = PAD_TOKEN,
     bos_token: int = BOS_TOKEN,
     record_trajectory: bool = False,
+    max_recorded_trajectory_steps: Optional[int] = None,
     verbose: bool = False,
     use_rate_reparam: bool = False,
     clamp_kappa: bool = False,
@@ -374,6 +375,25 @@ def sample_euler(
 
     device = next(model.parameters()).device
     batch_size = x_0.shape[0]
+
+    # ``record_trajectory`` is diagnostic-only.  Some callers need the exact
+    # first post-edit state of a long continuation but must not retain every
+    # later state on CPU.  The cap counts post-start states, so ``1`` stores
+    # ``[x_t, x_(t+Δ)]``.  It deliberately changes only storage, never model
+    # calls or RNG consumption.
+    if max_recorded_trajectory_steps is not None:
+        if not record_trajectory:
+            raise ValueError(
+                "max_recorded_trajectory_steps requires record_trajectory=True"
+            )
+        if (
+            not isinstance(max_recorded_trajectory_steps, int)
+            or isinstance(max_recorded_trajectory_steps, bool)
+            or max_recorded_trajectory_steps < 0
+        ):
+            raise ValueError(
+                "max_recorded_trajectory_steps must be a non-negative integer"
+            )
 
     if guidance_beta < 0 or not torch.isfinite(torch.tensor(guidance_beta)):
         raise ValueError("guidance_beta must be finite and non-negative")
@@ -601,7 +621,10 @@ def sample_euler(
             )
 
         t = t + adapt_h
-        if record_trajectory:
+        if record_trajectory and (
+            max_recorded_trajectory_steps is None
+            or len(trajectory) - 1 < max_recorded_trajectory_steps
+        ):
             trajectory.append(x_t.cpu().clone())
         if verbose:
             pbar.update(1)

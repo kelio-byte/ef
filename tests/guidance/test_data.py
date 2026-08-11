@@ -97,6 +97,63 @@ def test_guidance_records_round_trip_and_collate(tmp_path: Path):
     assert torch.equal(batch["reward"], torch.tensor([1.0, 0.0]))
 
 
+def test_collate_optional_first_transition_tokens():
+    records = [
+        make_guidance_record(
+            product_tokens=[BOS_TOKEN, 4, 5],
+            state_tokens=[BOS_TOKEN, 4, 5],
+            terminal_tokens=[BOS_TOKEN, 4, 6],
+            transition_tokens=[BOS_TOKEN, 4, 9],
+            time_step=0.5,
+            reward=1.0,
+            source_index=2,
+            sample_index=0,
+            time_index=50,
+            sample_seed=11,
+            coupling_seed=12,
+        ),
+        make_guidance_record(
+            product_tokens=[BOS_TOKEN, 7],
+            state_tokens=[BOS_TOKEN, 7],
+            terminal_tokens=[BOS_TOKEN, 7, 8],
+            transition_tokens=[BOS_TOKEN, 9],
+            time_step=0.5,
+            reward=0.0,
+            source_index=2,
+            sample_index=1,
+            time_index=50,
+            sample_seed=13,
+            coupling_seed=14,
+        ),
+    ]
+    batch = collate_guidance_records(records)
+    assert "transition_tokens" in batch
+    assert batch["transition_tokens"].shape == (2, 3)
+    assert torch.equal(
+        batch["transition_tokens"][:, 0],
+        torch.full((2,), BOS_TOKEN),
+    )
+
+
+def test_collate_rejects_partially_present_transition_tokens():
+    base = make_guidance_record(
+        product_tokens=[BOS_TOKEN, 4],
+        state_tokens=[BOS_TOKEN, 4],
+        terminal_tokens=[BOS_TOKEN, 5],
+        time_step=0.5,
+        reward=1.0,
+        source_index=0,
+        sample_index=0,
+        time_index=50,
+        sample_seed=1,
+        coupling_seed=2,
+    )
+    with_transition = dict(base)
+    with_transition["transition_tokens"] = [BOS_TOKEN, 6]
+    with pytest.raises(ValueError, match="every record or none"):
+        collate_guidance_records([base, with_transition])
+
+
 def test_guidance_record_requires_bos_and_finite_reward():
     kwargs = dict(
         product_tokens=[BOS_TOKEN, 4],
@@ -114,6 +171,10 @@ def test_guidance_record_requires_bos_and_finite_reward():
         make_guidance_record(**{**kwargs, "product_tokens": [4]})
     with pytest.raises(ValueError, match="finite"):
         make_guidance_record(**{**kwargs, "reward": float("nan")})
+    with pytest.raises(ValueError, match="transition_tokens"):
+        make_guidance_record(
+            **{**kwargs, "transition_tokens": [4]},
+        )
 
 
 def _group_records(group_count=3, group_size=4):

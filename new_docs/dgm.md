@@ -1529,3 +1529,19 @@ final 在该 split 上的 Top-k 排序优于 best，但 Oracle 低 3 个百分�
 耗时高约 2.3%。因此不能简单地说 final 在所有方面更好：best 更偏向覆盖，final 更偏向已生成候选
 的排序。由于这只是用户要求的 checkpoint 诊断，而非预注册的主模型选择实验，仍保留
 `guidance_best.pt` 作为按验证规则选择的正式 checkpoint；未据此启动 test、10k 或 Euler-Beam。
+
+## 12. 局部一步信用分配（2026-08-11）
+
+此前 action-level guidance 会把“当前中间分子到最终反应物”之间整条路径所需的编辑，都赋予该
+终点的 forward reward。这样会把未来很多步、乃至未来纠错的编辑错误归到当前一步。为检验这是否
+是 guidance 无法转化为 Top-k 提升的原因，新增了一个默认关闭的记录能力：每条从同一中间状态
+继续采样的 child，额外保存它**真实第一步 Euler 更新后**的分子状态。训练可显式选择仍使用旧的
+终点对齐，或只使用当前状态到这个一步后继的 action mask；Bregman、同 group ranking 和校准项会
+同步采用同一种 target，避免混用。
+
+L0 的 2-reaction CUDA smoke 已通过：打开记录不改变相同 seed 下任何旧字段、终点 token 或 reward，
+6/6 shared-anchor group 仍严格共享状态和时间，GPU 峰值内存不变。定向回归为 69 passed。下一阶段
+仅在与以往 reward/calibrator 划分不重叠的 50 个训练反应上审计“一步真实编辑是否足够多、是否带有
+组内 reward 差异”；在该 gate 通过之前不重新训练 adapter、不扫描 guidance 强度，也不做开发集
+Top-k 实验。完整方案、具体 hash 和 smoke 性能记录见
+`new_docs/dgm_local_credit_assignment_plan.md`。

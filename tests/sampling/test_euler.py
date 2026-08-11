@@ -157,6 +157,37 @@ class TestSampleEuler:
         assert len(trajectory) > 0
         assert trajectory[0].shape[0] == 1
 
+    def test_capped_trajectory_keeps_first_post_step_without_changing_terminal(
+        self, dummy_model,
+    ):
+        """Diagnostic state storage must not alter the sampled trajectory."""
+        dummy_model.eval()
+        scheduler = CubicScheduler()
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+        torch.manual_seed(2468)
+        baseline, _ = sample_euler(
+            dummy_model, x_0, scheduler, n_steps=5, max_seq_len=32,
+        )
+        torch.manual_seed(2468)
+        capped, trajectory = sample_euler(
+            dummy_model, x_0, scheduler, n_steps=5, max_seq_len=32,
+            record_trajectory=True,
+            max_recorded_trajectory_steps=1,
+        )
+        assert torch.equal(baseline, capped)
+        assert len(trajectory) == 2
+        assert torch.equal(trajectory[0], x_0)
+
+    def test_capped_trajectory_requires_trajectory_recording(self, dummy_model):
+        with pytest.raises(ValueError, match="requires record_trajectory"):
+            sample_euler(
+                dummy_model,
+                torch.tensor([[BOS_TOKEN, 3, PAD_TOKEN]]),
+                CubicScheduler(),
+                n_steps=5,
+                max_recorded_trajectory_steps=1,
+            )
+
     def test_first_event_recording(self, dummy_model):
         dummy_model.eval()
         scheduler = CubicScheduler()

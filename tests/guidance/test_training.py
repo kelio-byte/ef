@@ -263,3 +263,51 @@ def test_pairwise_validation_can_use_all_anchors_without_changing_model():
     assert all(torch.equal(a, b) for a, b in zip(
         before, model.parameters(), strict=True,
     ))
+
+
+def test_terminal_target_source_matches_legacy_default():
+    torch.manual_seed(11)
+    model = _small_guidance_model()
+    batch = _batch()
+    default_loss, default_metrics = guidance_action_loss(model, batch)
+    explicit_loss, explicit_metrics = guidance_action_loss(
+        model, batch, action_target_source="terminal",
+    )
+    assert torch.equal(default_loss, explicit_loss)
+    assert default_metrics == explicit_metrics
+
+
+def test_transition_target_source_drives_all_guidance_losses():
+    torch.manual_seed(12)
+    model = _small_guidance_model()
+    batch = _pairwise_batch()
+    # These first-step successors deliberately differ from the terminal
+    # sequences.  The test exercises Bregman, pairwise, and calibration paths
+    # through the one selected target source.
+    batch["transition_tokens"] = batch["state_tokens"].clone()
+    batch["transition_tokens"][:, 1] = torch.tensor([9, 10, 11, 12])
+    loss, metrics = guidance_action_loss(
+        model,
+        batch,
+        action_target_source="transition",
+        pairwise_loss_weight=0.5,
+        score_calibration_weight=0.5,
+        pairwise_group_size=4,
+    )
+    assert torch.isfinite(loss)
+    assert metrics["pair_count"] == 6.0
+    assert metrics["score_calibration_group_count"] == 1.0
+    loss.backward()
+    assert any(
+        parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        for parameter in model.parameters()
+    )
+
+
+def test_transition_target_source_requires_transition_tokens():
+    with pytest.raises(KeyError, match="transition_tokens"):
+        guidance_action_loss(
+            _small_guidance_model(),
+            _batch(),
+            action_target_source="transition",
+        )

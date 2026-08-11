@@ -14,6 +14,9 @@ alone, so the pairwise objective never compares different times or states.
 The output initially carries the cheap RDKit validity reward.  Use
 ``scripts/generate_forward_guidance_data.py`` afterwards to attach the audited
 Molecular Transformer forward-beam reward without changing the anchor fields.
+With ``--record_first_transition``, each record also stores the exact state
+after its continuation's first Euler update; this is optional so legacy
+terminal-target data keeps its original schema and storage cost.
 """
 
 from __future__ import annotations
@@ -153,6 +156,11 @@ def select_original_products(
 
 def generate(args: argparse.Namespace) -> dict:
     anchor_indices = resolve_anchor_steps(args)
+    # Preserve compatibility with programmatic callers created before the
+    # optional transition field existed.
+    record_first_transition = bool(
+        getattr(args, "record_first_transition", False)
+    )
     requested_anchor_time = (
         float(args.anchor_time)
         if getattr(args, "anchor_time", None) is not None
@@ -252,18 +260,41 @@ def generate(args: argparse.Namespace) -> dict:
             torch.manual_seed(continuation_seed)
             if device.type == "cuda":
                 torch.cuda.manual_seed_all(continuation_seed)
-            terminal_states, _ = sample_euler(
-                model, continuation_state, sample_scheduler,
-                n_steps=args.n_steps,
-                max_seq_len=cfg["max_seq_len"],
-                use_rate_reparam=cfg.get("use_rate_reparam", False),
-                clamp_kappa=cfg.get("clamp_kappa", False),
-                clamp_max=cfg.get("clamp_max", 50.0),
-                time_input=cfg.get("time_input", "t"),
-                train_scheduler=train_scheduler,
-                use_origin_mask=False,
-                start_time=anchor_time,
-            )
+            continuation_kwargs = {
+                "n_steps": args.n_steps,
+                "max_seq_len": cfg["max_seq_len"],
+                "use_rate_reparam": cfg.get("use_rate_reparam", False),
+                "clamp_kappa": cfg.get("clamp_kappa", False),
+                "clamp_max": cfg.get("clamp_max", 50.0),
+                "time_input": cfg.get("time_input", "t"),
+                "train_scheduler": train_scheduler,
+                "use_origin_mask": False,
+                "start_time": anchor_time,
+            }
+            if record_first_transition:
+                # The sampler stores only the start and first post-edit state;
+                # it still completes the exact same seeded continuation.
+                terminal_states, continuation_trajectory = sample_euler(
+                    model,
+                    continuation_state,
+                    sample_scheduler,
+                    record_trajectory=True,
+                    max_recorded_trajectory_steps=1,
+                    **continuation_kwargs,
+                )
+                if len(continuation_trajectory) != 2:
+                    raise RuntimeError(
+                        "interior shared-anchor continuation did not produce "
+                        "a first post-edit state"
+                    )
+                transition_states = continuation_trajectory[1]
+            else:
+                terminal_states, _ = sample_euler(
+                    model,
+                    continuation_state,
+                    sample_scheduler,
+                    **continuation_kwargs,
+                )
             terminal_text = _decode_rows(terminal_states, id2token)
             rewards = retro_tokenized_validity_reward(terminal_text)
 
@@ -295,6 +326,10 @@ def generate(args: argparse.Namespace) -> dict:
                         time_index=anchor_index,
                         sample_seed=child_seed,
                         coupling_seed=coupling_seed,
+                        transition_tokens=(
+                            _trim_pad(transition_states[row_index].tolist())
+                            if record_first_transition else None
+                        ),
                     )
                     if anchor_count > 1:
                         record["product_index"] = product_index
@@ -342,6 +377,7 @@ def generate(args: argparse.Namespace) -> dict:
             else "unique product_index/anchor_ordinal pair"
         ),
         "shared_anchor": True,
+        "record_first_transition": record_first_transition,
         "rng_scope": "product-batch prefix and vectorized continuation seeds",
         "sampler": "euler_shared_anchor_continuation",
         "reward": "rdkit_validity",
@@ -400,6 +436,14 @@ def main() -> None:
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--record_first_transition",
+        action="store_true",
+        help=(
+            "Store each continuation's exact first post-edit state as "
+            "transition_tokens without retaining its full trajectory."
+        ),
+    )
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     print(generate(args))
