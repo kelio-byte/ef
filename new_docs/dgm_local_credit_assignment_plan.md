@@ -241,3 +241,64 @@ forward reward 附加错误造成的。
 L2/L3 不启动。下一项只能是一个新的、先做小型数据诊断的方案：要么在当前状态显式按“发生编辑”
 条件采样多个 action proposal，要么定义经证明足够短的多数值步局部窗口；不能把更多训练步、更多
 β 扫描或更大训练集当作对这一数据缺陷的补救。
+
+## 10. 后续候选 E：按事件条件抽样的原子编辑 proposal（已预注册，尚未实现）
+
+### 10.1 为什么优先验证它
+
+L1 排除了“只增加训练步数”这个解释：在 100-step Euler 中，一个数值步绝大多数时候没有编辑，
+而当前 guidance 的三张权重表恰好描述的是**如果发生编辑，哪一个插入／替换／删除更值得选择**。
+更重要的是，现有采样时的 per-position normalization 会保留每个位置的总编辑率；它只重新分配
+这个编辑率到具体 token 和操作，并不试图学习 no-op 的概率。因此用 94.9% no-op record 训练具体
+编辑权重既低效，也没有和推理时真正被改变的量对齐。
+
+候选 E 保留当前共享状态、终点 rollout 和 forward reward，只改变“如何为当前 state 取得有信息量的
+具体编辑”：从基础 Edit Flows 在当前时间给出的瞬时有效编辑率中，**条件于发生一个有效编辑**抽样
+一个原子 action。对位置 `i` 和 token `v`，其未归一化质量是：
+
+```text
+insert(i, v)     = insert-rate(i)     × P_insert(v | i)
+substitute(i, v) = substitute-rate(i) × P_substitute(v | i)
+delete(i)        = delete-rate(i)
+```
+
+PAD、BOS、无效位置及“替换为当前同一 token”的 action 都会排除，再在剩余 action 上归一化抽样。
+每个 child 因而必有且仅有一个真正改变 token 序列的编辑；随后从该编辑后的 state 在本次数值步结束
+的真实时间继续普通 Euler 到终点，仍用冻结的 forward-beam reward 打分。
+
+### 10.2 它解决什么、与 DGM 的距离是什么
+
+它直接解决 L1 的样本有效率问题：训练不再依赖罕见的自然发生事件，而是从基础 rate field 的
+**action identity distribution**主动取得 proposal。对 DGM/action guidance 而言，这更接近要学习的
+“基础转移中哪些具体跳转应被放大”的量；同一 state/time 下的 child 仍可做公平的相对 reward 比较。
+
+它不是完整 exact DGM，也不伪装成普通 Euler 单步的精确条件分布：普通 Euler 在一个数值步可同时
+发生多个位置的编辑，而本方案强制一个原子编辑。它是小步长下连续时间 jump process 的
+event-conditioned 近似。它也不学习总编辑强度或 no-op 概率；这与当前 per-position guidance
+normalization 的能力边界一致。若未来改用会改变总 rate 的推理规则，必须重新定义这一训练数据，
+不能复用 E 的结论。
+
+### 10.3 最小适配方式
+
+1. 新增一个独立的 GPU 向量化 helper，只从冻结 Edit Flows 的单次前向输出构造有效原子 action
+   质量并为 batch 中每一行抽取一个 action；不得改动普通 `sample_euler` 的默认逻辑。
+2. 新的 shared-anchor 生成器先按原流程生成 prefix；每个 anchor 对所有 child 做一次上述
+   event-conditioned proposal，记录 proposal 的操作、位置、token、基础 log probability 和编辑后的
+   `transition_tokens`；随后从本 Euler 数值步结束的时间 rollout 到 terminal。
+3. 已有 collate/`action_target_source=transition`/loss 不需要为 E 重写：它们只读取
+   `state → transition_tokens` 的 action mask。新 metadata 必须明确标记 proposal 条件化，避免和 L0/L1
+   的自然 one-step 数据混用。
+4. 使用同一 raw forward-beam reward、同一 canonicalization、同一 n_steps/anchor/child 和同一
+   local-action audit。真实反应物仍不参与生成、reward 或训练。
+
+### 10.4 执行顺序和门槛
+
+| 阶段 | 工作 | 固定数据／配置 | 通过条件 | 不通过时的动作 |
+|---|---|---|---|---|
+| E0 | helper 单元测试 + 2 reaction CUDA smoke | 100 steps，5 anchor，4 child | 每 child 恰有一个有效 state-changing action；不改普通 Euler；rollout 起始时间正确 | 修正实现，不训练 |
+| E1 | 50-reaction 数据质量 pilot | 新的 train 原始块 `[1252,1302)`；同 L1 reward | group 完整共享；严格 local-discriminative group **>20%**；记录 action 类型、重复率、wall/显存 | 不进入正式数据／训练，记录负结果 |
+| E2 | 正式离线对照 | train `[0,1000)` / val `[0,200)`，除 target source 外固定 | event proposal candidate 通过 held-out Bregman guard，且同 group 的局部 ranking/correlation 有可解释提升 | 不做 Top-k |
+| E3 | frozen ordinary-Euler dev | 既有 1,000-reaction开发协议 | Top-1 不降且至少一项深层 Top-k/Oracle 改善 | 记录并关闭 E 支线 |
+
+E1 只检查数据，不能因“每条都已有 action”便跳到 E2。由于 E 会额外增加每个 anchor 一次冻结模型
+前向，smoke 和 E1 必须报告总 wall、records/s、峰值显存；在没有实测前，不宣称它更快或更慢。
