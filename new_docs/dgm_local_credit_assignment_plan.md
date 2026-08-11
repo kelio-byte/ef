@@ -100,6 +100,11 @@ guidance 数据 collate 仅在所有记录都有 `transition_tokens` 时加入�
 
 通过条件：所有 group 完整；至少有足够数量（预期应超过 20%）的 group 同时具有两个以上非空一步 action set 且 reward 有差异；若大部分 late-time group 都是 no-op，先按时间点报告并重新决定是否保留它们，不能直接开始大规模训练。
 
+这里的“两种 action set”在运行前进一步固定为**两种不同的 action mask**，而非仅仅两条
+non-no-op child：同一第一步编辑可能由于后续随机性走向不同终点并获得不同 reward，但这不能给
+当前 action 提供可区分的训练方向。审计同时报告较宽松的“两个非空 child”比例和更严格的
+“两个不同 action mask 的平均 reward 有差异”比例；通过门槛使用后者。
+
 ### 阶段 L2：正式离线训练对照
 
 仅在 L1 通过后，重新生成原始训练反应 0–999 和原始 validation 反应 0–199 的同配置数据（5 个时间点 × 4 children），并使用同一 frozen raw forward-beam reward。训练两套完全相同的 2,000-step guidance：
