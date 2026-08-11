@@ -386,3 +386,35 @@ event_proposal_e1_train50_start1252_action_audit.json
 candidate；两者的架构、seed、batch、optimizer、grouped batch、pairwise/calibration 设置和 checkpoint
 选择规则完全相同，唯一不同是哪些 action mask 获得同一条终点 reward。E2 的 held-out validation data
 也用同样的 event-conditioned 生成器构造，不能复用旧的自然-Euler guidance 文件。
+
+### 10.7 E2 预注册训练与比较规则（2026-08-11）
+
+E2 的正式训练/validation 块分别为 train 原始反应 `[0,1000)` 和 val 原始反应 `[0,200)`；二者来自
+各自已有 split，训练不会读取 validation/test target。两个块都重新用 E 的 generator 构造：100 Euler
+steps、anchor 10/30/50/70/90、4 child、augmentation 20、seed 42，随后使用同一 frozen forward beam
+（beam 5、canonicalized source、batch 16）附加 reward。预期得到 20,000 条 train record 和 4,000 条
+validation record；它们带有相同的 state、transition、terminal 与 reward 字段，因而可以安全切换
+监督目标。
+
+两个 adapter 均固定为已有 2,000-step control 的架构和优化器：hidden 256、product/state layer 2/4、
+8 heads、feedforward 1024、dropout/attention-dropout 0.1、AdamW learning rate `1e-4`、weight decay
+`1e-5`、batch 64、group size 4、grouped batch、梯度裁剪 1.0、validation interval 100、seed 42。
+每个模型都训练最多 2,000 step（约 6.4 个 train epoch）；独立按其**自身** validation loss 选择 best
+checkpoint。这保证 500-step pilot 的偶然早停不会决定结论，同时如果 best 位于 2,000 step 边界，会在
+进入 Top-k 前明确记录为“未证实收敛”，而不是把 final checkpoint 当作已选模型。
+
+为只测信用分配，不引入另一个尚未证实有效的训练目标：两者均设 pairwise loss 与 score-calibration
+loss 为 0；但 validation 仍在所有同 anchor child 上报告 pairwise/rank/correlation 诊断。control 明确
+使用 `state → terminal` mask，candidate 明确使用 `state → forced one-event transition` mask，除此以外
+无任何训练差别。
+
+两种 target 的各自 Bregman loss 涉及不同数量的 selected action，数值不能直接横比。因此 E2 的主比较
+在**同一个 transition-target validation 视角**上进行：用两个已选择 checkpoint 分别评分同一 4,000 条
+validation record，并固定 group/tie 规则。candidate 只有同时满足下列预注册 gate 才可进入 E3：
+
+1. common transition-target Bregman 比 terminal control **至少低 2%**；且
+2. common transition-target 的 tie-aware pair accuracy 至少提高 **3 个百分点**，或 reward–selected-score
+   Pearson 至少提高 **0.05**。
+
+这些阈值不是最终准确率结论，只是要求局部监督至少带来可超过浮动噪声的、同一评价目标下的改善。任一
+条件不通过时，记录两个模型的完整曲线和效率，但不做 Top-k、beta 扫描或 Euler-Beam 实验。
