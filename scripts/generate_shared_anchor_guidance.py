@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 """Generate guidance records with a genuinely shared intermediate anchor.
 
-For each product this script first samples one ordinary Euler prefix to a
-fixed interior time.  The exact prefix state is then repeated ``n_children``
-times and all rows are continued in one vectorized Euler call.  Consequently
-records in one ``source_index`` group share both ``state_tokens`` and ``time``;
-their terminal continuations remain stochastic and independent in the batched
-RNG stream.
+For each product this script first samples one ordinary Euler prefix trajectory.
+One or more interior states from that *same* trajectory can be selected as
+anchors.  For every ``(product, anchor)`` pair, the exact prefix state is
+repeated ``n_children`` times and all rows are continued in one vectorized
+Euler call.  Consequently records in one ``source_index`` group share both
+``state_tokens`` and ``time``; their terminal continuations remain stochastic
+and independent in the batched RNG stream.  In multi-anchor mode,
+``source_index`` identifies a ``(product, anchor)`` pair rather than a product
+alone, so the pairwise objective never compares different times or states.
 
 The output initially carries the cheap RDKit validity reward.  Use
 ``scripts/generate_forward_guidance_data.py`` afterwards to attach the audited
@@ -18,6 +21,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import time
+from typing import Sequence
 
 import torch
 
@@ -64,9 +68,68 @@ def validate_shared_anchor_config(
     return anchor_index
 
 
+def validate_shared_anchor_steps(
+    n_steps: int,
+    anchor_steps: Sequence[int],
+    n_children: int,
+) -> tuple[int, ...]:
+    """Validate and canonically order one or more interior Euler steps."""
+    if n_steps < 2:
+        raise ValueError("n_steps must be >= 2")
+    if n_children < 2:
+        raise ValueError("n_children must be >= 2 for shared-anchor data")
+    steps = tuple(int(step) for step in anchor_steps)
+    if not steps:
+        raise ValueError("anchor_steps must contain at least one interior step")
+    if len(set(steps)) != len(steps):
+        raise ValueError("anchor_steps must not contain duplicates")
+    invalid = [step for step in steps if step < 1 or step >= n_steps]
+    if invalid:
+        raise ValueError(
+            "every anchor step must be in [1, n_steps - 1], got "
+            f"{invalid} for n_steps={n_steps}"
+        )
+    return tuple(sorted(steps))
+
+
+def resolve_anchor_steps(args: argparse.Namespace) -> tuple[int, ...]:
+    """Resolve backward-compatible ``--anchor_time`` or new ``--anchor_steps``."""
+    anchor_steps = getattr(args, "anchor_steps", None)
+    anchor_time = getattr(args, "anchor_time", None)
+    if anchor_steps is not None:
+        if anchor_time is not None:
+            raise ValueError("use either --anchor_time or --anchor_steps, not both")
+        return validate_shared_anchor_steps(
+            args.n_steps, anchor_steps, args.n_children,
+        )
+    if anchor_time is None:
+        anchor_time = 0.5
+    return (
+        validate_shared_anchor_config(
+            args.n_steps, anchor_time, args.n_children,
+        ),
+    )
+
+
+def shared_anchor_group_index(
+    product_index: int,
+    anchor_ordinal: int,
+    anchor_count: int,
+) -> int:
+    """Return the unique pairwise group id for one product/anchor pair."""
+    if product_index < 0 or anchor_ordinal < 0 or anchor_count < 1:
+        raise ValueError("product_index, anchor_ordinal, and anchor_count are invalid")
+    if anchor_ordinal >= anchor_count:
+        raise ValueError("anchor_ordinal must be smaller than anchor_count")
+    return product_index * anchor_count + anchor_ordinal
+
+
 def generate(args: argparse.Namespace) -> dict:
-    anchor_index = validate_shared_anchor_config(
-        args.n_steps, args.anchor_time, args.n_children,
+    anchor_indices = resolve_anchor_steps(args)
+    requested_anchor_time = (
+        float(args.anchor_time)
+        if getattr(args, "anchor_time", None) is not None
+        else (0.5 if getattr(args, "anchor_steps", None) is None else None)
     )
     output = Path(args.output)
     if output.exists() and not args.overwrite:
@@ -98,12 +161,15 @@ def generate(args: argparse.Namespace) -> dict:
         for product in products
     ]
     step_times = get_euler_step_times(args.n_steps, sample_scheduler)
-    if anchor_index >= len(step_times) - 1:
-        raise RuntimeError(
-            f"Euler produced only {len(step_times) - 1} steps, cannot use "
-            f"anchor step {anchor_index}"
-        )
-    anchor_time = step_times[anchor_index]
+    anchor_specs: list[tuple[int, float]] = []
+    for anchor_index in anchor_indices:
+        if anchor_index >= len(step_times) - 1:
+            raise RuntimeError(
+                f"Euler produced only {len(step_times) - 1} steps, cannot use "
+                f"anchor step {anchor_index}"
+            )
+        anchor_specs.append((anchor_index, float(step_times[anchor_index])))
+    anchor_count = len(anchor_specs)
 
     records = []
     started = time.perf_counter()
@@ -140,58 +206,69 @@ def generate(args: argparse.Namespace) -> dict:
                 "trajectory/time schedule length mismatch: "
                 f"trajectory={actual_steps}, schedule={len(step_times) - 1}"
             )
-        anchor_state = trajectory[anchor_index].to(device)
+        for anchor_ordinal, (anchor_index, anchor_time) in enumerate(anchor_specs):
+            anchor_state = trajectory[anchor_index].to(device)
 
-        # Repeat the anchor and product in one batch.  This is the critical
-        # vectorization point: model calls are per continuation batch, not per
-        # child or per CPU record.
-        continuation_state = anchor_state.repeat_interleave(args.n_children, dim=0)
-        continuation_product = x0.repeat_interleave(args.n_children, dim=0)
-        continuation_seed = _mix_seed(
-            args.seed, batch_start, anchor_index + 100003,
-        )
-        torch.manual_seed(continuation_seed)
-        if device.type == "cuda":
-            torch.cuda.manual_seed_all(continuation_seed)
-        terminal_states, _ = sample_euler(
-            model, continuation_state, sample_scheduler,
-            n_steps=args.n_steps,
-            max_seq_len=cfg["max_seq_len"],
-            use_rate_reparam=cfg.get("use_rate_reparam", False),
-            clamp_kappa=cfg.get("clamp_kappa", False),
-            clamp_max=cfg.get("clamp_max", 50.0),
-            time_input=cfg.get("time_input", "t"),
-            train_scheduler=train_scheduler,
-            use_origin_mask=False,
-            start_time=anchor_time,
-        )
-        terminal_text = _decode_rows(terminal_states, id2token)
-        rewards = retro_tokenized_validity_reward(terminal_text)
+            # Repeat the anchor and product in one batch.  This is the critical
+            # vectorization point: model calls are per continuation batch, not
+            # per child or per CPU record.  A distinct seed is used per anchor.
+            continuation_state = anchor_state.repeat_interleave(
+                args.n_children, dim=0,
+            )
+            continuation_seed = _mix_seed(
+                args.seed, batch_start, anchor_index + 100003,
+            )
+            torch.manual_seed(continuation_seed)
+            if device.type == "cuda":
+                torch.cuda.manual_seed_all(continuation_seed)
+            terminal_states, _ = sample_euler(
+                model, continuation_state, sample_scheduler,
+                n_steps=args.n_steps,
+                max_seq_len=cfg["max_seq_len"],
+                use_rate_reparam=cfg.get("use_rate_reparam", False),
+                clamp_kappa=cfg.get("clamp_kappa", False),
+                clamp_max=cfg.get("clamp_max", 50.0),
+                time_input=cfg.get("time_input", "t"),
+                train_scheduler=train_scheduler,
+                use_origin_mask=False,
+                start_time=anchor_time,
+            )
+            terminal_text = _decode_rows(terminal_states, id2token)
+            rewards = retro_tokenized_validity_reward(terminal_text)
 
-        for product_offset, _ in enumerate(batch_products):
-            source_index = batch_start + product_offset
-            product_row = x0_cpu[product_offset]
-            state_row = anchor_state[product_offset].detach().cpu()
-            for child_index in range(args.n_children):
-                row_index = product_offset * args.n_children + child_index
-                child_seed = _mix_seed(
-                    args.seed, source_index, child_index + 1,
+            for product_offset, _ in enumerate(batch_products):
+                product_index = batch_start + product_offset
+                source_index = shared_anchor_group_index(
+                    product_index, anchor_ordinal, anchor_count,
                 )
-                coupling_seed = _mix_seed(
-                    args.seed, source_index, 100000 + child_index + 1,
-                )
-                records.append(make_guidance_record(
-                    product_tokens=_trim_pad(product_row.tolist()),
-                    state_tokens=_trim_pad(state_row.tolist()),
-                    terminal_tokens=_trim_pad(terminal_states[row_index].detach().cpu().tolist()),
-                    time_step=anchor_time,
-                    reward=float(rewards[row_index].item()),
-                    source_index=source_index,
-                    sample_index=child_index,
-                    time_index=anchor_index,
-                    sample_seed=child_seed,
-                    coupling_seed=coupling_seed,
-                ))
+                product_row = x0_cpu[product_offset]
+                state_row = anchor_state[product_offset].detach().cpu()
+                for child_index in range(args.n_children):
+                    row_index = product_offset * args.n_children + child_index
+                    child_seed = _mix_seed(
+                        args.seed, source_index, child_index + 1,
+                    )
+                    coupling_seed = _mix_seed(
+                        args.seed, source_index, 100000 + child_index + 1,
+                    )
+                    record = make_guidance_record(
+                        product_tokens=_trim_pad(product_row.tolist()),
+                        state_tokens=_trim_pad(state_row.tolist()),
+                        terminal_tokens=_trim_pad(
+                            terminal_states[row_index].detach().cpu().tolist(),
+                        ),
+                        time_step=anchor_time,
+                        reward=float(rewards[row_index].item()),
+                        source_index=source_index,
+                        sample_index=child_index,
+                        time_index=anchor_index,
+                        sample_seed=child_seed,
+                        coupling_seed=coupling_seed,
+                    )
+                    if anchor_count > 1:
+                        record["product_index"] = product_index
+                        record["anchor_ordinal"] = anchor_ordinal
+                    records.append(record)
 
         if batch_index == 1 or batch_index == total_batches or batch_index % 10 == 0:
             elapsed = time.perf_counter() - started
@@ -200,7 +277,8 @@ def generate(args: argparse.Namespace) -> dict:
             print(
                 f"Shared-anchor batches {batch_index}/{total_batches} | "
                 f"products {min(batch_start + args.batch_size, len(products))}/"
-                f"{len(products)} | elapsed {elapsed:.1f}s | ETA {eta:.1f}s",
+                f"{len(products)} | anchors {anchor_count} | "
+                f"elapsed {elapsed:.1f}s | ETA {eta:.1f}s",
                 flush=True,
             )
 
@@ -218,9 +296,17 @@ def generate(args: argparse.Namespace) -> dict:
         "augmentation": args.augmentation,
         "n_steps": args.n_steps,
         "n_children": args.n_children,
-        "anchor_time_requested": float(args.anchor_time),
-        "anchor_time": anchor_time,
-        "anchor_time_index": anchor_index,
+        "anchor_time_requested": requested_anchor_time,
+        "anchor_time": anchor_specs[0][1] if anchor_count == 1 else None,
+        "anchor_time_index": anchor_specs[0][0] if anchor_count == 1 else None,
+        "anchor_steps": [index for index, _ in anchor_specs],
+        "anchor_times": [time_value for _, time_value in anchor_specs],
+        "anchor_count": anchor_count,
+        "anchor_group_count": len(products) * anchor_count,
+        "source_index_semantics": (
+            "product_index" if anchor_count == 1
+            else "unique product_index/anchor_ordinal pair"
+        ),
         "shared_anchor": True,
         "rng_scope": "product-batch prefix and vectorized continuation seeds",
         "sampler": "euler_shared_anchor_continuation",
@@ -239,6 +325,8 @@ def generate(args: argparse.Namespace) -> dict:
         "output": str(output),
         "products": len(products),
         "records": len(records),
+        "anchor_steps": [index for index, _ in anchor_specs],
+        "anchor_times": [time_value for _, time_value in anchor_specs],
         "reward_mean": float(torch.tensor([r["reward"] for r in records]).mean()),
         "wall_seconds": wall,
         "records_per_second": len(records) / max(wall, 1e-9),
@@ -258,7 +346,14 @@ def main() -> None:
     parser.add_argument("--max_products", type=int, default=None)
     parser.add_argument("--n_steps", type=int, default=100)
     parser.add_argument("--n_children", type=int, default=4)
-    parser.add_argument("--anchor_time", type=float, default=0.5)
+    parser.add_argument(
+        "--anchor_time", type=float, default=None,
+        help="One interior anchor time in (0, 1); defaults to 0.5 when omitted.",
+    )
+    parser.add_argument(
+        "--anchor_steps", type=int, nargs="+", default=None,
+        help="One or more interior Euler step indices, e.g. --anchor_steps 10 30 50.",
+    )
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=42)

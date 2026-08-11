@@ -267,32 +267,35 @@ $PY scripts/rerank_forward_beam.py \
 当前 validation-B 对照约提速 3 倍并提高 AUC，后续默认开启。重排后仍需按原 prediction beam、
 augmentation、reaction offset 调用评分脚本。
 
-生成同一 product 的 4 个独立终点并附加 forward-beam reward：
+生成多时间点、共享中间状态的 guidance 数据并附加 forward-beam reward：
 
 ```bash
-$PY scripts/generate_guidance_data.py \
+$PY scripts/generate_shared_anchor_guidance.py \
   --checkpoint new_checkpoints/checkpoint_step600000.pt \
   --products_file "$DATA/train/src-train.txt" \
-  --output /path/to/train_multiterm_validity.pt \
+  --output /root/autodl-tmp/dgm_guidance_runs/train_shared_anchor1000_t10_30_50_70_90_validity.pt \
   --augmentation 20 --max_products 1000 \
-  --n_steps 100 --n_samples 4 --time_samples 1 \
+  --n_steps 100 --n_children 4 \
+  --anchor_steps 10 30 50 70 90 \
   --batch_size 32 --device cuda --seed 42
 
 $PY scripts/generate_forward_guidance_data.py \
-  --input_data /path/to/train_multiterm_validity.pt \
-  --output_data /path/to/train_multiterm_beam.pt \
+  --input_data /root/autodl-tmp/dgm_guidance_runs/train_shared_anchor1000_t10_30_50_70_90_validity.pt \
+  --output_data /root/autodl-tmp/dgm_guidance_runs/train_shared_anchor1000_t10_30_50_70_90_beam.pt \
   --checkpoint new_checkpoints/MIT_mixed_augm_model_average_20.pt \
   --vocab_file "$DATA/example.vocab.src" \
   --reward_mode beam_reconstruction --forward_beam_size 5 \
   --canonicalize_source --batch_size 16 --device cuda
 ```
 
-第一条命令的 `batch_size` 是同时处理的 product 数，实际终点 batch 为
-`batch_size × n_samples`；RTX 3090 的当前实测中 32 比 64 更快。第二条命令只读取保存的
-product/terminal，不读取反应 target；输出报告中的 `variable_reward_group_fraction` 是判断
-多终点监督是否比旧单终点数据更有信息量的关键指标。本地 guidance `.pt` 数据和 checkpoint
-体积较大，默认不提交 Git。正向 beam reward 的 batch 8/16/32 实测中 16 最快，故当前推荐 16；
-这与前一条 Euler 数据生成的 product batch 32 是两个不同参数，不要混淆。
+第一条命令先为每个 product 采样一条完整前缀轨迹，再分别取第 10/30/50/70/90 步作为 anchor；
+每个“product × anchor”复制为 4 条独立后续。`source_index` 因而表示一个 product-anchor 组，
+训练的 pairwise loss 不会跨时间比较。第一条命令的 `batch_size` 是同时处理的 product 数，实际
+continuation batch 为 `batch_size × n_children`；RTX 3090 的当前实测中 32 安全且高效。第二条命令
+只读取保存的 product/terminal，不读取反应 target；输出报告中的
+`variable_reward_group_fraction` 是判断多终点监督是否有比较信号的关键指标。本地 guidance `.pt`
+数据和 checkpoint 体积较大，默认不提交 Git。正向 beam reward 的 batch 8/16/32 实测中 16 最快，
+故当前推荐 16；这与前一条 Euler 数据生成的 product batch 32 是两个不同参数，不要混淆。
 
 ## 5. 分离运行采样和打分
 
