@@ -134,6 +134,47 @@ def _group_indices(examples: Sequence[Mapping[str, Any]]) -> list[list[int]]:
     return list(groups.values())
 
 
+def _prepare_training_groups(
+    examples: Sequence[Mapping[str, Any]],
+    groups: Sequence[Sequence[int]],
+    raw_scores: torch.Tensor,
+    *,
+    hard_negative_k: int,
+    device: torch.device,
+) -> tuple[list[torch.Tensor], torch.Tensor, torch.Tensor]:
+    """Precompute reaction groups and raw-score hard negatives once.
+
+    The contents are fixed for the whole optimization run.  Keeping this
+    preparation outside the step loop preserves the loss exactly while
+    avoiding millions of repeated Python and tensor-construction operations.
+    """
+
+    active: list[torch.Tensor] = []
+    positive_indices: list[int] = []
+    negative_indices: list[int] = []
+    for group in groups:
+        positive = [index for index in group if examples[index]["label"]]
+        negative = [index for index in group if not examples[index]["label"]]
+        if not positive or not negative:
+            continue
+        active.append(torch.tensor(group, dtype=torch.long, device=device))
+        hard_negative = sorted(
+            negative,
+            key=lambda index: (-float(raw_scores[index].item()), index),
+        )[:hard_negative_k]
+        for pos_index in positive:
+            for neg_index in hard_negative:
+                positive_indices.append(pos_index)
+                negative_indices.append(neg_index)
+    if not active:
+        raise ValueError("training split has no reaction with both positive and negative candidates")
+    return (
+        active,
+        torch.tensor(positive_indices, dtype=torch.long, device=device),
+        torch.tensor(negative_indices, dtype=torch.long, device=device),
+    )
+
+
 def _final_scores(
     model: RewardRanker,
     features: torch.Tensor,
@@ -152,9 +193,8 @@ def _final_scores(
 
 def _ranking_loss(
     scores: torch.Tensor,
-    raw_scores: torch.Tensor,
     labels: torch.Tensor,
-    groups: Sequence[Sequence[int]],
+    groups: Sequence[torch.Tensor],
     *,
     mode: str,
     temperature: float,
@@ -162,39 +202,25 @@ def _ranking_loss(
     pair_weight: float,
     residual: torch.Tensor,
     residual_reg: float,
-    hard_negative_k: int,
+    pair_positive: torch.Tensor,
+    pair_negative: torch.Tensor,
 ) -> torch.Tensor:
     losses: list[torch.Tensor] = []
-    pair_losses: list[torch.Tensor] = []
-    for group in groups:
-        valid_indices = [index for index in group]
-        positive = [index for index in valid_indices if labels[index] > 0.5]
-        negative = [index for index in valid_indices if labels[index] <= 0.5]
-        if not positive or not negative:
-            continue
-        index_tensor = torch.tensor(group, dtype=torch.long, device=scores.device)
+    for index_tensor in groups:
         group_scores = scores.index_select(0, index_tensor)
         group_labels = labels.index_select(0, index_tensor)
         target = group_labels / group_labels.sum().clamp_min(1.0)
         losses.append(
             -(target * torch.log_softmax(group_scores / temperature, dim=0)).sum()
         )
-        hard_negative = sorted(
-            negative,
-            key=lambda index: (-float(raw_scores[index].detach().item()), index),
-        )[:hard_negative_k]
-        for pos_index in positive:
-            for neg_index in hard_negative:
-                pair_losses.append(
-                    torch.nn.functional.softplus(
-                        margin - (scores[pos_index] - scores[neg_index])
-                    )
-                )
     if not losses:
         raise ValueError("training split has no reaction with both positive and negative candidates")
     loss = torch.stack(losses).mean()
-    if pair_losses:
-        loss = loss + pair_weight * torch.stack(pair_losses).mean()
+    if pair_positive.numel():
+        loss = loss + pair_weight * torch.nn.functional.softplus(
+            margin - (scores.index_select(0, pair_positive)
+                      - scores.index_select(0, pair_negative))
+        ).mean()
     if mode == "residual":
         loss = loss + residual_reg * residual.square().mean()
     return loss
@@ -216,6 +242,10 @@ def _fit_model(
     model = RewardRanker(int(features.shape[1])).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     groups = _group_indices(train_examples)
+    active_groups, pair_positive, pair_negative = _prepare_training_groups(
+        train_examples, groups, raw_scores,
+        hard_negative_k=args.hard_negative_k, device=device,
+    )
     history: list[dict[str, float]] = []
     for step in range(1, args.steps + 1):
         optimizer.zero_grad(set_to_none=True)
@@ -223,14 +253,15 @@ def _fit_model(
             model, features, raw_scores, mode, args.residual_cap,
         )
         loss = _ranking_loss(
-            scores, raw_scores, labels, groups,
+            scores, labels, active_groups,
             mode=mode,
             temperature=args.temperature,
             margin=args.margin,
             pair_weight=args.pair_weight,
             residual=residual,
             residual_reg=args.residual_reg,
-            hard_negative_k=args.hard_negative_k,
+            pair_positive=pair_positive,
+            pair_negative=pair_negative,
         )
         loss.backward()
         optimizer.step()
@@ -561,4 +592,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
