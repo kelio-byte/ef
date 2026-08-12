@@ -193,6 +193,14 @@ def generate(args: argparse.Namespace) -> dict:
         start_product=getattr(args, "start_product", 0),
         max_products=args.max_products,
     )
+    product_indices = list(range(selection_start, selection_end))
+    if getattr(args, "sort_by_product_length", False):
+        ordered = sorted(
+            zip(product_indices, products),
+            key=lambda item: (len(item[1].split()), item[0]),
+        )
+        product_indices = [item[0] for item in ordered]
+        products = [item[1] for item in ordered]
     unk_id = token2id.get("<unk>", 2)
     product_ids = [
         [token2id.get(token, unk_id) for token in product.split()]
@@ -217,8 +225,8 @@ def generate(args: argparse.Namespace) -> dict:
     ):
         batch_products = products[batch_start:batch_start + args.batch_size]
         batch_ids = product_ids[batch_start:batch_start + args.batch_size]
-        source_batch_start = selection_start + batch_start
-        batch_seed = _mix_seed(args.seed, source_batch_start, 0)
+        batch_product_indices = product_indices[batch_start:batch_start + len(batch_products)]
+        batch_seed = _mix_seed(args.seed, batch_product_indices[0], 0)
         torch.manual_seed(batch_seed)
         if device.type == "cuda":
             torch.cuda.manual_seed_all(batch_seed)
@@ -255,7 +263,7 @@ def generate(args: argparse.Namespace) -> dict:
                 args.n_children, dim=0,
             )
             continuation_seed = _mix_seed(
-                args.seed, source_batch_start, anchor_index + 100003,
+                args.seed, batch_product_indices[0], anchor_index + 100003,
             )
             torch.manual_seed(continuation_seed)
             if device.type == "cuda":
@@ -299,7 +307,7 @@ def generate(args: argparse.Namespace) -> dict:
             rewards = retro_tokenized_validity_reward(terminal_text)
 
             for product_offset, _ in enumerate(batch_products):
-                product_index = source_batch_start + product_offset
+                product_index = batch_product_indices[product_offset]
                 source_index = shared_anchor_group_index(
                     product_index, anchor_ordinal, anchor_count,
                 )
@@ -360,6 +368,10 @@ def generate(args: argparse.Namespace) -> dict:
         "source_product_count": len(all_products),
         "selection_start_product": selection_start,
         "selection_end_product_exclusive": selection_end,
+        "product_order": (
+            "length_sorted" if getattr(args, "sort_by_product_length", False)
+            else "source_order"
+        ),
         "product_count": len(products),
         "record_count": len(records),
         "augmentation": args.augmentation,
@@ -423,6 +435,10 @@ def main() -> None:
         ),
     )
     parser.add_argument("--max_products", type=int, default=None)
+    parser.add_argument(
+        "--sort_by_product_length", action="store_true",
+        help="Batch products in ascending token-length order to reduce padding.",
+    )
     parser.add_argument("--n_steps", type=int, default=100)
     parser.add_argument("--n_children", type=int, default=4)
     parser.add_argument(
