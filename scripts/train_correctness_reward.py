@@ -85,6 +85,18 @@ def _token_sequence(value: Sequence[int]) -> list[int]:
     return tokens
 
 
+def _decode_global_tokens(
+    value: Sequence[int], id2token: Mapping[int, str],
+) -> str:
+    """Decode serialized Edit Flows ids without consulting any target label."""
+
+    tokens = _token_sequence(value)
+    try:
+        return " ".join(id2token[int(token)] for token in tokens)
+    except KeyError as exc:
+        raise ValueError(f"token id {exc.args[0]} is absent from vocabulary") from exc
+
+
 def _raw_forward_reward(record: Mapping[str, Any]) -> float:
     rank = int(record.get("forward_beam_rank", 0))
     if rank < 0:
@@ -170,6 +182,7 @@ def _deduplicate_records(
     raw_positive = 0
     raw_products: set[int] = set()
     raw_source_groups: set[int] = set()
+    product_canonical_cache: dict[int, str] = {}
     for record_index, record in enumerate(records):
         product_index = int(record["product_index"])
         source_index = int(record.get("source_index", product_index))
@@ -178,6 +191,14 @@ def _deduplicate_records(
         candidate_canonical, label, _ = _candidate_label(
             record, id2token, canonical_targets,
         )
+        # The product feature must come from the serialized product input.
+        # It must never use canonical_targets: that would leak the label into
+        # the reward model through a seemingly harmless component-count field.
+        if product_index not in product_canonical_cache:
+            product_canonical_cache[product_index] = _canonical_global(
+                _decode_global_tokens(record["product_tokens"], id2token)
+            )
+        product_canonical = product_canonical_cache[product_index]
         raw_invalid += int(not candidate_canonical)
         raw_positive += int(label)
         # Invalid candidates are intentionally collapsed to one lowest-score
@@ -198,8 +219,7 @@ def _deduplicate_records(
             "forward_beam_rank": int(record.get("forward_beam_rank", 0)),
             "features": _feature_vector(
                 record["product_tokens"], record["terminal_tokens"],
-                product_canonical=canonical_targets[product_index]
-                if product_index < len(canonical_targets) else "",
+                product_canonical=product_canonical,
                 candidate_canonical=candidate_canonical,
                 raw_forward_reward=raw_score,
                 vocab_size=vocab_size,
