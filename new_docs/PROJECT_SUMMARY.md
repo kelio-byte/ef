@@ -100,7 +100,7 @@ E5 的 Top-1 配对置信区间为 [-3.9, -0.2] 个百分点；E7 的深层改�
 
 先做一个实现勘误：旧版 correctness-reward 脚本曾把真实 target 的 canonical component count 作为 product feature，故旧 P2/P3 的 AUC 和 rerank 数字不再是干净证据。修复后的实现只从序列化 product/candidate tokens 构造特征；target 仅用于候选池固定后的离线标签。旧结果保留在历史执行报告中，但不应继续被引用。
 
-修复后，在全新的 reaction split（ranker train 2000–2999、validation 3000–3199、一次性 holdout 3200–3399）上比较 raw forward、bounded residual 和 listwise/hard-negative ranker。validation 上 residual 的 global AUC 从 0.7118 到 0.7474，但 Top-1 从 51.5% 降到 41.0%；listwise 的 Top-1 为 40.5%。独立 holdout 上 raw 的 Top-1/3/10 为 46.5/72.5/78.5%，residual 为 40.0/71.5/78.5%，listwise 为 38.0/70.5/78.0%；三者 Oracle 都为 78.5%。residual 的 Top-1 paired bootstrap 95% CI 为 [-13.0, 0.0] pp，listwise 为 [-15.5, -1.5] pp。因此局部候选 AUC 的正向信号没有转化为 reaction-level rerank，P3 gate 失败，新的 guidance data、DGM 重训、改进后 `visualization_trajectory` 和 confirm/final/test 均没有启动。完整协议、参数、哈希和停止判定见 [`dgm_reward_ranker_v2_report.md`](dgm_reward_ranker_v2_report.md)。
+修复后先在 `1000/200/200` reaction 的 v2 split 上看到同样的 Top-1 下降；为排除小样本解释，又冻结 v3 大规模复核：ranker train/validation/holdout 分别为 `8000/1000/1000` 个独立 reaction（10000–17999、18000–18999、19000–19999）。validation 上 raw/residual/listwise Top-1 为 `47.4/39.5/40.1%`；一次性 holdout 上为 `47.7/38.1/37.0%`，Top-10 为 `80.4/80.3/80.4%`，三者 Oracle 均为 `80.4%`。residual 的 holdout global AUC 从 0.6922 提升到 0.7167，但 Top-1 差值的 1000-reaction paired bootstrap 95% CI 为 [-13.0, -6.3] pp；listwise CI 为 [-13.9, -7.5] pp。扩大数据后失败模式仍稳定，因此正式关闭当前 rerank 路线：不再扩大该 ranker、不构造 guidance data、不重训 DGM，也不运行改进后 `visualization_trajectory`。完整协议与报告见 [`dgm_reward_ranker_v3_large_protocol.md`](dgm_reward_ranker_v3_large_protocol.md) 和 [`dgm_reward_ranker_v3_large_report.md`](dgm_reward_ranker_v3_large_report.md)。
 
 ## 7. 当前项目状态
 
@@ -117,16 +117,16 @@ E5 的 Top-1 配对置信区间为 [-3.9, -0.2] 个百分点；E7 的深层改�
 - Q temperature 小于 1 不是默认改进。
 - 当前方法不是严格原始 DGM，不能以其理论保证解释结果。
 - guidance 的离线 reward 排序提升不等于最终 Top-1 提升；现有 E3--E7、P1/P2 以及已测试的 event-conditioned local credit 均未通过采用门槛。
-- 修复 target leakage 后，bounded residual 仍只表现出很小的 holdout AUC 正向信号，且两个 learned ranker 都被同池 Top-1 rerank gate 否定；因此不能把当前 ranker 直接接到 DGM。
+- 修复 target leakage 并扩大到 1000-reaction holdout 后，bounded residual 仍出现“candidate AUC 提高、reaction Top-1 明确下降”，listwise 更差；因此当前小型 endpoint reranker 已正式关闭，不能接到 DGM。
 - Euler-SMC 目前只有机制正确性，不具备准确率成功证据。
 
 ### 仍未解决的核心问题
 
-1. 如何获得与真实逆合成成功更一致、又不泄漏评测目标的 reward/偏好信号；
+1. 如何获得与真实逆合成成功更一致、又不泄漏评测目标的 reward/偏好信号，而不是再叠加一个无法超过 Molecular Transformer 的小型 reranker；
 2. 如何为可变长度编辑建立可信的中间动作价值或 credit assignment，而非把终端 reward 粗略复制到整段路径；
 3. 是否应在固定训练基础设施上重新设计具有不可变显式产物条件、并缓解编辑不均衡的基础模型；
 4. 如何把推理预算用于未来价值和谱系多样性，而不是盲目增大 K/M；任何新配置都应先冻结并通过未使用的 confirm/final reaction-level 集合，再报告完整测试结论。
 
 ## Source Map
 
-核心训练证据见 training_code_audit.md、training_tensorboard_and_fixes.md、new_checkpoint_validation_parameter_sweep.md；Euler 采样与受控搜索证据见 sampling_overview.md、euler_beam_current_situation.md、euler_beam_next_stage_plan.md；DGM 的最新协议、数据和 reward 审计见 dgm_evaluation_v2.md、dgm_multitime_guidance_data.md、dgm_local_credit_assignment_plan.md、dgm_reward_quality_protocol.md，理论适配边界见 dgm_edit_flows_adaptation_status.md；本轮冻结执行、paired trajectory 与 P2/P3 停止判定见 dgm_p0_protocol.md、dgm_p1_panel_v1.md、dgm_reward_ranker_v2_protocol.md、dgm_reward_ranker_v2_report.md。旧版执行记录及勘误见 dgm_execution_report.md。
+核心训练证据见 training_code_audit.md、training_tensorboard_and_fixes.md、new_checkpoint_validation_parameter_sweep.md；Euler 采样与受控搜索证据见 sampling_overview.md、euler_beam_current_situation.md、euler_beam_next_stage_plan.md；DGM 的最新协议、数据和 reward 审计见 dgm_evaluation_v2.md、dgm_multitime_guidance_data.md、dgm_local_credit_assignment_plan.md、dgm_reward_quality_protocol.md，理论适配边界见 dgm_edit_flows_adaptation_status.md；本轮冻结执行、paired trajectory 与 endpoint-ranker 终止判定见 dgm_p0_protocol.md、dgm_p1_panel_v1.md、dgm_reward_ranker_v2_protocol.md、dgm_reward_ranker_v2_report.md、dgm_reward_ranker_v3_large_protocol.md、dgm_reward_ranker_v3_large_report.md。旧版执行记录及勘误见 dgm_execution_report.md。

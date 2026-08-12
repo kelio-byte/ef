@@ -1,6 +1,6 @@
 # Reward ranker v3：大规模复核协议
 
-状态：已冻结，执行中。该复核只判断 endpoint reranking 是否值得保留，不训练 DGM。
+状态：已冻结并执行完成。该复核只判断 endpoint reranking 是否值得保留，不训练 DGM。结果见 [`dgm_reward_ranker_v3_large_report.md`](dgm_reward_ranker_v3_large_report.md)。
 
 ## 目的
 
@@ -51,4 +51,3 @@ v3 holdout 上，learned ranker 必须同时满足：
 5. 候选池、输入哈希、checkpoint 哈希和 forward reward 成本完整记录。
 
 若两个 learned ranker 均不满足，正式关闭当前 rerank 路线：不构造 guidance data、不训练 DGM、不进行改进后 trajectory visualization。该结论只针对当前 ranker 设计与 reward 特征，不外推为所有可能的强 reranker 都无效。
-
