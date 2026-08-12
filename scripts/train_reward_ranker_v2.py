@@ -141,7 +141,7 @@ def _prepare_training_groups(
     *,
     hard_negative_k: int,
     device: torch.device,
-) -> tuple[list[torch.Tensor], torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Precompute reaction groups and raw-score hard negatives once.
 
     The contents are fixed for the whole optimization run.  Keeping this
@@ -149,7 +149,7 @@ def _prepare_training_groups(
     avoiding millions of repeated Python and tensor-construction operations.
     """
 
-    active: list[torch.Tensor] = []
+    active: list[list[int]] = []
     positive_indices: list[int] = []
     negative_indices: list[int] = []
     for group in groups:
@@ -157,7 +157,7 @@ def _prepare_training_groups(
         negative = [index for index in group if not examples[index]["label"]]
         if not positive or not negative:
             continue
-        active.append(torch.tensor(group, dtype=torch.long, device=device))
+        active.append(list(group))
         hard_negative = sorted(
             negative,
             key=lambda index: (-float(raw_scores[index].item()), index),
@@ -168,8 +168,21 @@ def _prepare_training_groups(
                 negative_indices.append(neg_index)
     if not active:
         raise ValueError("training split has no reaction with both positive and negative candidates")
+    max_group_size = max(len(group) for group in active)
+    group_indices = torch.zeros(
+        (len(active), max_group_size), dtype=torch.long, device=device,
+    )
+    group_mask = torch.zeros(
+        (len(active), max_group_size), dtype=torch.bool, device=device,
+    )
+    for row_index, group in enumerate(active):
+        group_indices[row_index, :len(group)] = torch.tensor(
+            group, dtype=torch.long, device=device,
+        )
+        group_mask[row_index, :len(group)] = True
     return (
-        active,
+        group_indices,
+        group_mask,
         torch.tensor(positive_indices, dtype=torch.long, device=device),
         torch.tensor(negative_indices, dtype=torch.long, device=device),
     )
@@ -194,7 +207,8 @@ def _final_scores(
 def _ranking_loss(
     scores: torch.Tensor,
     labels: torch.Tensor,
-    groups: Sequence[torch.Tensor],
+    group_indices: torch.Tensor,
+    group_mask: torch.Tensor,
     *,
     mode: str,
     temperature: float,
@@ -205,17 +219,17 @@ def _ranking_loss(
     pair_positive: torch.Tensor,
     pair_negative: torch.Tensor,
 ) -> torch.Tensor:
-    losses: list[torch.Tensor] = []
-    for index_tensor in groups:
-        group_scores = scores.index_select(0, index_tensor)
-        group_labels = labels.index_select(0, index_tensor)
-        target = group_labels / group_labels.sum().clamp_min(1.0)
-        losses.append(
-            -(target * torch.log_softmax(group_scores / temperature, dim=0)).sum()
-        )
-    if not losses:
+    if group_indices.numel() == 0:
         raise ValueError("training split has no reaction with both positive and negative candidates")
-    loss = torch.stack(losses).mean()
+    safe_indices = group_indices.reshape(-1)
+    group_scores = scores.index_select(0, safe_indices).reshape(group_indices.shape)
+    group_labels = labels.index_select(0, safe_indices).reshape(group_indices.shape)
+    group_scores = group_scores.masked_fill(~group_mask, -1.0e9)
+    group_labels = group_labels * group_mask
+    target = group_labels / group_labels.sum(dim=1, keepdim=True).clamp_min(1.0)
+    loss = -(
+        target * torch.log_softmax(group_scores / temperature, dim=1)
+    ).sum(dim=1).mean()
     if pair_positive.numel():
         loss = loss + pair_weight * torch.nn.functional.softplus(
             margin - (scores.index_select(0, pair_positive)
@@ -242,7 +256,7 @@ def _fit_model(
     model = RewardRanker(int(features.shape[1])).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     groups = _group_indices(train_examples)
-    active_groups, pair_positive, pair_negative = _prepare_training_groups(
+    group_indices, group_mask, pair_positive, pair_negative = _prepare_training_groups(
         train_examples, groups, raw_scores,
         hard_negative_k=args.hard_negative_k, device=device,
     )
@@ -253,7 +267,7 @@ def _fit_model(
             model, features, raw_scores, mode, args.residual_cap,
         )
         loss = _ranking_loss(
-            scores, labels, active_groups,
+            scores, labels, group_indices, group_mask,
             mode=mode,
             temperature=args.temperature,
             margin=args.margin,
