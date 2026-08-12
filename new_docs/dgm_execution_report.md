@@ -1,8 +1,12 @@
-# DGM 后续计划执行报告
+# DGM 后续计划执行报告（历史 v1；当前结果见 v2）
 
 执行环境：conda `ef`，Python 3.10.20，PyTorch 2.7.1+cu126，NVIDIA RTX 3090（23.56 GiB）。
 
-结论先行：P0、P1、P2 已完成；P2 的新 correctness reward 在离线排序指标上有正向信号，但 P3 的同候选池终点 rerank 失败。因此按照计划的 stopping rule，P4 不启动，也没有读取 confirm、final 或完整 test。当前不能声称“新 reward + DGM”已经改善端到端逆合成。
+结论先行：P0、P1 的记录仍然有效；本文原先的 P2/P3 v1 数字因实现中的 target leakage 已失效，不能继续作为实验结论。请以 [`dgm_reward_ranker_v2_report.md`](dgm_reward_ranker_v2_report.md) 为当前权威结果：修复泄漏后，在全新 reaction split 上比较 raw forward、bounded residual 和 listwise/hard-negative ranker，两个 learned ranker 均未通过终点 Top-1 gate，因此 P4 不启动，也没有训练新的 DGM。
+
+## 本文状态与勘误
+
+旧 v1 脚本把 `canonical_targets[product_index]` 传入了 product component feature，导致 target leakage。虽然旧模型只在离线标签上评估，但该 feature 已经不是推理时可用的纯 product 信息，因此旧 P2 的 AUC 以及基于它的旧 P3 rerank 不能当作干净证据。代码已在提交 `532a46e` 修复；新的候选池、训练、validation 和一次性 holdout 结果完整记录在 v2 报告中。下文第 4–5 节保留仅用于解释历史决策，不代表当前结论。
 
 ## 1. 执行范围与提交
 
@@ -120,4 +124,3 @@ P4-A（重建 guidance 数据）、P4-B（训练新 DGM）、P4-C（新 guidance
 2. 如果继续研究 reward，先设计能直接优化 reaction-level candidate selection 的候选组损失/特征，并预先规定新的独立 holdout；不能在本 holdout 上反复修补。
 3. 进一步分析 P1 中“首次分叉晚、编辑类型几乎不变”的路径，重点检查 credit assignment 与 terminal-to-action 映射，而不是简单增加 guidance 强度。
 4. 只有新的 reward 通过离线 AUC **和**终点 rerank gate，才允许按原计划执行 P4，并在 dev 通过后原样复用 `P1-panel-v1` 做改进后成对可视化。
-

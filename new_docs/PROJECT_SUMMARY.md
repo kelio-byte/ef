@@ -98,9 +98,9 @@ E5 的 Top-1 配对置信区间为 [-3.9, -0.2] 个百分点；E7 的深层改�
 
 ### 6.4 新 correctness reward 的一次冻结 gate
 
-在后续计划中，新构造的 candidate-correctness reward 只用 train-1000 训练，并在独立 reward holdout-200 上一次性评估。它使用产物/候选的 label-free token 与长度特征以及 raw forward reciprocal-rank，训练后全局 valid-candidate AUC 从 0.6864 提升到 0.7306，shared-anchor 组内 AUC 从 0.6114 提升到 0.6777；这证明它学到了一些比 forward reconstruction reward 更接近数据集 exact correctness 的局部偏好，但不是端到端收益。
+先做一个实现勘误：旧版 correctness-reward 脚本曾把真实 target 的 canonical component count 作为 product feature，故旧 P2/P3 的 AUC 和 rerank 数字不再是干净证据。修复后的实现只从序列化 product/candidate tokens 构造特征；target 仅用于候选池固定后的离线标签。旧结果保留在历史执行报告中，但不应继续被引用。
 
-同一冻结候选池上的终点 rerank 给出相反结论：Top-1 从 48.5% 降到 42.0%，Top-3 从 79.5% 降到 76.0%，Top-10 与 Oracle 均未提高。因此 P3 gate 失败，新的 guidance 数据、DGM 重训、改进后轨迹复核和 confirm/final/test 均按停止规则没有启动。完整命令、哈希、bootstrap 与停止判定见 [`dgm_execution_report.md`](dgm_execution_report.md)。
+修复后，在全新的 reaction split（ranker train 2000–2999、validation 3000–3199、一次性 holdout 3200–3399）上比较 raw forward、bounded residual 和 listwise/hard-negative ranker。validation 上 residual 的 global AUC 从 0.7118 到 0.7474，但 Top-1 从 51.5% 降到 41.0%；listwise 的 Top-1 为 40.5%。独立 holdout 上 raw 的 Top-1/3/10 为 46.5/72.5/78.5%，residual 为 40.0/71.5/78.5%，listwise 为 38.0/70.5/78.0%；三者 Oracle 都为 78.5%。residual 的 Top-1 paired bootstrap 95% CI 为 [-13.0, 0.0] pp，listwise 为 [-15.5, -1.5] pp。因此局部候选 AUC 的正向信号没有转化为 reaction-level rerank，P3 gate 失败，新的 guidance data、DGM 重训、改进后 `visualization_trajectory` 和 confirm/final/test 均没有启动。完整协议、参数、哈希和停止判定见 [`dgm_reward_ranker_v2_report.md`](dgm_reward_ranker_v2_report.md)。
 
 ## 7. 当前项目状态
 
@@ -117,7 +117,7 @@ E5 的 Top-1 配对置信区间为 [-3.9, -0.2] 个百分点；E7 的深层改�
 - Q temperature 小于 1 不是默认改进。
 - 当前方法不是严格原始 DGM，不能以其理论保证解释结果。
 - guidance 的离线 reward 排序提升不等于最终 Top-1 提升；现有 E3--E7、P1/P2 以及已测试的 event-conditioned local credit 均未通过采用门槛。
-- 新 correctness reward 的 AUC 正向信号也不等于终点排序有效：它在一次独立 holdout 上提高 AUC，却被同池 Top-1 rerank gate 否定。
+- 修复 target leakage 后，bounded residual 仍只表现出很小的 holdout AUC 正向信号，且两个 learned ranker 都被同池 Top-1 rerank gate 否定；因此不能把当前 ranker 直接接到 DGM。
 - Euler-SMC 目前只有机制正确性，不具备准确率成功证据。
 
 ### 仍未解决的核心问题
@@ -129,4 +129,4 @@ E5 的 Top-1 配对置信区间为 [-3.9, -0.2] 个百分点；E7 的深层改�
 
 ## Source Map
 
-核心训练证据见 training_code_audit.md、training_tensorboard_and_fixes.md、new_checkpoint_validation_parameter_sweep.md；Euler 采样与受控搜索证据见 sampling_overview.md、euler_beam_current_situation.md、euler_beam_next_stage_plan.md；DGM 的最新协议、数据和 reward 审计见 dgm_evaluation_v2.md、dgm_multitime_guidance_data.md、dgm_local_credit_assignment_plan.md、dgm_reward_quality_protocol.md，理论适配边界见 dgm_edit_flows_adaptation_status.md；本轮冻结执行、paired trajectory 与 P2/P3 停止判定见 dgm_p0_protocol.md、dgm_p1_panel_v1.md、dgm_execution_report.md。
+核心训练证据见 training_code_audit.md、training_tensorboard_and_fixes.md、new_checkpoint_validation_parameter_sweep.md；Euler 采样与受控搜索证据见 sampling_overview.md、euler_beam_current_situation.md、euler_beam_next_stage_plan.md；DGM 的最新协议、数据和 reward 审计见 dgm_evaluation_v2.md、dgm_multitime_guidance_data.md、dgm_local_credit_assignment_plan.md、dgm_reward_quality_protocol.md，理论适配边界见 dgm_edit_flows_adaptation_status.md；本轮冻结执行、paired trajectory 与 P2/P3 停止判定见 dgm_p0_protocol.md、dgm_p1_panel_v1.md、dgm_reward_ranker_v2_protocol.md、dgm_reward_ranker_v2_report.md。旧版执行记录及勘误见 dgm_execution_report.md。
