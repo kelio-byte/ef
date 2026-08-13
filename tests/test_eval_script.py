@@ -53,6 +53,7 @@ def test_sample_command_carries_current_euler_beam_settings():
     args = _args(
         "--n_branches", "5", "--n_children", "3", "--n_runs", "2",
         "--max_products", "200", "--euler_beam_share_identical_forwards",
+        "--euler_beam_first_edit_diversity",
     )
     command = eval_script.build_sample_command(args)
     rendered = " ".join(command)
@@ -63,6 +64,7 @@ def test_sample_command_carries_current_euler_beam_settings():
     assert "--euler_beam_n_return" not in rendered
     assert "--max_products 200" in rendered
     assert "--euler_beam_share_identical_forwards" in rendered
+    assert "--euler_beam_first_edit_diversity" in rendered
 
 
 def test_sample_command_carries_optional_guidance_settings():
@@ -77,6 +79,34 @@ def test_sample_command_carries_optional_guidance_settings():
     assert "--guidance_checkpoint guidance.pt" in rendered
     assert "--guidance_beta 0.1" in rendered
     assert "--guidance_rate_normalization per_sample" in rendered
+
+
+def test_sample_command_carries_structured_sampler_settings():
+    args = _args(
+        "--sampler", "structured_diversification",
+        "--structured_n_trajectories", "9",
+        "--structured_token_selection", "argmax",
+    )
+    command = eval_script.build_sample_command(args)
+    rendered = " ".join(command)
+    assert "--sampler structured_diversification" in rendered
+    assert "--structured_n_trajectories 9" in rendered
+    assert "--structured_token_selection argmax" in rendered
+
+
+def test_sample_command_carries_delayed_structured_v2_settings():
+    args = _args(
+        "--sampler", "structured_diversification_v2",
+        "--structured_v2_k_mode", "3",
+        "--structured_v2_k_completion", "3",
+        "--structured_v2_mode_pool_size", "9",
+    )
+    command = eval_script.build_sample_command(args)
+    rendered = " ".join(command)
+    assert "--sampler structured_diversification_v2" in rendered
+    assert "--structured_v2_k_mode 3" in rendered
+    assert "--structured_v2_k_completion 3" in rendered
+    assert "--structured_v2_mode_pool_size 9" in rendered
 
 
 def test_score_command_defaults_to_top10_diagnostics():

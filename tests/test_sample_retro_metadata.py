@@ -30,6 +30,8 @@ def _euler_beam_args(tmp_path):
         n_branches=3,
         n_children=2,
         n_runs=3,
+        structured_n_trajectories=9,
+        structured_token_selection="argmax",
         euler_beam_initial_seed_groups=None,
         seed=42,
         euler_beam_score_mode="full_probability",
@@ -37,6 +39,7 @@ def _euler_beam_args(tmp_path):
         euler_beam_q_temperature=1.0,
         euler_beam_matmul_precision="high",
         euler_beam_child_policy="stochastic_noop",
+        euler_beam_first_edit_diversity=False,
         euler_beam_share_identical_forwards=False,
         batch_size=64,
         device="cuda",
@@ -48,6 +51,21 @@ def test_euler_beam_output_count_uses_runs_times_branches(tmp_path):
     assert _outputs_per_product(args) == 9
     args.sampler = "euler"
     assert _outputs_per_product(args) == 99
+
+
+def test_structured_output_count_uses_trajectory_budget(tmp_path):
+    args = _euler_beam_args(tmp_path)
+    args.sampler = "structured_diversification"
+    args.structured_n_trajectories = 9
+    assert _outputs_per_product(args) == 9
+
+
+def test_structured_v2_output_count_uses_mode_completion_budget(tmp_path):
+    args = _euler_beam_args(tmp_path)
+    args.sampler = "structured_diversification_v2"
+    args.structured_v2_k_mode = 3
+    args.structured_v2_k_completion = 3
+    assert _outputs_per_product(args) == 9
 
 
 def test_augmentation_inference_requires_unambiguous_aug_path():
@@ -130,6 +148,7 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
         "matmul_precision": "high",
         "child_policy": "stochastic_noop",
         "share_identical_forwards": False,
+        "first_edit_diversity": False,
         "seed_scope": "stable product/run streams",
     }
     assert metadata["input"]["product_count"] == 2

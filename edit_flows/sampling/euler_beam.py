@@ -29,6 +29,9 @@ from edit_flows.sampling.ops import apply_ins_del_operations
 from edit_flows.utils.tokens import BOS_TOKEN, PAD_TOKEN
 
 
+FirstEditSignature = Optional[Tuple[Tuple[str, int, int], ...]]
+
+
 # ---------------------------------------------------------------------------
 # 分支状态
 # ---------------------------------------------------------------------------
@@ -39,6 +42,7 @@ class _BranchState:
 
     __slots__ = (
         "x_t", "weight", "path_log_p", "log_mass", "t", "seed", "state_key",
+        "first_edit_signature",
     )
 
     def __init__(
@@ -50,6 +54,7 @@ class _BranchState:
         t: float = 0.0,      # 当前连续时间
         seed: int = 0,       # 随机种子
         state_key: Optional[Tuple[int, ...]] = None,
+        first_edit_signature: FirstEditSignature = None,
     ):
         self.x_t = x_t
         self.weight = weight
@@ -58,6 +63,7 @@ class _BranchState:
         self.t = t
         self.seed = seed
         self.state_key = state_key
+        self.first_edit_signature = first_edit_signature
 
     def clone(self) -> _BranchState:
         return _BranchState(
@@ -68,6 +74,7 @@ class _BranchState:
             t=self.t,
             seed=self.seed,
             state_key=self.state_key,
+            first_edit_signature=self.first_edit_signature,
         )
 
 
@@ -192,6 +199,230 @@ def _select_k1_m2_children(
     if rank(second, second_key) > rank(first, first_key):
         return second
     return first
+
+
+def _first_edit_signatures_from_actions(
+    actions: dict,
+    row_indices: Optional[List[int]] = None,
+) -> List[FirstEditSignature]:
+    """Return a compact signature for the first active edit in each row.
+
+    Only the first affected position is retained.  If multiple edit types are
+    active at that position, all of them are included in a deterministic
+    order.  The reduction is performed on-device and only a handful of values
+    per row are copied to CPU, so enabling the diversity policy does not copy
+    the full action tensors.
+    """
+    row_count = actions["ins_mask"].shape[0]
+    if row_indices is None:
+        selected = torch.arange(
+            row_count, dtype=torch.long, device=actions["ins_mask"].device,
+        )
+    else:
+        selected = torch.tensor(
+            row_indices, dtype=torch.long, device=actions["ins_mask"].device,
+        )
+    if selected.numel() == 0:
+        return []
+
+    ins_mask = actions["ins_mask"].index_select(0, selected)
+    sub_mask = actions["sub_mask"].index_select(0, selected)
+    del_mask = actions["del_mask"].index_select(0, selected)
+    ins_tokens = actions["ins_tokens"].index_select(0, selected)
+    sub_tokens = actions["sub_tokens"].index_select(0, selected)
+    active = ins_mask | sub_mask | del_mask
+    has_active = active.any(dim=1)
+    first_position = active.to(torch.long).argmax(dim=1)
+    row = torch.arange(
+        selected.shape[0], dtype=torch.long, device=active.device,
+    )
+    summary = torch.stack((
+        has_active.to(torch.long),
+        first_position,
+        ins_mask[row, first_position].to(torch.long),
+        sub_mask[row, first_position].to(torch.long),
+        del_mask[row, first_position].to(torch.long),
+        ins_tokens[row, first_position],
+        sub_tokens[row, first_position],
+    ), dim=1).detach().cpu().tolist()
+
+    signatures: List[FirstEditSignature] = []
+    for (
+        has_edit, position, has_ins, has_sub, has_del,
+        ins_token, sub_token,
+    ) in summary:
+        if not has_edit:
+            signatures.append(None)
+            continue
+        events: List[Tuple[str, int, int]] = []
+        if has_ins:
+            events.append(("ins", int(position), int(ins_token)))
+        if has_sub:
+            events.append(("sub", int(position), int(sub_token)))
+        if has_del:
+            events.append(("del", int(position), -1))
+        signatures.append(tuple(events))
+    return signatures
+
+
+def _merge_state_candidates_with_first_edit_diversity(
+    candidates: List[Tuple[_BranchState, Tuple[int, ...]]],
+    n_branches: int,
+    origin_key: Optional[Tuple[int, ...]] = None,
+    changed_state_bonus: float = 0.0,
+) -> List[_BranchState]:
+    """Merge states while reserving slots for distinct first-edit signatures.
+
+    State mass is merged only when both the token state and the first-edit
+    signature match.  This keeps different search hypotheses separate long
+    enough for the diversity constraint to act.  If fewer than ``n_branches``
+    signatures exist, the sampler keeps only the available unique hypotheses;
+    it does not manufacture duplicate no-op branches that would cost extra
+    forwards without adding coverage.
+    """
+    merged: Dict[
+        Tuple[Tuple[int, ...], FirstEditSignature], _BranchState
+    ] = {}
+    for branch, key in candidates:
+        merge_key = (key, branch.first_edit_signature)
+        if merge_key not in merged:
+            merged[merge_key] = branch
+            continue
+        representative = merged[merge_key]
+        combined_mass = _logaddexp_float(
+            representative.log_mass, branch.log_mass,
+        )
+        best_path_log_p = max(
+            representative.path_log_p, branch.path_log_p,
+        )
+        if branch.seed < representative.seed:
+            branch.log_mass = combined_mass
+            branch.weight += representative.weight
+            branch.path_log_p = best_path_log_p
+            merged[merge_key] = branch
+        else:
+            representative.log_mass = combined_mass
+            representative.weight += branch.weight
+            representative.path_log_p = best_path_log_p
+
+    def rank(branch: _BranchState, key: Tuple[int, ...]):
+        return (
+            branch.log_mass
+            + changed_state_bonus * float(key != origin_key),
+            branch.log_mass,
+            -float(branch.seed),
+        )
+
+    best_by_signature: Dict[FirstEditSignature, Tuple[_BranchState, Tuple[int, ...]]] = {}
+    merged_items = list(merged.items())
+    for (_, _), branch in merged_items:
+        key = branch.state_key
+        if key is None:
+            raise RuntimeError(
+                "first-edit diversity requires tracked branch state keys"
+            )
+        signature = branch.first_edit_signature
+        previous = best_by_signature.get(signature)
+        if previous is None or rank(branch, key) > rank(*previous):
+            best_by_signature[signature] = (branch, key)
+
+    selected = [
+        branch for branch, _ in sorted(
+            best_by_signature.values(),
+            key=lambda item: rank(*item),
+            reverse=True,
+        )[:n_branches]
+    ]
+    return sorted(
+        selected[:n_branches],
+        key=lambda branch: rank(branch, branch.state_key or ()),
+        reverse=True,
+    )
+
+
+def _select_first_edit_diverse_run_group(
+    new_branches: Dict[int, List[_BranchState]],
+    new_keys: Dict[int, List[Tuple[int, ...]]],
+    origin_keys: List[Tuple[int, ...]],
+    group_indices: List[int],
+    n_children: int,
+    changed_state_bonus: float,
+) -> Dict[int, _BranchState]:
+    """Select one child per run while covering distinct first edits.
+
+    The production R9K1M2 layout uses nine independent ``n_branches=1``
+    runs for each augmented product.  Per-run Top-1 selection would discard
+    the alternatives before they can be compared, so this small group-level
+    allocator first prefers signatures supported by fewer runs, then fills
+    the remaining run slots by the existing mass ranking.
+    """
+    slot_candidates: Dict[int, List[_BranchState]] = {}
+    for sample_index in group_indices:
+        candidates = _merge_state_candidates_with_first_edit_diversity(
+            list(zip(
+                new_branches[sample_index], new_keys[sample_index],
+            )),
+            n_branches=n_children,
+            origin_key=origin_keys[sample_index],
+            changed_state_bonus=changed_state_bonus,
+        )
+        if not candidates:
+            raise RuntimeError(
+                "first-edit diversity produced no candidate for run "
+                f"{sample_index}"
+            )
+        slot_candidates[sample_index] = candidates
+
+    def rank(sample_index: int, branch: _BranchState):
+        key = branch.state_key or ()
+        return (
+            branch.log_mass
+            + changed_state_bonus * float(
+                key != origin_keys[sample_index]
+            ),
+            branch.log_mass,
+            -float(branch.seed),
+        )
+
+    signature_support: Dict[FirstEditSignature, set[int]] = {}
+    for sample_index, candidates in slot_candidates.items():
+        for branch in candidates:
+            signature_support.setdefault(
+                branch.first_edit_signature, set(),
+            ).add(sample_index)
+
+    selected: Dict[int, _BranchState] = {}
+    selected_signatures: set[FirstEditSignature] = set()
+    while len(selected) < len(group_indices):
+        available = [
+            (sample_index, branch)
+            for sample_index in group_indices
+            if sample_index not in selected
+            for branch in slot_candidates[sample_index]
+            if branch.first_edit_signature not in selected_signatures
+        ]
+        if not available:
+            break
+        sample_index, branch = max(
+            available,
+            key=lambda item: (
+                -len(signature_support[item[1].first_edit_signature]),
+                *rank(*item),
+            ),
+        )
+        selected[sample_index] = branch
+        selected_signatures.add(branch.first_edit_signature)
+
+    # There may be fewer unique signatures than runs.  Fill those slots by
+    # the old local ranking; this does not create extra runs or extra forwards.
+    for sample_index in group_indices:
+        if sample_index in selected:
+            continue
+        selected[sample_index] = max(
+            slot_candidates[sample_index],
+            key=lambda branch: rank(sample_index, branch),
+        )
+    return selected
 
 
 def _token_keys_batch(
@@ -595,6 +826,7 @@ def sample_euler_beam(
     profile_sample_group_size: int = 1,
     share_identical_forwards: bool = False,
     q_temperature: float = 1.0,
+    first_edit_diversity: bool = False,
     initial_branch_seeds: Optional[List[List[int]]] = None,
     sampling_stats: Optional[Dict[str, int]] = None,
 ) -> Tensor:
@@ -611,11 +843,14 @@ def sample_euler_beam(
         changed_state_bonus: 给非原始 token 状态的固定搜索先验；0 表示禁用。
         child_policy: `stochastic` 或 M=2 的启发式 `stochastic_noop`。
         profile_sample_group_size: 仅用于显式profile；相邻多少个sample
-            属于同一product的受保护lineage组。
+            属于同一product的受保护lineage组。启用首步多样性且
+            n_branches=1时，该组也是跨独立run分配首步的范围。
         share_identical_forwards: 对同一product内相同时间、相同token状态
             只执行一次确定性模型前向，再映射回独立seed lineage。
         q_temperature: 对insert/substitute token posterior应用的采样温度；
             1.0保持checkpoint原始分布。
+        first_edit_diversity: 在多后继模式下，首次真实状态变化时优先保留
+            不同的编辑 signature；不增加模型前向或最终输出槽位。
 
     Returns:
         x_final: (B * n_branches, L_out) 每条样本的全部排名分支，按样本优先
@@ -682,6 +917,20 @@ def sample_euler_beam(
     if child_policy == "stochastic_noop" and n_children != 2:
         raise ValueError(
             "stochastic_noop requires n_children=2"
+        )
+    if first_edit_diversity and n_children < 2:
+        raise ValueError(
+            "first_edit_diversity requires n_children >= 2"
+        )
+    if first_edit_diversity and n_branches == 1 and \
+       profile_sample_group_size < 2:
+        raise ValueError(
+            "first_edit_diversity with n_branches=1 requires "
+            "profile_sample_group_size >= 2"
+        )
+    if first_edit_diversity and score_mode != "full_probability":
+        raise ValueError(
+            "first_edit_diversity requires score_mode='full_probability'"
         )
 
     if score_mode == "legacy_triggered_reverse":
@@ -928,6 +1177,38 @@ def sample_euler_beam(
             x_candidates, actions_batch, max_seq_len, pad_token,
         )
         next_keys = _token_keys_batch(x_next_batch, pad_token, bos_token)
+        first_edit_signatures: List[FirstEditSignature] = [None] * len(
+            parent_index_values
+        )
+        signature_row_indices: List[int] = []
+        if first_edit_diversity:
+            for i, parent_i in enumerate(parent_index_values):
+                _, _, parent = flat[parent_i]
+                if parent.first_edit_signature is None and \
+                   next_keys[i] != parent.state_key:
+                    signature_row_indices.append(i)
+            computed_signatures = _first_edit_signatures_from_actions(
+                actions_batch, signature_row_indices,
+            )
+            for i, signature in zip(
+                signature_row_indices, computed_signatures,
+            ):
+                first_edit_signatures[i] = signature
+            for stats in (profile, sampling_stats):
+                if stats is not None:
+                    stats["first_edit_signature_candidates"] = (
+                        int(stats.get(
+                            "first_edit_signature_candidates", 0,
+                        )) + len(signature_row_indices)
+                    )
+                    stats["first_edit_signature_assigned"] = (
+                        int(stats.get(
+                            "first_edit_signature_assigned", 0,
+                        )) + sum(
+                            signature is not None
+                            for signature in computed_signatures
+                        )
+                    )
         _profile_finish(
             profile, "apply_edits_seconds", section_started, device,
         )
@@ -939,6 +1220,9 @@ def sample_euler_beam(
         child_log_share = math.log(n_children)
         for i, parent_i in enumerate(parent_index_values):
             b, k, s = flat[parent_i]
+            first_edit_signature = s.first_edit_signature
+            if first_edit_signature is None:
+                first_edit_signature = first_edit_signatures[i]
             new_branches[b].append(_BranchState(
                 x_t=x_next_batch[i:i + 1],
                 weight=(1.0 if n_children > 1 else s.weight),
@@ -950,11 +1234,16 @@ def sample_euler_beam(
                 t=s.t + adapt_h_values[i],
                 seed=child_seed_values[i],
                 state_key=next_keys[i],
+                first_edit_signature=first_edit_signature,
             ))
             new_keys[b].append(next_keys[i])
 
         # 7. 逐样本: 去重、排序、剪枝、分裂
         for b in range(B):
+            if first_edit_diversity and n_branches == 1:
+                # Production R9K1M2 has one branch per independent run.  Its
+                # diversity decision is made across the run group below.
+                continue
             candidates = new_branches[b]
 
             if n_children > 1 and score_mode == "full_probability":
@@ -995,6 +1284,15 @@ def sample_euler_beam(
                         origin_keys[b],
                         changed_state_bonus,
                     )]
+                elif first_edit_diversity:
+                    all_branches[b] = (
+                        _merge_state_candidates_with_first_edit_diversity(
+                            list(zip(candidates, new_keys[b])),
+                            n_branches,
+                            origin_key=origin_keys[b],
+                            changed_state_bonus=changed_state_bonus,
+                        )
+                    )
                 else:
                     paired = list(zip(candidates, new_keys[b]))
                     all_branches[b] = _merge_state_candidates(
@@ -1003,6 +1301,21 @@ def sample_euler_beam(
                         origin_key=origin_keys[b],
                         changed_state_bonus=changed_state_bonus,
                     )
+                if first_edit_diversity:
+                    for stats in (profile, sampling_stats):
+                        if stats is not None:
+                            stats["first_edit_signature_groups"] = (
+                                int(stats.get(
+                                    "first_edit_signature_groups", 0,
+                                )) + len({
+                                    branch.first_edit_signature
+                                    for branch in all_branches[b]
+                                })
+                            )
+                            stats["first_edit_diverse_slots"] = (
+                                int(stats.get("first_edit_diverse_slots", 0))
+                                + len(all_branches[b])
+                            )
                 continue
 
             # 7a. 合并相同 token 序列的分支
@@ -1040,6 +1353,37 @@ def sample_euler_beam(
                     seed=parent.seed + 10000 + len(all_branches[b]),
                     state_key=parent.state_key,
                 ))
+        if first_edit_diversity and n_branches == 1:
+            for group_start in range(0, B, profile_sample_group_size):
+                group_indices = list(range(
+                    group_start,
+                    group_start + profile_sample_group_size,
+                ))
+                selected = _select_first_edit_diverse_run_group(
+                    new_branches,
+                    new_keys,
+                    origin_keys,
+                    group_indices,
+                    n_children,
+                    changed_state_bonus,
+                )
+                selected_signatures = {
+                    branch.first_edit_signature
+                    for branch in selected.values()
+                }
+                for b in group_indices:
+                    all_branches[b] = [selected[b]]
+                for stats in (profile, sampling_stats):
+                    if stats is not None:
+                        stats["first_edit_signature_groups"] = (
+                            int(stats.get(
+                                "first_edit_signature_groups", 0,
+                            )) + len(selected_signatures)
+                        )
+                        stats["first_edit_diverse_slots"] = (
+                            int(stats.get("first_edit_diverse_slots", 0))
+                            + len(group_indices)
+                        )
         _profile_finish(
             profile, "merge_and_prune_seconds", section_started, device,
         )

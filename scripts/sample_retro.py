@@ -23,6 +23,12 @@ from edit_flows.guidance.model import ProductConditionedGuidance
 from edit_flows.models.transformer import EditFlowsTransformer
 from edit_flows.sampling.euler import sample_euler
 from edit_flows.sampling.euler_beam import _mix_child_seed, sample_euler_beam
+from edit_flows.sampling.structured_diversification import (
+    sample_structured_diversification,
+)
+from edit_flows.sampling.structured_diversification_v2 import (
+    sample_delayed_structured_diversification,
+)
 from edit_flows.sampling.beam import sample_greedy_single_edit, sample_beam_single_edit
 from edit_flows.sampling.time_policy import (
     DepthTimePolicy, FixedTimePolicy, RatioTimePolicy, KappaTimePolicy,
@@ -197,6 +203,10 @@ def _git_state() -> dict:
 def _outputs_per_product(args) -> int:
     if args.sampler == "euler_beam":
         return args.n_runs * args.n_branches
+    if args.sampler == "structured_diversification":
+        return args.structured_n_trajectories
+    if args.sampler == "structured_diversification_v2":
+        return args.structured_v2_k_mode * args.structured_v2_k_completion
     return args.n_samples
 
 
@@ -274,6 +284,8 @@ def _build_sampling_metadata(
     peak_cuda_reserved_bytes: int | None = None,
     euler_beam_profile: dict | None = None,
     euler_beam_stats: dict | None = None,
+    structured_stats: dict | None = None,
+    structured_diagnostics_path: str | None = None,
 ) -> dict:
     # Augmentation describes the actual input layout, so it must not be
     # inferred from the checkpoint's training data directory.  A single
@@ -300,7 +312,10 @@ def _build_sampling_metadata(
         "sample_scheduler": sample_scheduler_name,
         "train_scheduler": train_scheduler_name,
         "seed": args.seed,
-        "seed_applied_to_sampler": args.sampler in ("euler", "euler_beam"),
+        "seed_applied_to_sampler": args.sampler in (
+                            "euler", "euler_beam", "structured_diversification",
+                            "structured_diversification_v2",
+        ),
     }
     if args.sampler == "euler_beam":
         sampling.update({
@@ -315,6 +330,9 @@ def _build_sampling_metadata(
             "matmul_precision": args.euler_beam_matmul_precision,
             "child_policy": args.euler_beam_child_policy,
             "q_temperature": args.euler_beam_q_temperature,
+            "first_edit_diversity": getattr(
+                args, "euler_beam_first_edit_diversity", False,
+            ),
             "share_identical_forwards": (
                 args.euler_beam_share_identical_forwards
             ),
@@ -324,6 +342,35 @@ def _build_sampling_metadata(
                 else "stable product/run streams"
             ),
         })
+    elif args.sampler == "structured_diversification":
+        sampling.update({
+            "n_trajectories": args.structured_n_trajectories,
+            "direction_selection": "descending_log_lambda",
+            "token_selection": args.structured_token_selection,
+            "continuation": "ordinary_euler_m1_from_first_step",
+            "cross_trajectory_competition": False,
+            "seed_scope": "global torch RNG",
+        })
+        if structured_diagnostics_path is not None:
+            sampling["diagnostics"] = _path_metadata(
+                structured_diagnostics_path, include_sha256=True,
+            )
+    elif args.sampler == "structured_diversification_v2":
+        sampling.update({
+            "k_mode": args.structured_v2_k_mode,
+            "k_completion": args.structured_v2_k_completion,
+            "mode_pool_size": args.structured_v2_mode_pool_size,
+            "trigger": "first_sampled_edit_event_or_final_step",
+            "mode_selection": "top1_anchor_plus_weighted_top_pool_without_replacement",
+            "token_selection": "top_q_completion",
+            "continuation": "ordinary_euler_m1_stateless_seeded",
+            "cross_trajectory_competition": False,
+            "seed_scope": "stable product/trajectory streams",
+        })
+        if structured_diagnostics_path is not None:
+            sampling["diagnostics"] = _path_metadata(
+                structured_diagnostics_path, include_sha256=True,
+            )
     else:
         sampling["n_samples"] = args.n_samples
         if getattr(args, "guidance_checkpoint", None):
@@ -354,6 +401,8 @@ def _build_sampling_metadata(
         runtime["euler_beam_profile"] = euler_beam_profile
     if euler_beam_stats is not None:
         runtime["euler_beam_stats"] = euler_beam_stats
+    if structured_stats is not None:
+        runtime["structured_diversification_stats"] = structured_stats
 
     return {
         "schema_version": 1,
@@ -431,7 +480,12 @@ def main():
                         choices=["cubic", "linear"],
                         help="Override sampling scheduler (default: use config sample_scheduler or training scheduler)")
     parser.add_argument("--sampler", type=str, default="euler",
-                        choices=["euler", "euler_beam", "greedy_edit", "beam_edit"],
+                        choices=[
+                            "euler", "euler_beam",
+                            "structured_diversification",
+                            "structured_diversification_v2",
+                            "greedy_edit", "beam_edit",
+                        ],
                         help="Sampling algorithm (default: euler)")
     parser.add_argument("--n_branches", type=int, default=5,
                         help="并行分支数 (euler_beam)")
@@ -439,6 +493,27 @@ def main():
                         help="每个父分支每步生成的后继数 (euler_beam)")
     parser.add_argument("--n_runs", type=int, default=1,
                         help="每个产物独立运行次数 (euler_beam, 等价于 Euler 的 --n_samples)")
+    parser.add_argument(
+        "--structured_n_trajectories", type=int, default=9,
+        help="Structured sampler trajectories per product",
+    )
+    parser.add_argument(
+        "--structured_token_selection", type=str, default="argmax",
+        choices=["argmax", "sample"],
+        help="INS/SUB token selection for structured first edits",
+    )
+    parser.add_argument(
+        "--structured_v2_k_mode", type=int, default=3,
+        help="Delayed structured v2 high-probability modes",
+    )
+    parser.add_argument(
+        "--structured_v2_k_completion", type=int, default=3,
+        help="Delayed structured v2 Q completions per mode",
+    )
+    parser.add_argument(
+        "--structured_v2_mode_pool_size", type=int, default=6,
+        help="Candidate mode pool used for delayed v2 alternatives",
+    )
     parser.add_argument(
         "--euler_beam_initial_seed_groups",
         type=int,
@@ -470,6 +545,15 @@ def main():
                         default="stochastic",
                         choices=["stochastic", "stochastic_noop"],
                         help="Euler-Beam child proposal policy")
+    parser.add_argument(
+        "--euler_beam_first_edit_diversity",
+        action="store_true",
+        default=False,
+        help=(
+            "Within each beam, reserve branches for distinct first real "
+            "edits; no extra Transformer forwards or output slots"
+        ),
+    )
     parser.add_argument(
         "--euler_beam_profile",
         action="store_true",
@@ -519,6 +603,27 @@ def main():
 
     if args.euler_beam_profile and args.sampler != "euler_beam":
         raise ValueError("euler_beam_profile requires --sampler euler_beam")
+    if (
+        args.euler_beam_first_edit_diversity
+        and args.sampler != "euler_beam"
+    ):
+        raise ValueError(
+            "euler_beam_first_edit_diversity requires --sampler euler_beam"
+        )
+    if args.structured_n_trajectories < 1:
+        raise ValueError("structured_n_trajectories must be >= 1")
+    if args.structured_token_selection not in {"argmax", "sample"}:
+        raise ValueError(
+            "structured_token_selection must be 'argmax' or 'sample'"
+        )
+    if args.structured_v2_k_mode < 1:
+        raise ValueError("structured_v2_k_mode must be >= 1")
+    if args.structured_v2_k_completion < 1:
+        raise ValueError("structured_v2_k_completion must be >= 1")
+    if args.structured_v2_mode_pool_size < args.structured_v2_k_mode:
+        raise ValueError(
+            "structured_v2_mode_pool_size must be >= structured_v2_k_mode"
+        )
     if args.sampler == "euler_beam":
         if args.euler_beam_initial_seed_groups is not None:
             if args.n_runs != 1:
@@ -666,6 +771,13 @@ def main():
     print(f"Sampler: {args.sampler}")
     euler_beam_profile = {} if args.euler_beam_profile else None
     euler_beam_stats = {} if args.sampler == "euler_beam" else None
+    structured_stats = (
+        {} if args.sampler in {
+            "structured_diversification",
+            "structured_diversification_v2",
+        } else None
+    )
+    structured_action_records: list[dict] = []
     if use_greedy_beam:
         # Build time policy.
         if args.time_policy == "depth":
@@ -689,7 +801,14 @@ def main():
               f"outputs_per_product={outputs_per_product}, "
               f"matmul_precision={args.euler_beam_matmul_precision}, "
               f"child_policy={args.euler_beam_child_policy}, "
+              f"first_edit_diversity={args.euler_beam_first_edit_diversity}, "
               f"q_temperature={args.euler_beam_q_temperature}")
+    if args.sampler == "structured_diversification_v2":
+        print(
+            f"  k_mode={args.structured_v2_k_mode}, "
+            f"k_completion={args.structured_v2_k_completion}, "
+            f"mode_pool_size={args.structured_v2_mode_pool_size}"
+        )
     if args.guidance_checkpoint:
         print(
             f"  guidance_checkpoint={args.guidance_checkpoint}, "
@@ -774,6 +893,9 @@ def main():
                     changed_state_bonus=args.euler_beam_changed_state_bonus,
                     child_policy=args.euler_beam_child_policy,
                     q_temperature=args.euler_beam_q_temperature,
+                    first_edit_diversity=(
+                        args.euler_beam_first_edit_diversity
+                    ),
                     profile=euler_beam_profile,
                     profile_sample_group_size=args.n_runs,
                     share_identical_forwards=(
@@ -781,6 +903,62 @@ def main():
                     ),
                     initial_branch_seeds=initial_branch_seeds,
                     sampling_stats=euler_beam_stats,
+                )
+            elif args.sampler == "structured_diversification":
+                B_prod = end - start
+                # Structured sampler expands each product internally after
+                # selecting its distinct first-edit directions.
+                x_structured = _make_batch(
+                    batch_products, 1, PAD_TOKEN,
+                ).to(device)
+                results, _ = sample_structured_diversification(
+                    model,
+                    x_structured,
+                    kappa_scheduler,
+                    n_trajectories=args.structured_n_trajectories,
+                    n_steps=n_sampling_steps,
+                    max_seq_len=cfg["max_seq_len"],
+                    use_rate_reparam=cfg.get("use_rate_reparam", False),
+                    clamp_kappa=clamp_kappa,
+                    clamp_max=clamp_max,
+                    time_input=time_input,
+                    train_scheduler=train_scheduler,
+                    token_selection=args.structured_token_selection,
+                    product_indices=[
+                        args.start_product + start + product_index
+                        for product_index in range(B_prod)
+                    ],
+                    action_records=structured_action_records,
+                    sampling_stats=structured_stats,
+                )
+            elif args.sampler == "structured_diversification_v2":
+                B_prod = end - start
+                x_structured = _make_batch(
+                    batch_products, 1, PAD_TOKEN,
+                ).to(device)
+                results, _ = sample_delayed_structured_diversification(
+                    model,
+                    x_structured,
+                    kappa_scheduler,
+                    k_mode=args.structured_v2_k_mode,
+                    k_completion=args.structured_v2_k_completion,
+                    n_steps=n_sampling_steps,
+                    max_seq_len=cfg["max_seq_len"],
+                    use_rate_reparam=cfg.get("use_rate_reparam", False),
+                    clamp_kappa=clamp_kappa,
+                    clamp_max=clamp_max,
+                    time_input=time_input,
+                    train_scheduler=train_scheduler,
+                    event_prob_mode="poisson",
+                    use_origin_mask=use_origin_mask,
+                    mode_pool_size=args.structured_v2_mode_pool_size,
+                    base_seed=args.seed,
+                    product_indices=[
+                        args.start_product + start + product_index
+                        for product_index in range(B_prod)
+                    ],
+                    action_records=structured_action_records,
+                    sampling_stats=structured_stats,
                 )
             elif args.sampler == "greedy_edit":
                 results = sample_greedy_single_edit(
@@ -832,7 +1010,9 @@ def main():
                         i, args.n_runs, args.n_branches,
                     )
                 else:
-                    n_out = args.n_samples if use_greedy_beam else n_rep
+                    n_out = (
+                        1 if use_greedy_beam else _outputs_per_product(args)
+                    )
                     row_indices = [
                         i if use_greedy_beam else i * n_out + s
                         for s in range(n_out)
@@ -867,6 +1047,26 @@ def main():
                 "sampler output count mismatch: expected "
                 f"{expected_predictions}, wrote {written_predictions}"
             )
+        structured_diagnostics_path = None
+        if args.sampler in {
+            "structured_diversification",
+            "structured_diversification_v2",
+        }:
+            structured_diagnostics_path = os.path.join(
+                args.output_dir, "structured_diagnostics.json",
+            )
+            with open(structured_diagnostics_path, "w") as f:
+                json.dump(
+                    {
+                        "schema_version": 1,
+                        "sampler": args.sampler,
+                        "records": structured_action_records,
+                    },
+                    f,
+                    indent=2,
+                    sort_keys=True,
+                )
+                f.write("\n")
         metadata = _build_sampling_metadata(
             args,
             cfg,
@@ -884,6 +1084,8 @@ def main():
             peak_cuda_reserved_bytes=peak_cuda_reserved_bytes,
             euler_beam_profile=euler_beam_profile,
             euler_beam_stats=euler_beam_stats,
+            structured_stats=structured_stats,
+            structured_diagnostics_path=structured_diagnostics_path,
         )
         metadata_path = os.path.join(
             args.output_dir, "sampling_metadata.json",
@@ -897,6 +1099,15 @@ def main():
                   f"(n_branches={args.n_branches}, "
                   f"n_children={args.n_children}, n_runs={args.n_runs}, "
                   f"outputs_per_product={outputs_per_product})")
+        elif args.sampler == "structured_diversification":
+            print(f"Done. Total predictions: "
+                  f"{n_products * outputs_per_product} "
+                  f"(n_trajectories={args.structured_n_trajectories})")
+        elif args.sampler == "structured_diversification_v2":
+            print(f"Done. Total predictions: "
+                  f"{n_products * outputs_per_product} "
+                  f"(k_mode={args.structured_v2_k_mode}, "
+                  f"k_completion={args.structured_v2_k_completion})")
         else:
             print(f"Done. Total predictions: {n_products * args.n_samples}")
         print(f"Saved to: {pred_file}")

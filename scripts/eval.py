@@ -66,7 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
     sampling = parser.add_argument_group("sampling")
     sampling.add_argument(
         "--sampler",
-        choices=["euler", "euler_beam", "greedy_edit", "beam_edit"],
+        choices=[
+            "euler", "euler_beam", "structured_diversification",
+            "structured_diversification_v2",
+            "greedy_edit", "beam_edit",
+        ],
         default="euler_beam",
     )
     sampling.add_argument("--n_steps", type=int, default=100)
@@ -94,6 +98,15 @@ def build_parser() -> argparse.ArgumentParser:
     sampling.add_argument("--n_branches", type=int, default=3)
     sampling.add_argument("--n_children", type=int, default=2)
     sampling.add_argument("--n_runs", type=int, default=3)
+    sampling.add_argument("--structured_n_trajectories", type=int, default=9)
+    sampling.add_argument(
+        "--structured_token_selection",
+        choices=["argmax", "sample"],
+        default="argmax",
+    )
+    sampling.add_argument("--structured_v2_k_mode", type=int, default=3)
+    sampling.add_argument("--structured_v2_k_completion", type=int, default=3)
+    sampling.add_argument("--structured_v2_mode_pool_size", type=int, default=6)
     sampling.add_argument(
         "--euler_beam_initial_seed_groups", type=int, default=None,
     )
@@ -117,6 +130,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--euler_beam_child_policy",
         choices=["stochastic", "stochastic_noop"],
         default="stochastic_noop",
+    )
+    sampling.add_argument(
+        "--euler_beam_first_edit_diversity",
+        action="store_true",
+        help=(
+            "Reserve beam slots for distinct first real edits within each "
+            "run; keeps the same forward and output budget"
+        ),
     )
     sampling.add_argument("--euler_beam_profile", action="store_true")
     sampling.add_argument(
@@ -193,6 +214,11 @@ def build_sample_command(args: argparse.Namespace) -> list[str]:
         "--n_branches", str(args.n_branches),
         "--n_children", str(args.n_children),
         "--n_runs", str(args.n_runs),
+        "--structured_n_trajectories", str(args.structured_n_trajectories),
+        "--structured_token_selection", args.structured_token_selection,
+        "--structured_v2_k_mode", str(args.structured_v2_k_mode),
+        "--structured_v2_k_completion", str(args.structured_v2_k_completion),
+        "--structured_v2_mode_pool_size", str(args.structured_v2_mode_pool_size),
         "--euler_beam_score_mode", args.euler_beam_score_mode,
         "--euler_beam_changed_state_bonus",
         str(args.euler_beam_changed_state_bonus),
@@ -213,6 +239,8 @@ def build_sample_command(args: argparse.Namespace) -> list[str]:
         "--p_stop_mode", args.p_stop_mode,
         "--fh_warmup_steps", str(args.fh_warmup_steps),
     ]
+    if args.euler_beam_first_edit_diversity:
+        command.append("--euler_beam_first_edit_diversity")
     _add_value(command, "--max_products", args.max_products)
     _add_value(command, "--data_dir", args.data_dir)
     _add_value(command, "--vocab_file", args.vocab_file)
@@ -379,7 +407,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         beam_size = (
             args.n_runs * args.n_branches
-            if args.sampler == "euler_beam" else args.n_samples
+            if args.sampler == "euler_beam"
+            else (
+                (
+                    args.structured_n_trajectories
+                    if args.sampler == "structured_diversification"
+                    else args.structured_v2_k_mode * args.structured_v2_k_completion
+                )
+                if args.sampler in {
+                    "structured_diversification",
+                    "structured_diversification_v2",
+                }
+                else args.n_samples
+            )
         )
         reaction_count = args.max_products // args.augmentation
         target_offset = args.start_product // args.augmentation

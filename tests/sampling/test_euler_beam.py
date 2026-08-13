@@ -427,6 +427,22 @@ def test_sample_euler_beam_validates_sizes():
             model, x_0, LinearScheduler(), n_children=3,
             child_policy="stochastic_noop",
         )
+    with pytest.raises(ValueError, match="first_edit_diversity"):
+        sample_euler_beam(
+            model, x_0, LinearScheduler(), n_children=1,
+            first_edit_diversity=True,
+        )
+    with pytest.raises(ValueError, match="profile_sample_group_size"):
+        sample_euler_beam(
+            model, x_0, LinearScheduler(), n_branches=1, n_children=2,
+            first_edit_diversity=True,
+        )
+    with pytest.raises(ValueError, match="score_mode"):
+        sample_euler_beam(
+            model, x_0, LinearScheduler(), n_children=2,
+            score_mode="legacy_triggered_reverse",
+            first_edit_diversity=True,
+        )
 
 
 def test_child_seed_is_stable_distinct_and_m1_compatible():
@@ -464,6 +480,94 @@ def test_noop_policy_only_clears_second_child_edit_masks():
         assert not actions[name][1::2].any()
     assert torch.equal(actions["ins_tokens"], original_tokens["ins_tokens"])
     assert torch.equal(actions["sub_tokens"], original_tokens["sub_tokens"])
+
+
+def test_first_edit_signature_uses_first_active_position_only():
+    from edit_flows.sampling.euler_beam import _first_edit_signatures_from_actions
+
+    actions = {
+        "ins_mask": torch.tensor([
+            [False, False, True, False],
+            [False, False, False, False],
+            [False, False, False, False],
+        ]),
+        "sub_mask": torch.tensor([
+            [False, False, False, True],
+            [False, True, False, False],
+            [False, False, False, False],
+        ]),
+        "del_mask": torch.tensor([
+            [False, False, False, False],
+            [False, True, False, False],
+            [False, False, False, False],
+        ]),
+        "ins_tokens": torch.tensor([
+            [0, 0, 11, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+        ]),
+        "sub_tokens": torch.tensor([
+            [0, 0, 0, 12],
+            [0, 13, 0, 0],
+            [0, 0, 0, 0],
+        ]),
+    }
+
+    assert _first_edit_signatures_from_actions(actions) == [
+        (("ins", 2, 11),),
+        (("sub", 1, 13), ("del", 1, -1)),
+        None,
+    ]
+
+
+def test_first_edit_diversity_reserves_unique_signature_slots():
+    from edit_flows.sampling.euler_beam import (
+        _merge_state_candidates_with_first_edit_diversity,
+    )
+
+    signature_a = (("ins", 1, 7),)
+    signature_b = (("sub", 2, 8),)
+    candidates = [
+        (
+            _BranchState(
+                torch.tensor([[BOS_TOKEN, 4]]),
+                log_mass=-0.1,
+                seed=1,
+                state_key=(4,),
+                first_edit_signature=signature_a,
+            ),
+            (4,),
+        ),
+        (
+            _BranchState(
+                torch.tensor([[BOS_TOKEN, 5]]),
+                log_mass=-0.2,
+                seed=2,
+                state_key=(5,),
+                first_edit_signature=signature_a,
+            ),
+            (5,),
+        ),
+        (
+            _BranchState(
+                torch.tensor([[BOS_TOKEN, 6]]),
+                log_mass=-0.9,
+                seed=3,
+                state_key=(6,),
+                first_edit_signature=signature_b,
+            ),
+            (6,),
+        ),
+    ]
+
+    selected = _merge_state_candidates_with_first_edit_diversity(
+        candidates, n_branches=2, origin_key=(4,), changed_state_bonus=0.0,
+    )
+
+    assert len(selected) == 2
+    assert {
+        branch.first_edit_signature for branch in selected
+    } == {signature_a, signature_b}
 
 
 def test_state_merge_uses_logsumexp_mass_not_path_probability():
@@ -838,6 +942,61 @@ def test_all_final_branches_are_returned_with_fixed_layout():
     assert stats["final_branch_shortfall_samples"] == 0
     assert stats["final_branch_shortfall_outputs"] == 0
     assert stats["parent_branch_evaluations"] > 0
+    assert stats["child_candidate_evaluations"] == (
+        2 * stats["parent_branch_evaluations"]
+    )
+
+
+def test_first_edit_diversity_keeps_fixed_output_budget_and_records_signatures():
+    model = _StochasticModel()
+    x_0 = torch.tensor([[BOS_TOKEN, 4, 5, 6, PAD_TOKEN]])
+    stats = {}
+    result = sample_euler_beam(
+        model,
+        x_0,
+        LinearScheduler(),
+        n_branches=3,
+        n_children=2,
+        n_steps=4,
+        max_seq_len=32,
+        base_seed=91,
+        first_edit_diversity=True,
+        sampling_stats=stats,
+    )
+
+    assert result.shape[0] == 3
+    assert stats["first_edit_signature_groups"] > 0
+    assert stats["first_edit_diverse_slots"] > 0
+    assert stats["child_candidate_evaluations"] == (
+        2 * stats["parent_branch_evaluations"]
+    )
+
+
+def test_first_edit_diversity_coordinates_r9_style_run_group():
+    model = _StochasticModel()
+    x_0 = torch.tensor([
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+    ])
+    stats = {}
+    result = sample_euler_beam(
+        model,
+        x_0,
+        LinearScheduler(),
+        n_branches=1,
+        n_children=2,
+        n_steps=4,
+        max_seq_len=32,
+        base_seed=91,
+        profile_sample_group_size=3,
+        first_edit_diversity=True,
+        sampling_stats=stats,
+    )
+
+    assert result.shape[0] == 3
+    assert stats["first_edit_signature_groups"] > 0
+    assert stats["first_edit_diverse_slots"] == 3 * stats["steps"]
     assert stats["child_candidate_evaluations"] == (
         2 * stats["parent_branch_evaluations"]
     )
