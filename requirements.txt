@@ -6,3 +6,4 @@ tqdm>=4.64.0                 # 进度条
 tensorboard>=2.13.0          # SummaryWriter
 pyyaml>=6.0                  # YAML 配置解析
 pandas
+SmilesPE==0.0.3          # deterministic pre-trained SMILES Pair Encoding preprocessing
