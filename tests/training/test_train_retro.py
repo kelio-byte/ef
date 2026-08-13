@@ -2,7 +2,13 @@ import re
 
 import torch
 
-from scripts.train_retro import EpochRandomSampler, Tee, validation_due
+from scripts.train_retro import (
+    EpochRandomSampler,
+    Tee,
+    _metrics_are_finite,
+    gradient_diagnostics,
+    validation_due,
+)
 
 
 def test_tee_adds_minute_timestamp_once_per_logical_line(tmp_path):
@@ -47,3 +53,18 @@ def test_epoch_random_sampler_changes_permutation_by_epoch():
 
     assert first != second
     assert sorted(second) == data
+
+
+def test_gradient_diagnostics_and_metric_finiteness():
+    import torch
+
+    model = torch.nn.Linear(3, 2)
+    output = model(torch.ones(1, 3)).sum()
+    output.backward()
+    diagnostics = gradient_diagnostics(model)
+    assert diagnostics["gradient_tensors"] == 2
+    assert diagnostics["nonfinite_grad_values"] == 0
+    assert diagnostics["nonfinite_parameter_values"] == 0
+    assert diagnostics["grad_norm"] > 0.0
+    assert _metrics_are_finite({"loss": 1.0, "u_tot": 2})
+    assert not _metrics_are_finite({"loss": float("nan")})

@@ -38,6 +38,9 @@ test_sample/
 # Runtime output
 *.log
 
+# Independent SPE pilot runtime artifacts (weights and logs stay local)
+checkpoints/retro_spe_pilot/
+
 # OS files
 .DS_Store
 Thumbs.db

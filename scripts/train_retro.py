@@ -3,11 +3,13 @@
 
 import argparse
 import glob
+import json
 import os
 import random
 import re
 import sys
 import shutil
+import time
 import yaml
 import numpy as np
 import torch
@@ -246,6 +248,51 @@ def log_metrics(writer, prefix: str, metrics: dict, step: int) -> None:
                       ("lambda_sub", "substitute"), ("lambda_del", "delete")):
         if key in metrics:
             writer.add_scalar(f"{prefix}/lambda/{name}", metrics[key], step)
+
+
+def gradient_diagnostics(model) -> dict:
+    """Return inexpensive gradient/parameter health diagnostics.
+
+    The scan is intentionally separate from ``train_step`` and is called only
+    at the configured monitoring interval.  This keeps the historical
+    training path unchanged while making pilot failures (NaN/Inf or exploding
+    gradients) explicit in both the terminal log and the JSONL trace.
+    """
+    grad_sq_sum = 0.0
+    grad_max_abs = 0.0
+    nonfinite_grad_values = 0
+    gradient_tensors = 0
+    nonfinite_parameter_values = 0
+    for parameter in model.parameters():
+        if not torch.isfinite(parameter).all():
+            nonfinite_parameter_values += int(
+                (~torch.isfinite(parameter)).sum().item()
+            )
+        if parameter.grad is None:
+            continue
+        gradient_tensors += 1
+        grad = parameter.grad.detach()
+        finite = torch.isfinite(grad)
+        nonfinite_grad_values += int((~finite).sum().item())
+        if finite.any():
+            finite_grad = grad[finite]
+            grad_max_abs = max(grad_max_abs, float(finite_grad.abs().max().item()))
+            grad_sq_sum += float((finite_grad.float() ** 2).sum().item())
+    return {
+        "grad_norm": grad_sq_sum ** 0.5,
+        "grad_max_abs": grad_max_abs,
+        "gradient_tensors": gradient_tensors,
+        "nonfinite_grad_values": nonfinite_grad_values,
+        "nonfinite_parameter_values": nonfinite_parameter_values,
+    }
+
+
+def _metrics_are_finite(metrics: dict) -> bool:
+    """Check scalar train/validation metrics before they enter a trace."""
+    return all(
+        isinstance(value, (int, float)) and np.isfinite(value)
+        for value in metrics.values()
+    )
 
 
 def validation_due(
@@ -603,6 +650,25 @@ def main():
         checkpoint_interval = int(cfg.get("checkpoint_interval", 10000))
         save_best = bool(cfg.get("save_best_checkpoint", True))
 
+        monitoring_cfg = cfg.get("monitoring", {}) or {}
+        monitoring_enabled = bool(monitoring_cfg.get("enabled", False))
+        monitor_interval = int(monitoring_cfg.get("interval", log_interval))
+        if monitoring_enabled and monitor_interval <= 0:
+            raise ValueError("monitoring.interval must be positive when enabled")
+        monitor_file = None
+        monitor_path = None
+        if monitoring_enabled:
+            monitor_filename = str(
+                monitoring_cfg.get("jsonl", "training_monitor.jsonl")
+            )
+            monitor_path = (
+                monitor_filename
+                if os.path.isabs(monitor_filename)
+                else os.path.join(save_dir, monitor_filename)
+            )
+            monitor_file = open(monitor_path, "a", buffering=1)
+            print(f"Training monitor: {monitor_path}")
+
         train_batches_per_epoch = len(train_loader)
         if train_batches_per_epoch <= 0:
             raise RuntimeError(
@@ -626,6 +692,12 @@ def main():
                 train_epoch, train_batch_offset * int(cfg["batch_size"]),
             )
 
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
+        monitor_started_at = time.perf_counter()
+        monitor_window_started_at = monitor_started_at
+        monitor_records = 0
+        monitor_anomalies = 0
         model.train()
         train_iter = iter(train_loader)
         try:
@@ -736,6 +808,61 @@ def main():
                     )
                     print(f"--- Checkpoint saved: {path}")
 
+                if monitoring_enabled and completed_steps % monitor_interval == 0:
+                    if device.type == "cuda":
+                        # CUDA work is asynchronous; synchronize only at the
+                        # monitoring boundary so the window speed is real.
+                        torch.cuda.synchronize(device)
+                    now = time.perf_counter()
+                    window_seconds = now - monitor_window_started_at
+                    total_seconds = now - monitor_started_at
+                    grad_info = gradient_diagnostics(model)
+                    record = {
+                        "event": "train_metrics",
+                        "step": completed_steps,
+                        "learning_rate": float(current_lr),
+                        "metrics": {
+                            key: float(value) for key, value in metrics.items()
+                        },
+                        "gradient": grad_info,
+                        "timing": {
+                            "window_seconds": window_seconds,
+                            "total_seconds": total_seconds,
+                            "steps_per_second": (
+                                monitor_interval / window_seconds
+                                if window_seconds > 0 else 0.0
+                            ),
+                            "milliseconds_per_step": (
+                                1000.0 * window_seconds / monitor_interval
+                                if window_seconds > 0 else 0.0
+                            ),
+                        },
+                    }
+                    if device.type == "cuda":
+                        record["memory"] = {
+                            "allocated_bytes": int(torch.cuda.memory_allocated(device)),
+                            "reserved_bytes": int(torch.cuda.memory_reserved(device)),
+                            "peak_allocated_bytes": int(torch.cuda.max_memory_allocated(device)),
+                            "peak_reserved_bytes": int(torch.cuda.max_memory_reserved(device)),
+                        }
+                    if not _metrics_are_finite(metrics):
+                        record["anomaly"] = "nonfinite_metrics"
+                    if grad_info["nonfinite_grad_values"]:
+                        record["anomaly"] = "nonfinite_gradients"
+                    if grad_info["nonfinite_parameter_values"]:
+                        record["anomaly"] = "nonfinite_parameters"
+                    if "anomaly" in record:
+                        monitor_anomalies += 1
+                    if monitor_file is not None:
+                        monitor_file.write(json.dumps(record, sort_keys=True) + "\n")
+                    monitor_records += 1
+                    monitor_window_started_at = now
+                    if "anomaly" in record:
+                        raise FloatingPointError(
+                            f"Non-finite training state at step {completed_steps}: "
+                            f"{record['anomaly']}"
+                        )
+
                 if writer is not None and completed_steps % int(
                     tensorboard_cfg.get("flush_interval", 500)
                 ) == 0:
@@ -752,11 +879,45 @@ def main():
                 },
                 best_val_loss=(best_val_loss if best_val_loss < float("inf") else None),
             )
+            if monitoring_enabled:
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
+                finished_at = time.perf_counter()
+                summary = {
+                    "schema_version": 1,
+                    "status": "completed",
+                    "completed_steps": int(total_steps),
+                    "elapsed_seconds": finished_at - monitor_started_at,
+                    "steps_per_second": (
+                        total_steps / (finished_at - monitor_started_at)
+                        if finished_at > monitor_started_at else 0.0
+                    ),
+                    "monitor_interval": monitor_interval,
+                    "monitor_records": monitor_records,
+                    "monitor_anomalies": monitor_anomalies,
+                    "real_vocab_size": int(real_vocab_size),
+                    "model_vocab": int(model_vocab),
+                    "model_parameters": int(sum(p.numel() for p in model.parameters())),
+                    "checkpoint": final_path,
+                }
+                if device.type == "cuda":
+                    summary["gpu"] = torch.cuda.get_device_name(device)
+                    summary["peak_memory"] = {
+                        "allocated_bytes": int(torch.cuda.max_memory_allocated(device)),
+                        "reserved_bytes": int(torch.cuda.max_memory_reserved(device)),
+                    }
+                summary_path = os.path.join(save_dir, "training_summary.json")
+                with open(summary_path, "w") as summary_file:
+                    json.dump(summary, summary_file, indent=2, sort_keys=True)
+                    summary_file.write("\n")
+                print(f"Training summary: {summary_path}")
             print("=" * 55)
             print(f"Training complete. Final model saved to {final_path}")
         finally:
             if writer is not None:
                 writer.close()
+            if monitor_file is not None:
+                monitor_file.close()
 
 
 if __name__ == "__main__":

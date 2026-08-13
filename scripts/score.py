@@ -247,7 +247,10 @@ def main(opt):
             sorted_invalid_rates[j] += 1
         unique_rates += len(rank)
 
-    for i in range(opt.n_best):
+    # A small Euler run may have fewer candidate slots than the requested
+    # report horizon (e.g. beam_size=3, n_best=10).  Report only available
+    # ranks instead of indexing the shorter invalid-rate arrays.
+    for i in range(min(opt.n_best, len(invalid_rates))):
         if i in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 19, 49]:
             print("Top-{} Acc:{:.3f}%, MaxFrag {:.3f}%,".format(i + 1, accuracy[i] / data_size * 100, max_frag_accuracy[i] / data_size * 100),
                   " Invalid SMILES:{:.3f}% Sorted Invalid SMILES:{:.3f}%".format(invalid_rates[i] / data_size / opt.augmentation * 100, sorted_invalid_rates[i] / data_size / opt.augmentation * 100))

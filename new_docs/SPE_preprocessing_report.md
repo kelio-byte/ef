@@ -170,4 +170,7 @@ python scripts/preprocessing/preprocess_spe.py \
 建议进入“单独 SPE checkpoint 的训练准备/小规模训练验证”，但不要替换当前 baseline，也不要直接从旧
 checkpoint resume。原因是预处理指标满足进入门槛：序列和编辑距离显著下降、长度无超限、round-trip 0 失败、
 OOV 极低；但 vocab 和 operation distribution 都发生了实质变化，必须重新初始化匹配 SPE vocab 的模型，
-再与原 tokenizer 在同一 protocol 下比较 Top-K、Oracle、invalid rate 和运行效率。
+再与原 tokenizer 在同一 protocol 下比较 Top-K、Oracle、invalid rate 和运行效率。训练 pilot 的独立配置为
+[`configs/retro_spe_pilot.yaml`](../configs/retro_spe_pilot.yaml)，训练完成后应把 loss/u_tot、三类编辑率、
+吞吐、显存和小规模 Euler sampling 结果记录在单独的
+[`SPE_training_pilot_report.md`](SPE_training_pilot_report.md)，不应覆盖原 tokenizer 的 checkpoint。
