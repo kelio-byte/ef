@@ -3,6 +3,7 @@ import re
 import torch
 
 from scripts.train_retro import (
+    DistributedEpochRandomSampler,
     EpochRandomSampler,
     Tee,
     _metrics_are_finite,
@@ -53,6 +54,41 @@ def test_epoch_random_sampler_changes_permutation_by_epoch():
 
     assert first != second
     assert sorted(second) == data
+
+
+def test_distributed_epoch_sampler_shards_one_shared_permutation_and_resumes():
+    data = list(range(11))
+    expected = list(EpochRandomSampler(data, seed=42))
+    rank0 = DistributedEpochRandomSampler(
+        data, num_replicas=2, rank=0, seed=42, shuffle=True, drop_last=True,
+    )
+    rank1 = DistributedEpochRandomSampler(
+        data, num_replicas=2, rank=1, seed=42, shuffle=True, drop_last=True,
+    )
+
+    rank0_indices = list(rank0)
+    rank1_indices = list(rank1)
+    assert rank0_indices == expected[:10:2]
+    assert rank1_indices == expected[1:10:2]
+    assert not set(rank0_indices).intersection(rank1_indices)
+    assert sorted(rank0_indices + rank1_indices) == sorted(expected[:10])
+
+    rank1.set_position(epoch=0, start_index=3)
+    assert list(rank1) == rank1_indices[3:]
+
+
+def test_distributed_validation_sampler_never_pads_examples():
+    data = list(range(5))
+    rank0 = DistributedEpochRandomSampler(
+        data, num_replicas=2, rank=0, seed=42, shuffle=False, drop_last=False,
+    )
+    rank1 = DistributedEpochRandomSampler(
+        data, num_replicas=2, rank=1, seed=42, shuffle=False, drop_last=False,
+    )
+
+    assert list(rank0) == [0, 2, 4]
+    assert list(rank1) == [1, 3]
+    assert sorted(list(rank0) + list(rank1)) == data
 
 
 def test_gradient_diagnostics_and_metric_finiteness():

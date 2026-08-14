@@ -98,7 +98,30 @@ $PY scripts/train_retro.py \
 event 文件。终端和 `train.log` 中的每条逻辑日志行都会带本地时间戳，格式为
 `[MM/DD/HH/MM]`，例如 `[08/06/14/09] step ...`。
 
-### 2.4 从 checkpoint 继续训练
+### 2.4 SPE 的单卡 / 双卡 600k 训练
+
+SPE-50k pilot（`configs/retro_spe_pilot.yaml`）保持冻结。正式 SPE 600k 使用独立配置：
+
+- 只有一张卡：`configs/retro_spe_600k.yaml`，`batch_size=128`；
+- 两张卡：`configs/retro_spe_600k_ddp2.yaml`，`batch_size=64` **每卡**，全局有效 batch
+  仍为 `2 × 64 = 128`。
+
+双卡必须使用 DDP / `torchrun`，不要使用 `DataParallel`：
+
+```bash
+OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 PYTHONPATH=. \
+torchrun --standalone --nproc_per_node=2 scripts/train_retro.py \
+  --config configs/retro_spe_600k_ddp2.yaml \
+  --device cuda \
+  --save_dir checkpoints/retro_spe_600k_ddp2
+```
+
+脚本会自动通过 `LOCAL_RANK` 绑定 GPU、用 NCCL 同步梯度、shard train/val 数据，并只让
+rank 0 写日志和 checkpoint。两卡首次可用时先跑 5 个 update 的 GPU smoke，确认日志显示
+`world_size=2` 和 `effective global batch=128`，再开 600k。完整设计、恢复语义和已通过的
+CPU-DDP/单卡 CUDA 回归见 [`new_docs/training_ddp.md`](new_docs/training_ddp.md)。
+
+### 2.5 从 checkpoint 继续训练
 
 ```bash
 $PY scripts/train_retro.py \
@@ -112,7 +135,7 @@ $PY scripts/train_retro.py \
 的旧文件误当成可无缝 resume 的 checkpoint。训练代码还会保存 `checkpoint_latest.pt` 和按 step
 命名的 checkpoint（具体保留数量由 `--keep_checkpoints`/yaml 决定）。
 
-### 2.5 预计算 alignment（通常只需做一次）
+### 2.6 预计算 alignment（通常只需做一次）
 
 ```bash
 $PY scripts/precompute_alignments.py \
