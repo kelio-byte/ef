@@ -460,6 +460,8 @@ def euler_transition_step(
         log_sub_probs,
         step_size,
         score_mode="full_probability",
+        state_tokens=states,
+        pad_token=pad_token,
     )
     next_states = _apply_edits_batch(
         states, actions, max_seq_len=max_seq_len, pad_token=pad_token,

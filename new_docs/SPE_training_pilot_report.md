@@ -110,3 +110,9 @@ SPE pilot 证明了两件事：
 但当前候选质量没有达到 baseline 的可接受范围：Oracle 下降 26 pp，Top-1 下降 30 pp，invalid 增加约 27–29 pp。增加的 unique candidates 主要伴随 invalid，并没有转化为有效 Top-K 覆盖。
 
 因此本轮结论是：**暂不进入完整 600k，不替换 baseline，SPE 保留为独立 opt-in 分支。** 若未来要继续，必须先把“invalid 大幅升高”作为首要问题，完成一个新的中期质量门槛后再决定是否支付约 12 小时的完整训练成本；本报告不把 50k vs 600k 的差异解释成 SPE 架构本身的最终上限。
+
+## 7. 2026-08-14 采样语义勘误
+
+本报告第 4–6 节的 100-reaction SPE 数字产生于后续 sampling action-support 修复之前，不能再被当作“当前代码的修复前后质量对照”。审计确认训练 target 中存在大量 leading insert，而旧 ordinary Euler、Euler-Beam 和 Structured 路径错误地把 `INS(pos=0)` 与 BOS 的 SUB/DEL 一起屏蔽；当前代码只禁止 BOS SUB/DEL，并过滤 special token/no-op substitution。
+
+这次修复没有改动 SPE 训练、数据、模型或 checkpoint。基于“50k steps 尚不足以判断 SPE 质量”的研究决定，本轮不重新运行该 checkpoint 的 Top-K/Oracle 对比，也不从历史数值推导修复的质量增益或损失。待有训练充分、协议匹配的 SPE checkpoint 后，再用固定 100-reaction protocol 做新的独立质量评估。详见 `new_docs/sampler_semantics_audit.md`。

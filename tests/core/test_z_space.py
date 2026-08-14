@@ -1,7 +1,8 @@
 import torch
 from edit_flows.core.z_space import (
     rm_gap_tokens, rv_gap_tokens, fill_gap_tokens_with_repeats,
-    make_ut_mask_from_z, sample_cond_zt, project_mask_z_to_x,
+    fill_gap_tokens_with_repeats_log, make_ut_mask_from_z, sample_cond_zt,
+    project_mask_z_to_x,
 )
 from edit_flows.core.scheduler import CubicScheduler
 from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN, GAP_TOKEN
@@ -60,6 +61,27 @@ class TestFillGapTokensWithRepeats:
 
 
 class TestMakeUtMaskFromZ:
+    def test_leading_insert_target_projects_to_bos_anchor(self):
+        # After BOS is prepended, a leading target GAP is represented by an
+        # INSERT action at X-position 0.  Applying that action inserts after
+        # BOS; it does not substitute or delete the sentinel itself.
+        z_t = torch.tensor([[BOS_TOKEN, GAP_TOKEN, 6, PAD_TOKEN]])
+        z_1 = torch.tensor([[BOS_TOKEN, 9, 6, PAD_TOKEN]])
+        x_t, _, z_gap_mask, z_pad_mask = rm_gap_tokens(z_t)
+        assert torch.equal(x_t, torch.tensor([[BOS_TOKEN, 6]]))
+
+        target_mask = make_ut_mask_from_z(z_t, z_1, vocab_size=16)
+        assert target_mask[0, 1, 9].item()
+
+        log_x_actions = torch.tensor([[
+            [1.0, 2.0],
+            [3.0, 4.0],
+        ]])
+        log_z_actions = fill_gap_tokens_with_repeats_log(
+            log_x_actions, z_gap_mask, z_pad_mask,
+        )
+        assert torch.equal(log_z_actions[0, 1], log_x_actions[0, 0])
+
     def test_insert_mask(self):
         z_t = torch.tensor([[BOS_TOKEN, GAP_TOKEN, PAD_TOKEN]])
         z_1 = torch.tensor([[BOS_TOKEN, 6, PAD_TOKEN]])

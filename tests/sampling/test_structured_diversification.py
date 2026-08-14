@@ -36,6 +36,28 @@ class DirectionModel(nn.Module):
         return log_rates, log_probs, log_probs.clone()
 
 
+class BosAnchorModel(nn.Module):
+    """Expose only a leading insertion, which must be anchored at BOS."""
+
+    def __init__(self, vocab_size=16):
+        super().__init__()
+        self.anchor = nn.Parameter(torch.zeros(1))
+        self.vocab_size = vocab_size
+
+    def forward(self, tokens, time_step, padding_mask, origin_mask=None):
+        batch, length = tokens.shape
+        log_rates = torch.full(
+            (batch, length, 3), -20.0, device=tokens.device,
+        )
+        log_rates[:, 0, 0] = 12.0  # INS immediately after BOS
+        logits = torch.full(
+            (batch, length, self.vocab_size), -10.0, device=tokens.device,
+        )
+        logits[:, :, 7] = 5.0
+        log_probs = torch.log_softmax(logits, dim=-1)
+        return log_rates, log_probs, log_probs.clone()
+
+
 def test_structured_sampler_selects_distinct_directions_without_competition():
     model = DirectionModel()
     x_0 = torch.tensor([[BOS_TOKEN, 4, 5, 6, PAD_TOKEN]])
@@ -95,3 +117,23 @@ def test_structured_sampler_uses_concrete_token_fallback():
         item["selection_mode"] == "concrete_fallback"
         for item in records[0]["selected_actions"]
     )
+
+
+def test_structured_sampler_uses_bos_as_leading_insert_anchor():
+    model = BosAnchorModel()
+    x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+
+    results, records = sample_structured_diversification(
+        model,
+        x_0,
+        LinearScheduler(),
+        n_trajectories=1,
+        n_steps=1,
+        max_seq_len=32,
+    )
+
+    action = records[0]["selected_actions"][0]
+    assert (action["position"], action["operation"], action["token"]) == (
+        0, "INS", 7,
+    )
+    assert results[0].tolist() == [BOS_TOKEN, 7, 4]

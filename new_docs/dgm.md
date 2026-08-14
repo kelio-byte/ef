@@ -619,9 +619,10 @@ baseline checkpoint id
   padding/collate 和 metadata 检查通过。
 - 正式 train 生成首次运行到第 120/626 批时发现一条终态第 0 列被采样编辑、丢失 BOS。
   这是采样器的结构性边界问题，不是输入数据损坏：训练耦合始终固定 BOS，而 Euler 原先
-  只屏蔽 PAD。已在普通 Euler 和 Euler-Beam 的 action sampler 中统一屏蔽位置 0，并加入
-  回归测试；失败批次（原始 product index 8019）修复后短复现不再产生非 BOS 终态。这样
-  既保证 guidance 数据格式合法，也避免 DGM 与 baseline 使用不同的序列语义。
+  只屏蔽 PAD。初始修复以“屏蔽位置 0”描述；该说法在 2026-08-14 的 target 审计中被进一步
+  校正为更精确的规则：BOS 不可 SUB/DEL，但 `INS(pos=0)` 表示 BOS 后插入，必须保留以表达
+  leading target GAP。普通 Euler、Euler-Beam 与 Structured 路径现已统一该规则，且仍保证
+  BOS 不会被改写或删除。完整勘误见 `new_docs/sampler_semantics_audit.md`。
 - 修复后正式数据已完整生成并通过全量 CPU 审计：train 为 **40,003 products / 80,006
   records**，GPU wall **1475.5s（24.6min）**；validation 为 **5,001 products / 10,002
   records**，GPU wall **182.5s（3.0min）**。两份数据均为每个 product 两个中间时间点，

@@ -25,7 +25,11 @@ from edit_flows.sampling.euler import (
     _event_probability,
     get_adaptive_h,
 )
-from edit_flows.sampling.ops import apply_ins_del_operations
+from edit_flows.sampling.ops import (
+    apply_ins_del_operations,
+    edit_position_masks,
+    legal_token_log_probs,
+)
 from edit_flows.utils.tokens import BOS_TOKEN, PAD_TOKEN
 
 
@@ -444,22 +448,60 @@ def _step_log_p_batch(
     log_sub_probs: Tensor,
     adapt_h: Tensor,
     score_mode: str = "full_probability",
+    state_tokens: Optional[Tensor] = None,
+    pad_token: int = PAD_TOKEN,
 ) -> Tensor:
     """批量计算每条分支本步完整动作集合的 log-prob。"""
     rates = torch.exp(log_rates_eff)
+    if state_tokens is not None:
+        if state_tokens.shape != rates.shape[:2]:
+            raise ValueError(
+                "state_tokens must have shape [batch, length] matching rates"
+            )
+        insert_positions, sub_del_positions = edit_position_masks(
+            state_tokens, pad_token=pad_token,
+        )
+    else:
+        insert_positions = actions.get("insert_position_mask")
+        sub_del_positions = actions.get("sub_del_position_mask")
+        if insert_positions is None:
+            insert_positions = torch.ones_like(rates[:, :, 0], dtype=torch.bool)
+        if sub_del_positions is None:
+            sub_del_positions = torch.ones_like(
+                rates[:, :, 1], dtype=torch.bool,
+            )
+
+    # The stochastic samplers draw INS/SUB tokens from Q conditioned on the
+    # valid action support.  Their returned log normalizers make beam scoring
+    # use the same conditional Q instead of silently scoring a different
+    # distribution.  Hand-built test actions retain legacy/raw-Q behavior.
+    ins_log_normalizer = actions.get("ins_token_log_normalizer")
+    sub_log_normalizer = actions.get("sub_token_log_normalizer")
+    ins_rates = rates[:, :, 0] * insert_positions.to(rates.dtype)
+    sub_rates = rates[:, :, 1] * sub_del_positions.to(rates.dtype)
+    del_rates = rates[:, :, 2] * sub_del_positions.to(rates.dtype)
     eps = 1e-12
     log_eps = math.log(eps)
-    ins_mu = adapt_h * rates[:, :, 0]
+    ins_mu = adapt_h * ins_rates
     if score_mode == "legacy_triggered_reverse":
         event_log_p = torch.log(
-            (-torch.expm1(-adapt_h.unsqueeze(-1) * rates)).clamp_min(eps)
+            (-torch.expm1(
+                -adapt_h.unsqueeze(-1)
+                * torch.stack((ins_rates, sub_rates, del_rates), dim=-1)
+            )).clamp_min(eps)
         )
         ins_token_log_p = log_ins_probs.gather(
             2, actions["ins_tokens"].unsqueeze(-1),
-        ).squeeze(-1).clamp_min(log_eps)
+        ).squeeze(-1)
         sub_token_log_p = log_sub_probs.gather(
             2, actions["sub_tokens"].unsqueeze(-1),
-        ).squeeze(-1).clamp_min(log_eps)
+        ).squeeze(-1)
+        if ins_log_normalizer is not None:
+            ins_token_log_p = ins_token_log_p - ins_log_normalizer
+        if sub_log_normalizer is not None:
+            sub_token_log_p = sub_token_log_p - sub_log_normalizer
+        ins_token_log_p = ins_token_log_p.clamp_min(log_eps)
+        sub_token_log_p = sub_token_log_p.clamp_min(log_eps)
         return (
             (event_log_p[:, :, 0] + ins_token_log_p)
             .masked_fill(~actions["ins_mask"], 0.0).sum(dim=1)
@@ -470,30 +512,36 @@ def _step_log_p_batch(
         )
     if score_mode != "full_probability":
         raise ValueError(f"Unsupported score_mode: {score_mode}")
-    ds_rates = rates[:, :, 1] + rates[:, :, 2]
+    ds_rates = sub_rates + del_rates
     ds_mu = adapt_h * ds_rates
     ins_event_log_p = torch.log((-torch.expm1(-ins_mu)).clamp_min(eps))
     ds_event_log_p = torch.log((-torch.expm1(-ds_mu)).clamp_min(eps))
     ins_token_log_p = log_ins_probs.gather(
         2, actions["ins_tokens"].unsqueeze(-1),
-    ).squeeze(-1).clamp_min(log_eps)
+    ).squeeze(-1)
     sub_token_log_p = log_sub_probs.gather(
         2, actions["sub_tokens"].unsqueeze(-1),
-    ).squeeze(-1).clamp_min(log_eps)
+    ).squeeze(-1)
+    if ins_log_normalizer is not None:
+        ins_token_log_p = ins_token_log_p - ins_log_normalizer
+    if sub_log_normalizer is not None:
+        sub_token_log_p = sub_token_log_p - sub_log_normalizer
+    ins_token_log_p = ins_token_log_p.clamp_min(log_eps)
+    sub_token_log_p = sub_token_log_p.clamp_min(log_eps)
     ins_contrib = torch.where(
         actions["ins_mask"], ins_event_log_p + ins_token_log_p, -ins_mu,
     )
     sub_contrib = (
         ds_event_log_p
         + torch.log(
-            (rates[:, :, 1] / ds_rates.clamp_min(eps)).clamp_min(eps)
+            (sub_rates / ds_rates.clamp_min(eps)).clamp_min(eps)
         )
         + sub_token_log_p
     )
     del_contrib = (
         ds_event_log_p
         + torch.log(
-            (rates[:, :, 2] / ds_rates.clamp_min(eps)).clamp_min(eps)
+            (del_rates / ds_rates.clamp_min(eps)).clamp_min(eps)
         )
     )
     ds_contrib = torch.where(
@@ -510,6 +558,8 @@ def _step_log_p(
     log_ins_probs: Tensor,
     log_sub_probs: Tensor,
     adapt_h: float,
+    state_tokens: Optional[Tensor] = None,
+    pad_token: int = PAD_TOKEN,
 ) -> float:
     """单分支兼容包装；主采样循环使用 `_step_log_p_batch()`。"""
     h = torch.tensor(
@@ -517,6 +567,7 @@ def _step_log_p(
     )
     return _step_log_p_batch(
         actions, log_rates_eff, log_ins_probs, log_sub_probs, h,
+        state_tokens=state_tokens, pad_token=pad_token,
     )[0].item()
 
 
@@ -598,9 +649,24 @@ def _sample_actions_per_branch(
     """按 branch seed 无状态、批量地采样所有分支动作。"""
     seeds = branch_seeds.to(device=x_t.device, dtype=torch.int64)
     rates = torch.exp(log_rates)
-    lambda_ins = rates[:, :, 0]
-    lambda_sub = rates[:, :, 1]
-    lambda_del = rates[:, :, 2]
+    legal_log_ins_probs, ins_log_normalizer = legal_token_log_probs(
+        log_ins_probs,
+    )
+    legal_log_sub_probs, sub_log_normalizer = legal_token_log_probs(
+        log_sub_probs,
+        current_tokens=x_t,
+    )
+    insert_positions, sub_del_positions = edit_position_masks(
+        x_t, pad_token=pad_token,
+    )
+    # Apply the same legal support to event rates before the stateless random
+    # draws.  This prevents forbidden BOS SUB/DEL (and Q-empty INS/SUB) from
+    # becoming silent no-ops and keeps proposal sampling aligned with scoring.
+    ins_sample_positions = insert_positions & torch.isfinite(ins_log_normalizer)
+    sub_sample_positions = sub_del_positions & torch.isfinite(sub_log_normalizer)
+    lambda_ins = rates[:, :, 0] * ins_sample_positions.to(rates.dtype)
+    lambda_sub = rates[:, :, 1] * sub_sample_positions.to(rates.dtype)
+    lambda_del = rates[:, :, 2] * sub_del_positions.to(rates.dtype)
 
     ins_prob = _event_probability(adapt_h * lambda_ins, event_prob_mode)
     ds_prob = _event_probability(
@@ -622,35 +688,33 @@ def _sample_actions_per_branch(
     sub_mask = ds_mask & ~del_mask
 
     ins_tokens = _sample_tokens_from_uniform(
-        log_ins_probs,
+        legal_log_ins_probs,
         _stateless_uniform(
             seeds, step, seq_len, stream=3, dtype=log_ins_probs.dtype,
         ),
     )
     sub_tokens = _sample_tokens_from_uniform(
-        log_sub_probs,
+        legal_log_sub_probs,
         _stateless_uniform(
             seeds, step, seq_len, stream=4, dtype=log_sub_probs.dtype,
         ),
     )
 
-    non_pad_mask = x_t != pad_token
-    # BOS is a structural sentinel and is never an Euler edit position.  This
-    # must match the ordinary Euler sampler so beam children cannot corrupt
-    # the sequence header either.
-    if non_pad_mask.shape[1] > 0:
-        non_pad_mask[:, 0] = False
-    ins_mask &= non_pad_mask
-    del_mask &= non_pad_mask
-    sub_mask &= non_pad_mask
-    ins_tokens = ins_tokens.masked_fill(~non_pad_mask, pad_token)
-    sub_tokens = sub_tokens.masked_fill(~non_pad_mask, pad_token)
+    ins_mask &= ins_sample_positions
+    del_mask &= sub_del_positions
+    sub_mask &= sub_sample_positions
+    ins_tokens = ins_tokens.masked_fill(~ins_mask, pad_token)
+    sub_tokens = sub_tokens.masked_fill(~sub_mask, pad_token)
     return {
         "ins_mask": ins_mask,
         "del_mask": del_mask,
         "sub_mask": sub_mask,
         "ins_tokens": ins_tokens,
         "sub_tokens": sub_tokens,
+        "ins_token_log_normalizer": ins_log_normalizer,
+        "sub_token_log_normalizer": sub_log_normalizer,
+        "insert_position_mask": insert_positions,
+        "sub_del_position_mask": sub_del_positions,
     }
 
 
@@ -1166,6 +1230,8 @@ def sample_euler_beam(
             lsp_candidates,
             adapt_h_candidates,
             score_mode=score_mode,
+            state_tokens=x_candidates,
+            pad_token=pad_token,
         ).cpu().tolist()
         adapt_h_values = adapt_h_candidates.squeeze(-1).cpu().tolist()
         _profile_finish(

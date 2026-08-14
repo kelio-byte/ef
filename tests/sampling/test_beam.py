@@ -73,11 +73,25 @@ class _ControlledModel(nn.Module):
         self._log_sub_probs = log_sub_probs
 
     def forward(self, tokens, time_step, padding_mask, origin_mask=None):
-        B = tokens.shape[0]
-        # Expand pre-set (L,) outputs to (B, L, ...) by repeating.
-        lr = self._log_rates.unsqueeze(0).expand(B, -1, -1).to(tokens.device)
-        lip = self._log_ins_probs.unsqueeze(0).expand(B, -1, -1).to(tokens.device)
-        lsp = self._log_sub_probs.unsqueeze(0).expand(B, -1, -1).to(tokens.device)
+        B, length = tokens.shape
+
+        def fit_length(values: Tensor) -> Tensor:
+            """Keep a fixed test fixture valid after a sampled edit shifts L."""
+            if values.shape[0] >= length:
+                return values[:length]
+            extra = torch.full(
+                (length - values.shape[0], *values.shape[1:]),
+                LOG_NEG_INF,
+                dtype=values.dtype,
+                device=values.device,
+            )
+            return torch.cat((values, extra), dim=0)
+
+        # Expand pre-set (L,) outputs to the current state length.  Real beam
+        # states lose PAD suffixes and may grow/shrink after every edit.
+        lr = fit_length(self._log_rates).unsqueeze(0).expand(B, -1, -1).to(tokens.device)
+        lip = fit_length(self._log_ins_probs).unsqueeze(0).expand(B, -1, -1).to(tokens.device)
+        lsp = fit_length(self._log_sub_probs).unsqueeze(0).expand(B, -1, -1).to(tokens.device)
         # Apply PAD masking for realism.
         pad_3d = padding_mask.unsqueeze(-1)
         lr = lr.masked_fill(pad_3d, LOG_NEG_INF)
@@ -116,50 +130,50 @@ class _BranchingTimePolicy(TimePolicy):
 
 class TestIsReverseOp:
     def test_none_last_edit_always_false(self):
-        cand = EditCandidate(pos=2, op="sub", token=5, log_u_real=0.0, score=0.0)
+        cand = EditCandidate(pos=2, op="sub", token=5, log_u=0.0, score=0.0)
         assert not _is_reverse_op(cand, None)
 
     def test_sub_then_different_sub_allowed(self):
         """a→b then b→c should NOT be reverse."""
-        last = EditCandidate(pos=3, op="sub", token=7, log_u_real=1.0, score=0.0,
+        last = EditCandidate(pos=3, op="sub", token=7, log_u=1.0, score=0.0,
                              old_token=5)
-        cand = EditCandidate(pos=3, op="sub", token=9, log_u_real=1.0, score=0.0,
+        cand = EditCandidate(pos=3, op="sub", token=9, log_u=1.0, score=0.0,
                              old_token=7)
         assert not _is_reverse_op(cand, last)
 
     def test_sub_then_reverse_sub_blocked(self):
         """a→b then b→a IS reverse."""
-        last = EditCandidate(pos=3, op="sub", token=7, log_u_real=1.0, score=0.0,
+        last = EditCandidate(pos=3, op="sub", token=7, log_u=1.0, score=0.0,
                              old_token=5)
-        cand = EditCandidate(pos=3, op="sub", token=5, log_u_real=1.0, score=0.0,
+        cand = EditCandidate(pos=3, op="sub", token=5, log_u=1.0, score=0.0,
                              old_token=7)
         assert _is_reverse_op(cand, last)
 
     def test_sub_at_different_position_allowed(self):
-        last = EditCandidate(pos=3, op="sub", token=7, log_u_real=1.0, score=0.0,
+        last = EditCandidate(pos=3, op="sub", token=7, log_u=1.0, score=0.0,
                              old_token=5)
-        cand = EditCandidate(pos=4, op="sub", token=5, log_u_real=1.0, score=0.0,
+        cand = EditCandidate(pos=4, op="sub", token=5, log_u=1.0, score=0.0,
                              old_token=7)
         assert not _is_reverse_op(cand, last)
 
     def test_ins_then_del_same_pos_reverse(self):
-        last = EditCandidate(pos=2, op="ins", token=8, log_u_real=1.0, score=0.0)
-        cand = EditCandidate(pos=2, op="del", token=None, log_u_real=1.0, score=0.0)
+        last = EditCandidate(pos=2, op="ins", token=8, log_u=1.0, score=0.0)
+        cand = EditCandidate(pos=2, op="del", token=None, log_u=1.0, score=0.0)
         assert _is_reverse_op(cand, last)
 
     def test_ins_then_del_different_pos_allowed(self):
-        last = EditCandidate(pos=2, op="ins", token=8, log_u_real=1.0, score=0.0)
-        cand = EditCandidate(pos=3, op="del", token=None, log_u_real=1.0, score=0.0)
+        last = EditCandidate(pos=2, op="ins", token=8, log_u=1.0, score=0.0)
+        cand = EditCandidate(pos=3, op="del", token=None, log_u=1.0, score=0.0)
         assert not _is_reverse_op(cand, last)
 
     def test_del_then_ins_same_pos_same_token_reverse(self):
-        last = EditCandidate(pos=2, op="del", token=8, log_u_real=1.0, score=0.0)
-        cand = EditCandidate(pos=2, op="ins", token=8, log_u_real=1.0, score=0.0)
+        last = EditCandidate(pos=2, op="del", token=8, log_u=1.0, score=0.0)
+        cand = EditCandidate(pos=2, op="ins", token=8, log_u=1.0, score=0.0)
         assert _is_reverse_op(cand, last)
 
     def test_del_then_ins_same_pos_different_token_allowed(self):
-        last = EditCandidate(pos=2, op="del", token=8, log_u_real=1.0, score=0.0)
-        cand = EditCandidate(pos=2, op="ins", token=9, log_u_real=1.0, score=0.0)
+        last = EditCandidate(pos=2, op="del", token=8, log_u=1.0, score=0.0)
+        cand = EditCandidate(pos=2, op="ins", token=9, log_u=1.0, score=0.0)
         assert not _is_reverse_op(cand, last)
 
 
@@ -308,7 +322,7 @@ class TestApplySingleEdit:
     def test_sub_edit(self):
         x_t = torch.tensor([BOS_TOKEN, 5, 6, 7])
         origin = torch.ones_like(x_t, dtype=torch.bool)
-        cand = EditCandidate(pos=1, op="sub", token=10, log_u_real=1.0, score=0.0)
+        cand = EditCandidate(pos=1, op="sub", token=10, log_u=1.0, score=0.0)
 
         x_next, origin_next = _apply_single_edit_to_sequence(
             x_t, origin, cand, max_seq_len=32, pad_token=PAD_TOKEN,
@@ -324,7 +338,7 @@ class TestApplySingleEdit:
     def test_ins_edit(self):
         x_t = torch.tensor([BOS_TOKEN, 5, 6, 7])
         origin = torch.ones_like(x_t, dtype=torch.bool)
-        cand = EditCandidate(pos=1, op="ins", token=10, log_u_real=1.0, score=0.0)
+        cand = EditCandidate(pos=1, op="ins", token=10, log_u=1.0, score=0.0)
 
         x_next, origin_next = _apply_single_edit_to_sequence(
             x_t, origin, cand, max_seq_len=32, pad_token=PAD_TOKEN,
@@ -340,7 +354,7 @@ class TestApplySingleEdit:
     def test_del_edit(self):
         x_t = torch.tensor([BOS_TOKEN, 5, 6, 7])
         origin = torch.ones_like(x_t, dtype=torch.bool)
-        cand = EditCandidate(pos=1, op="del", token=None, log_u_real=1.0, score=0.0)
+        cand = EditCandidate(pos=1, op="del", token=None, log_u=1.0, score=0.0)
 
         x_next, origin_next = _apply_single_edit_to_sequence(
             x_t, origin, cand, max_seq_len=32, pad_token=PAD_TOKEN,
@@ -352,7 +366,7 @@ class TestApplySingleEdit:
 
     def test_no_origin_mask(self):
         x_t = torch.tensor([BOS_TOKEN, 5, 6])
-        cand = EditCandidate(pos=1, op="sub", token=10, log_u_real=1.0, score=0.0)
+        cand = EditCandidate(pos=1, op="sub", token=10, log_u=1.0, score=0.0)
         x_next, origin_next = _apply_single_edit_to_sequence(
             x_t, None, cand, max_seq_len=32, pad_token=PAD_TOKEN,
         )
@@ -597,7 +611,7 @@ class TestBeamDeadEnd:
         assert cands[0].op == "sub" and cands[0].pos == 1 and cands[0].token == 5
 
         # This should be detected as reverse of sub(pos=1, 5→10).
-        last = EditCandidate(pos=1, op="sub", token=10, log_u_real=1.0, score=0.0,
+        last = EditCandidate(pos=1, op="sub", token=10, log_u=1.0, score=0.0,
                              old_token=5)
         assert _is_reverse_op(cands[0], last), \
             "sub(pos=1, 10→5) should be reverse of sub(pos=1, 5→10)"
@@ -819,7 +833,7 @@ class TestOriginMaskSingleEdit:
     def test_sub_flips_origin_to_false(self):
         x_t = torch.tensor([BOS_TOKEN, 5, 6, 7])
         origin = torch.ones_like(x_t, dtype=torch.bool)
-        cand = EditCandidate(pos=1, op="sub", token=10, log_u_real=1.0, score=0.0)
+        cand = EditCandidate(pos=1, op="sub", token=10, log_u=1.0, score=0.0)
         _, origin_next = _apply_single_edit_to_sequence(
             x_t, origin, cand, max_seq_len=32, pad_token=PAD_TOKEN,
         )
@@ -830,7 +844,7 @@ class TestOriginMaskSingleEdit:
     def test_ins_new_token_is_false(self):
         x_t = torch.tensor([BOS_TOKEN, 5, 6, 7])
         origin = torch.ones_like(x_t, dtype=torch.bool)
-        cand = EditCandidate(pos=1, op="ins", token=10, log_u_real=1.0, score=0.0)
+        cand = EditCandidate(pos=1, op="ins", token=10, log_u=1.0, score=0.0)
         _, origin_next = _apply_single_edit_to_sequence(
             x_t, origin, cand, max_seq_len=32, pad_token=PAD_TOKEN,
         )
@@ -840,7 +854,7 @@ class TestOriginMaskSingleEdit:
     def test_del_removes_token_and_mask_together(self):
         x_t = torch.tensor([BOS_TOKEN, 5, 6, 7])
         origin = torch.ones_like(x_t, dtype=torch.bool)
-        cand = EditCandidate(pos=1, op="del", token=None, log_u_real=1.0, score=0.0)
+        cand = EditCandidate(pos=1, op="del", token=None, log_u=1.0, score=0.0)
         x_next, origin_next = _apply_single_edit_to_sequence(
             x_t, origin, cand, max_seq_len=32, pad_token=PAD_TOKEN,
         )

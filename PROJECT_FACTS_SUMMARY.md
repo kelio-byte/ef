@@ -411,7 +411,7 @@ residual 全局 AUC 0.6922→0.7167（+2.45pp）、同组 AUC 0.6493→0.6894，
 
 ## 7.2 推理与采样侧计划
 
-- 特殊 token/BOS 完整硬约束：位置 0 屏蔽已在 guidance 数据阶段实现并统一到 Euler/Euler-Beam；文档仍将“BOS/特殊 token 动作约束未完全硬编码”列为当前限制，后续应先诊断再决定是否完整硬屏蔽（⏳）。
+- 特殊 token/BOS action support：2026-08-14 审计修正了旧的“位置 0 全屏蔽”表述。BOS 本身不可 SUB/DEL，但 `INS(pos=0)` 是 BOS 后插入锚点，且训练 target 中真实出现；ordinary Euler、Euler-Beam/SMC、Structured v1/v2 已统一为该语义，并过滤 special 输出和 no-op SUB。见 `new_docs/sampler_semantics_audit.md`（✅ 语义/回归已验证；质量效果待充分训练 checkpoint）。
 - n_steps 消融（50/100/200）在 DGM 阶段 5 通过后才做 —— ⏳ 未执行。
 - GPU 状态 key/合并、child 维广播等性能候选（预期 4–8%）—— ⏳ 未实现（需先保证逐行一致）。
 - 混合候选池 NNN+LL + frequency-first：holdout-200 上 Top-3 净增 11/200（p=0.0074）、Oracle 91%，但 Top-1/2 不显著、LL 为未校准启发式 → 保留为高覆盖实验模式，未设为默认；文档未列正式后续任务，仅在任务 13 中冻结为参考档（🟡）。
@@ -454,6 +454,7 @@ residual 全局 AUC 0.6922→0.7167（+2.45pp）、同组 AUC 0.6493→0.6894，
 | 早期“shared-anchor”数据实际不共享 state/time | P5 pairwise 指标无效 | P5b 审计发现；P5c 实现真实 continuation 并重做 P5d |
 | adaptive endpoint 时间近似错误 | 修正前 1k shared-anchor 文件无效 | `get_euler_step_times()` 修正，旧文件作废 |
 | continuation 原地改写 GPU 输入 tensor | 2/1000 条 transition_tokens 被污染 | `68f89de` clone 修复；污染文件改名保留 |
+| 采样器把 pos=0 的 INS 与 BOS SUB/DEL 一并屏蔽 | 训练 target 的 leading insert 无法由采样器表达；Euler/Euler-Beam/Structured support 不一致 | 2026-08-14：保留 `INS(pos=0)`（BOS 后插入），禁止 BOS SUB/DEL；过滤 special/no-op Q，并让 Euler-Beam proposal/score support 一致 |
 | 普通 Euler 的 `--seed` 未接入采样器 | 历史 Euler 对照不可严格配对 | 已修复（metadata 记录 `seed_applied_to_sampler=true`） |
 | PyTorch 2.6+ `torch.load(weights_only=True)` 拒绝旧 checkpoint | 采样加载失败 | `88a0f2e` 显式 `weights_only=False` |
 | `visualize_trajectory --n_branches` 伪支持（未实现 recording 却解包） | 运行时崩溃/误导 | 明确报错；完整 branch 树记录未实现 |
@@ -469,6 +470,7 @@ residual 全局 AUC 0.6922→0.7167（+2.45pp）、同组 AUC 0.6493→0.6894，
 | 58% 恢复版本 | 可作对照 | 不同 seed/评分语义，仅研究线索 |
 | correctness reward v1 | AUC 0.7306 等 | 有 target leakage，失效；v2/v3 为权威 |
 | shared-anchor pairwise（P5） | 排序 59.66% 等 | 数据不共享 anchor，指标无效；P5d 修正后联合 gate 仍未过 |
+| beam 是否允许 BOS 插入 | “位置 0 全屏蔽” | single-edit beam 一直允许 `INS(pos=0)`；当前所有正式 sampler 统一为“仅 INS 可锚定 BOS” |
 | validation-A/B | 曾用于方法结论 | 降级为历史探索；方法结论以 v2 dev/confirm/final 为准 |
 | guidance checkpoint best vs final | — | 协议选 best（Bregman/pairwise gate）；final 在个别 Top-k 上更好但 Oracle 更低，不能事后换 |
 | 环境版本 | execution report: PyTorch 2.7.1+cu126 | dgm.md 依赖清单: torch 2.13.0+cu130（未消解，复现以实际环境为准） |

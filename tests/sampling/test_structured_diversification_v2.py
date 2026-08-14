@@ -39,6 +39,29 @@ class DelayedModeModel(nn.Module):
         return log_rates, log_probs, log_probs.clone()
 
 
+class DelayedBosAnchorModel(nn.Module):
+    """Trigger one certain leading insertion after the initial Euler step."""
+
+    def __init__(self, vocab_size=16):
+        super().__init__()
+        self.anchor = nn.Parameter(torch.zeros(1))
+        self.vocab_size = vocab_size
+
+    def forward(self, tokens, time_step, padding_mask, origin_mask=None):
+        batch, length = tokens.shape
+        log_rates = torch.full(
+            (batch, length, 3), -20.0, device=tokens.device,
+        )
+        active = (time_step[:, 0] >= 0.25) & (time_step[:, 0] < 0.5)
+        log_rates[active, 0, 0] = 30.0  # INS immediately after BOS
+        logits = torch.full(
+            (batch, length, self.vocab_size), -10.0, device=tokens.device,
+        )
+        logits[:, :, 7] = 5.0
+        log_probs = torch.log_softmax(logits, dim=-1)
+        return log_rates, log_probs, log_probs.clone()
+
+
 def test_delayed_structured_uses_first_event_and_3x3_budget():
     model = DelayedModeModel()
     x_0 = torch.tensor([[BOS_TOKEN, 4, 5, 6, PAD_TOKEN]])
@@ -114,3 +137,27 @@ def test_delayed_structured_accumulates_stats_across_batch_rows():
     assert stats["trajectory_count"] == 18
     assert stats["final_slots"] == 18
     assert stats["selected_mode_rank_count"] == 6
+
+
+def test_delayed_structured_uses_bos_as_leading_insert_anchor():
+    model = DelayedBosAnchorModel()
+    x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+
+    results, records = sample_delayed_structured_diversification(
+        model,
+        x_0,
+        LinearScheduler(),
+        k_mode=1,
+        k_completion=1,
+        n_steps=4,
+        max_seq_len=32,
+        mode_pool_size=1,
+        base_seed=123,
+    )
+
+    action = records[0]["selected_actions"][0]
+    assert records[0]["trigger_t"] == 0.25
+    assert (action["position"], action["operation"], action["token"]) == (
+        0, "INS", 7,
+    )
+    assert results[0].tolist() == [BOS_TOKEN, 7, 4]

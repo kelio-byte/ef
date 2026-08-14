@@ -7,7 +7,11 @@ from tqdm import tqdm
 from edit_flows.core.rate_scale import apply_rate_parameterization, get_rate_scale
 from edit_flows.core.scheduler import KappaScheduler
 from edit_flows.guidance.sampling import apply_action_guidance
-from edit_flows.sampling.ops import apply_ins_del_operations
+from edit_flows.sampling.ops import (
+    apply_ins_del_operations,
+    edit_position_masks,
+    legal_token_log_probs,
+)
 from edit_flows.utils.tokens import (
     BOS_TOKEN,
     GAP_TOKEN,
@@ -34,15 +38,30 @@ def _sample_edit_actions(
     event_prob_mode: str = "poisson",
 ) -> dict:
     device = x_t.device
-    x_pad_mask = x_t == pad_token
 
+    legal_log_ins_probs, ins_log_normalizer = legal_token_log_probs(
+        log_ins_probs,
+    )
+    legal_log_sub_probs, sub_log_normalizer = legal_token_log_probs(
+        log_sub_probs,
+        current_tokens=x_t,
+    )
+    ins_probs = torch.exp(legal_log_ins_probs)
+    sub_probs = torch.exp(legal_log_sub_probs)
+
+    insert_positions, sub_del_positions = edit_position_masks(
+        x_t, pad_token=pad_token,
+    )
+    # Mask unsupported modes *before* drawing their Bernoulli events.  Merely
+    # clearing an already-drawn action would leave a silent no-op process at
+    # BOS/PAD (or when Q has no legal token), which is not the trained action
+    # space and wastes sampling work.
+    ins_sample_positions = insert_positions & torch.isfinite(ins_log_normalizer)
+    sub_sample_positions = sub_del_positions & torch.isfinite(sub_log_normalizer)
     rates = torch.exp(log_rates)
-    ins_probs = torch.exp(log_ins_probs)
-    sub_probs = torch.exp(log_sub_probs)
-
-    lambda_ins = rates[:, :, 0]
-    lambda_sub = rates[:, :, 1]
-    lambda_del = rates[:, :, 2]
+    lambda_ins = rates[:, :, 0] * ins_sample_positions.to(rates.dtype)
+    lambda_sub = rates[:, :, 1] * sub_sample_positions.to(rates.dtype)
+    lambda_del = rates[:, :, 2] * sub_del_positions.to(rates.dtype)
 
     ins_prob = _event_probability(adapt_h * lambda_ins, event_prob_mode)
     del_sub_prob = _event_probability(
@@ -60,14 +79,6 @@ def _sample_edit_actions(
     del_mask = torch.bernoulli(prob_del).bool()
     sub_mask = del_sub_mask & ~del_mask
 
-    non_pad_mask = ~x_pad_mask
-    # BOS is a structural sentinel, not an editable molecule token.  The
-    # training target keeps it unchanged, so allowing a sampled operation at
-    # column zero can corrupt the sequence header (and later make decoding or
-    # guidance-data construction fail).  Keep the same invariant at sampling
-    # time; the guard also handles empty sequences.
-    if non_pad_mask.shape[1] > 0:
-        non_pad_mask[:, 0] = False
     ins_tokens = torch.full(
         ins_probs.shape[:2], pad_token, dtype=torch.long, device=device,
     )
@@ -75,19 +86,24 @@ def _sample_edit_actions(
         sub_probs.shape[:2], pad_token, dtype=torch.long, device=device,
     )
 
-    if non_pad_mask.any():
+    if ins_sample_positions.any():
         ins_sampled = torch.multinomial(
-            ins_probs[non_pad_mask], num_samples=1, replacement=True,
+            ins_probs[ins_sample_positions], num_samples=1, replacement=True,
         ).squeeze(-1)
+        ins_tokens[ins_sample_positions] = ins_sampled
+    if sub_sample_positions.any():
         sub_sampled = torch.multinomial(
-            sub_probs[non_pad_mask], num_samples=1, replacement=True,
+            sub_probs[sub_sample_positions], num_samples=1, replacement=True,
         ).squeeze(-1)
-        ins_tokens[non_pad_mask] = ins_sampled
-        sub_tokens[non_pad_mask] = sub_sampled
+        sub_tokens[sub_sample_positions] = sub_sampled
 
-    ins_mask = ins_mask & non_pad_mask
-    del_mask = del_mask & non_pad_mask
-    sub_mask = sub_mask & non_pad_mask
+    # ``INS(pos=0)`` inserts after BOS and is therefore legal.  BOS itself is
+    # still protected because SUB/DEL use ``sub_del_positions``.
+    ins_mask = ins_mask & ins_sample_positions
+    del_mask = del_mask & sub_del_positions
+    sub_mask = sub_mask & sub_sample_positions
+    ins_tokens = ins_tokens.masked_fill(~ins_mask, pad_token)
+    sub_tokens = sub_tokens.masked_fill(~sub_mask, pad_token)
     return {
         "rates": rates,
         "ins_mask": ins_mask,
@@ -97,6 +113,10 @@ def _sample_edit_actions(
         "sub_tokens": sub_tokens,
         "ins_probs": ins_probs,
         "sub_probs": sub_probs,
+        "ins_token_log_normalizer": ins_log_normalizer,
+        "sub_token_log_normalizer": sub_log_normalizer,
+        "insert_position_mask": insert_positions,
+        "sub_del_position_mask": sub_del_positions,
     }
 
 
@@ -121,8 +141,10 @@ def sample_event_conditioned_atomic_actions(
     for offline event-conditioned proposal data, not as a replacement for
     :func:`sample_euler`.
 
-    The action support excludes structural tokens, BOS/PAD positions, no-op
-    substitutions, and insertions that would exceed ``max_seq_len``.  The
+    The action support excludes structural tokens, BOS substitution/deletion,
+    no-op substitutions, and insertions that would exceed ``max_seq_len``.
+    ``INS(pos=0)`` remains legal because it inserts immediately after BOS.
+    The
     returned masks contain exactly one action per batch row; an all-invalid
     row raises rather than silently emitting a no-op.
     """
@@ -154,11 +176,11 @@ def sample_event_conditioned_atomic_actions(
     if vocab_size < 1:
         raise ValueError("event-conditioned proposals require a positive vocabulary")
 
-    editable_positions = x_t != pad_token
-    editable_positions = editable_positions.clone()
-    editable_positions[:, 0] = False
+    insert_positions, editable_positions = edit_position_masks(
+        x_t, pad_token=pad_token,
+    )
     sequence_lengths = (x_t != pad_token).sum(dim=1)
-    insert_positions = editable_positions & (
+    insert_positions = insert_positions & (
         sequence_lengths.unsqueeze(1) < max_seq_len
     )
 
@@ -1119,8 +1141,6 @@ def sample_euler_oracle(
     if verbose:
         pbar = tqdm(total=n_steps, desc="Oracle Euler")
     while (t < 1.0).any():
-        x_pad_mask = x_t == pad_token
-
         log_rates, log_ins_probs, log_sub_probs, edit_dists = \
             compute_oracle_model_output(
                 x_t, x_1, t, scheduler, vocab_size,
@@ -1131,58 +1151,18 @@ def sample_euler_oracle(
             ts_list.append(t.squeeze(-1).cpu().clone())
             dists_list.append(torch.tensor(edit_dists, dtype=torch.float))
 
-        rates = torch.exp(log_rates)
-        ins_probs = torch.exp(log_ins_probs)
-        sub_probs = torch.exp(log_sub_probs)
-
-        lambda_ins = rates[:, :, 0]
-        lambda_sub = rates[:, :, 1]
-        lambda_del = rates[:, :, 2]
-
         adapt_h = get_adaptive_h(default_h, t, scheduler)
-
-        ins_prob = _event_probability(adapt_h * lambda_ins, event_prob_mode)
-        del_sub_prob = _event_probability(
-            adapt_h * (lambda_sub + lambda_del), event_prob_mode,
+        # Keep the oracle diagnostic on the exact same executable action
+        # support as the production Euler sampler: INS may anchor at BOS,
+        # while BOS SUB/DEL, structural outputs, and no-op substitutions are
+        # never sampled.
+        actions = _sample_edit_actions(
+            x_t, log_rates, log_ins_probs, log_sub_probs, adapt_h,
+            pad_token=pad_token, event_prob_mode=event_prob_mode,
         )
-
-        ins_mask = torch.rand_like(lambda_ins) < ins_prob
-        del_sub_mask = torch.rand_like(lambda_sub) < del_sub_prob
-
-        done = (t >= 1.0).squeeze(-1)
-        if done.any():
-            ins_mask[done] = False
-            del_sub_mask[done] = False
-
-        prob_del = torch.where(
-            del_sub_mask,
-            lambda_del / (lambda_sub + lambda_del + 1e-8),
-            torch.zeros_like(lambda_del),
-        )
-        del_mask = torch.bernoulli(prob_del).bool()
-        sub_mask = del_sub_mask & ~del_mask
-
-        non_pad_mask = ~x_pad_mask
-        ins_tokens = torch.full(
-            ins_probs.shape[:2], pad_token, dtype=torch.long, device=device,
-        )
-        sub_tokens = torch.full(
-            sub_probs.shape[:2], pad_token, dtype=torch.long, device=device,
-        )
-
-        if non_pad_mask.any():
-            ins_sampled = torch.multinomial(
-                ins_probs[non_pad_mask], num_samples=1, replacement=True,
-            ).squeeze(-1)
-            sub_sampled = torch.multinomial(
-                sub_probs[non_pad_mask], num_samples=1, replacement=True,
-            ).squeeze(-1)
-            ins_tokens[non_pad_mask] = ins_sampled
-            sub_tokens[non_pad_mask] = sub_sampled
-
-        x_t[sub_mask] = sub_tokens[sub_mask]
+        x_t[actions["sub_mask"]] = actions["sub_tokens"][actions["sub_mask"]]
         x_t = apply_ins_del_operations(
-            x_t, ins_mask, del_mask, ins_tokens,
+            x_t, actions["ins_mask"], actions["del_mask"], actions["ins_tokens"],
             max_seq_len=max_seq_len, pad_token=pad_token,
         )
 

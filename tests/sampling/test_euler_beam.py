@@ -85,7 +85,7 @@ def test_step_log_p_matches_complete_scalar_implementation():
     assert math.isclose(actual, expected, rel_tol=1e-6, abs_tol=1e-6)
 
 
-def test_beam_never_samples_bos_as_an_edit_position():
+def test_beam_uses_bos_as_an_insert_anchor_only():
     x_t = torch.tensor([[BOS_TOKEN, 7, PAD_TOKEN]])
     log_rates = torch.full((1, 3, 3), 20.0)
     log_probs = torch.log_softmax(torch.zeros(1, 3, 16), dim=-1)
@@ -100,9 +100,65 @@ def test_beam_never_samples_bos_as_an_edit_position():
         "poisson",
         step=0,
     )
-    assert not bool(actions["ins_mask"][0, 0])
+    assert bool(actions["ins_mask"][0, 0])
     assert not bool(actions["sub_mask"][0, 0])
     assert not bool(actions["del_mask"][0, 0])
+
+
+def test_beam_filters_special_tokens_and_noop_substitution():
+    x_t = torch.tensor([[BOS_TOKEN, 7, PAD_TOKEN]])
+    log_rates = torch.full((1, 3, 3), -1e9)
+    log_rates[0, 0, 0] = 20.0
+    log_rates[0, 1, 1] = 20.0
+    log_ins = torch.full((1, 3, 16), -1e9)
+    log_ins[:, :, PAD_TOKEN] = 0.0
+    log_ins[:, :, 9] = -0.1
+    log_sub = torch.full((1, 3, 16), -1e9)
+    log_sub[:, :, 7] = 0.0
+    log_sub[:, :, PAD_TOKEN] = -0.1
+    log_sub[:, :, 10] = -0.2
+
+    actions = _sample_actions_per_branch(
+        torch.tensor([123]),
+        x_t,
+        log_rates,
+        log_ins,
+        log_sub,
+        torch.tensor([[0.1]]),
+        PAD_TOKEN,
+        "poisson",
+        step=0,
+    )
+
+    assert bool(actions["ins_mask"][0, 0])
+    assert int(actions["ins_tokens"][0, 0].item()) == 9
+    assert bool(actions["sub_mask"][0, 1])
+    assert int(actions["sub_tokens"][0, 1].item()) == 10
+
+
+def test_step_score_ignores_bos_substitute_delete_mass():
+    x_t = torch.tensor([[BOS_TOKEN, PAD_TOKEN]])
+    log_rates = torch.full((1, 2, 3), -1e9)
+    log_rates[0, 0, 1] = 0.0
+    log_rates[0, 0, 2] = 0.0
+    log_probs = torch.log_softmax(torch.zeros(1, 2, 16), dim=-1)
+    actions = {
+        "ins_mask": torch.zeros(1, 2, dtype=torch.bool),
+        "sub_mask": torch.zeros(1, 2, dtype=torch.bool),
+        "del_mask": torch.zeros(1, 2, dtype=torch.bool),
+        "ins_tokens": torch.zeros(1, 2, dtype=torch.long),
+        "sub_tokens": torch.zeros(1, 2, dtype=torch.long),
+    }
+
+    score = _step_log_p(
+        actions,
+        log_rates,
+        log_probs,
+        log_probs,
+        adapt_h=0.1,
+        state_tokens=x_t,
+    )
+    assert abs(score) < 1e-6
 
 
 def test_step_log_p_no_events_includes_survival_probability():

@@ -159,10 +159,14 @@ def _legal_mode_candidates(
     non_pad = x_row != pad_token
     sequence_length = int(non_pad.sum().item())
     candidates: list[dict[str, Any]] = []
-    for position in range(1, x_row.shape[0]):
+    for position in range(x_row.shape[0]):
         if not bool(non_pad[position].item()):
             continue
         for operation in range(3):
+            # BOS anchors an insertion immediately after itself.  It is not
+            # eligible for SUB/DEL, which would mutate the sequence sentinel.
+            if position == 0 and operation != 0:
+                continue
             if operation == 0 and sequence_length >= max_seq_len:
                 continue
             log_rate = float(log_rates_row[position, operation].item())

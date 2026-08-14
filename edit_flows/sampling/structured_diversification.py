@@ -130,10 +130,14 @@ def _rank_direction_candidates(
     non_pad = x_row != pad_token
     sequence_length = int(non_pad.sum().item())
     direction_candidates: list[tuple[float, int, int]] = []
-    for position in range(1, x_row.shape[0]):
+    for position in range(x_row.shape[0]):
         if not bool(non_pad[position].item()):
             continue
         for operation in range(3):
+            # Position 0 is BOS: it is a legal anchor for insertion after
+            # BOS, but never a molecule token that may be substituted/deleted.
+            if position == 0 and operation != 0:
+                continue
             if operation == 0 and sequence_length >= max_seq_len:
                 continue
             score = float(log_rates_row[position, operation].item())
@@ -167,10 +171,12 @@ def _rank_concrete_fallbacks(
         forbidden_token_ids=forbidden_token_ids,
     )
     candidates: list[tuple[float, int, int, int, float]] = []
-    for position in range(1, x_row.shape[0]):
+    for position in range(x_row.shape[0]):
         if not bool(non_pad[position].item()):
             continue
         for operation in (0, 1):
+            if position == 0 and operation != 0:
+                continue
             if operation == 0:
                 if sequence_length >= max_seq_len:
                     continue
@@ -200,12 +206,13 @@ def _rank_concrete_fallbacks(
                     (score, position, operation, token,
                      float(token_score.item()))
                 )
-        operation = 2
-        score = float(log_rates_row[position, operation].item())
-        if math.isfinite(score) and score > -1e8:
-            action_key = (position, operation, -1)
-            if action_key not in selected_actions:
-                candidates.append((score, position, operation, -1, 0.0))
+        if position != 0:
+            operation = 2
+            score = float(log_rates_row[position, operation].item())
+            if math.isfinite(score) and score > -1e8:
+                action_key = (position, operation, -1)
+                if action_key not in selected_actions:
+                    candidates.append((score, position, operation, -1, 0.0))
     candidates.sort(key=lambda item: (-item[0], item[1], item[2], item[3]))
     return candidates
 

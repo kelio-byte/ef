@@ -2,7 +2,79 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from edit_flows.utils.tokens import PAD_TOKEN
+from edit_flows.utils.tokens import BOS_TOKEN, GAP_TOKEN, PAD_TOKEN, UNK_TOKEN
+
+
+# These IDs are model-internal structural symbols, not molecular output
+# tokens.  Training targets never select them as INSERT/SUBSTITUTE outputs.
+FORBIDDEN_OUTPUT_TOKEN_IDS = (PAD_TOKEN, BOS_TOKEN, GAP_TOKEN, UNK_TOKEN)
+# Model padding paths use a large finite negative sentinel rather than -inf.
+# Treat it as zero probability before conditional-Q renormalization, otherwise
+# an all-masked row could be accidentally revived as a uniform distribution.
+LOG_ZERO_CUTOFF = -1e8
+
+
+def edit_position_masks(
+    x_t: Tensor,
+    *,
+    pad_token: int = PAD_TOKEN,
+) -> tuple[Tensor, Tensor]:
+    """Return legal ``(insert, substitute/delete)`` position masks.
+
+    Position 0 contains BOS.  It is immutable as a token, so substitution and
+    deletion are forbidden there.  An insertion at position 0, however,
+    means *insert immediately after BOS* in :func:`apply_ins_del_operations`.
+    That is how a leading GAP in the aligned training target is represented,
+    so it must remain a legal insertion anchor.
+    """
+    if x_t.ndim != 2:
+        raise ValueError("x_t must have shape [batch, length]")
+    non_pad = x_t != pad_token
+    insert_positions = non_pad
+    sub_del_positions = non_pad.clone()
+    if sub_del_positions.shape[1] > 0:
+        sub_del_positions[:, 0] = False
+    return insert_positions, sub_del_positions
+
+
+def legal_token_log_probs(
+    log_probs: Tensor,
+    *,
+    current_tokens: Tensor | None = None,
+    forbidden_token_ids: tuple[int, ...] = FORBIDDEN_OUTPUT_TOKEN_IDS,
+) -> tuple[Tensor, Tensor]:
+    """Restrict a token posterior to the training-supported action space.
+
+    INSERT/SUBSTITUTE outputs may not be structural tokens.  For substitute,
+    ``current_tokens`` additionally removes the identity/no-op token at each
+    position.  The returned distribution is renormalized over the remaining
+    legal tokens; ``log_normalizer`` is returned so callers that score sampled
+    actions can use the same conditional probability.
+    """
+    if log_probs.ndim != 3:
+        raise ValueError("log_probs must have shape [batch, length, vocab]")
+    if current_tokens is not None and current_tokens.shape != log_probs.shape[:2]:
+        raise ValueError(
+            "current_tokens must have shape [batch, length] matching log_probs"
+        )
+
+    vocab_size = log_probs.shape[-1]
+    allowed = torch.ones(vocab_size, dtype=torch.bool, device=log_probs.device)
+    for token_id in forbidden_token_ids:
+        if 0 <= int(token_id) < vocab_size:
+            allowed[int(token_id)] = False
+
+    masked = log_probs.masked_fill(log_probs <= LOG_ZERO_CUTOFF, float("-inf"))
+    masked = masked.masked_fill(~allowed.view(1, 1, -1), float("-inf"))
+    if current_tokens is not None:
+        token_indices = current_tokens.clamp(0, vocab_size - 1).unsqueeze(-1)
+        masked = masked.scatter(2, token_indices, float("-inf"))
+
+    log_normalizer = torch.logsumexp(masked, dim=-1)
+    has_legal_token = torch.isfinite(log_normalizer).unsqueeze(-1)
+    normalized = masked - log_normalizer.unsqueeze(-1)
+    normalized = torch.where(has_legal_token, normalized, masked)
+    return normalized, log_normalizer
 
 
 def apply_ins_del_operations(

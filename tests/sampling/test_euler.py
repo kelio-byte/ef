@@ -10,6 +10,7 @@ from edit_flows.sampling.euler import (
     sample_event_conditioned_atomic_actions,
     sample_event_conditioned_euler_transition,
     sample_euler,
+    sample_euler_oracle,
 )
 from edit_flows.core.rate_scale import get_rate_scale
 from edit_flows.core.scheduler import CubicScheduler, LinearScheduler
@@ -90,7 +91,9 @@ class TestEventConditionedAtomicActions:
             position = int(first["position"][row].item())
             operation = int(first["operation"][row].item())
             token = int(first["token"][row].item())
-            assert position > 0
+            assert position > 0 or operation == 0
+            if position == 0:
+                assert operation == 0
             assert int(x_t[row, position].item()) != PAD_TOKEN
             if operation in (0, 1):
                 assert token not in {0, 1, 2, 3}
@@ -129,7 +132,25 @@ class TestEventConditionedAtomicActions:
         x_t = torch.tensor([[BOS_TOKEN, PAD_TOKEN]])
         log_rates, log_ins, log_sub = self._inputs(x_t)
         with pytest.raises(ValueError, match="no valid state-changing action"):
-            sample_event_conditioned_atomic_actions(x_t, log_rates, log_ins, log_sub)
+            sample_event_conditioned_atomic_actions(
+                x_t, log_rates, log_ins, log_sub, max_seq_len=1,
+            )
+
+    def test_can_select_leading_insert_from_bos_anchor(self):
+        x_t = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+        log_rates = torch.full((1, 3, 3), -1e9)
+        log_rates[0, 0, 0] = 0.0
+        log_ins = torch.full((1, 3, 16), -1e9)
+        log_sub = torch.full((1, 3, 16), -1e9)
+        log_ins[0, 0, 9] = 0.0
+
+        actions = sample_event_conditioned_atomic_actions(
+            x_t, log_rates, log_ins, log_sub, max_seq_len=16,
+        )
+
+        assert int(actions["position"][0].item()) == 0
+        assert int(actions["operation"][0].item()) == 0
+        assert int(actions["token"][0].item()) == 9
 
     def test_transition_advances_time_without_mutating_input(self, dummy_model):
         dummy_model.eval()
@@ -207,7 +228,7 @@ class TestSampleEuler:
         )
         assert torch.equal(baseline, guided)
 
-    def test_bos_is_never_sampled_as_an_edit_position(self):
+    def test_bos_is_an_insertion_anchor_but_not_an_editable_token(self):
         x_t = torch.tensor([[BOS_TOKEN, 7, PAD_TOKEN]])
         log_rates = torch.full((1, 3, 3), 20.0)
         log_probs = torch.log_softmax(torch.zeros(1, 3, 16), dim=-1)
@@ -219,9 +240,65 @@ class TestSampleEuler:
             torch.tensor([[0.1]]),
             pad_token=PAD_TOKEN,
         )
-        assert not bool(actions["ins_mask"][0, 0])
+        assert bool(actions["ins_mask"][0, 0])
         assert not bool(actions["sub_mask"][0, 0])
         assert not bool(actions["del_mask"][0, 0])
+
+    def test_sampling_filters_special_tokens_and_noop_substitution(self):
+        x_t = torch.tensor([[BOS_TOKEN, 7, PAD_TOKEN]])
+        log_rates = torch.full((1, 3, 3), -1e9)
+        log_rates[0, 0, 0] = 20.0
+        log_rates[0, 1, 1] = 20.0
+
+        log_ins = torch.full((1, 3, 16), -1e9)
+        log_ins[:, :, PAD_TOKEN] = 0.0
+        log_ins[:, :, 9] = -0.1
+        log_sub = torch.full((1, 3, 16), -1e9)
+        log_sub[:, :, 7] = 0.0  # identity/no-op substitution
+        log_sub[:, :, PAD_TOKEN] = -0.1
+        log_sub[:, :, 10] = -0.2
+
+        actions = _sample_edit_actions(
+            x_t,
+            log_rates,
+            log_ins,
+            log_sub,
+            torch.tensor([[0.1]]),
+            pad_token=PAD_TOKEN,
+        )
+
+        assert bool(actions["ins_mask"][0, 0])
+        assert int(actions["ins_tokens"][0, 0].item()) == 9
+        assert bool(actions["sub_mask"][0, 1])
+        assert int(actions["sub_tokens"][0, 1].item()) == 10
+
+    def test_oracle_sampler_uses_the_same_bos_action_support(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ):
+        def fake_oracle_output(x_t, x_1, t, scheduler, vocab_size, **kwargs):
+            batch, length = x_t.shape
+            log_rates = torch.full((batch, length, 3), -1e9)
+            log_rates[:, 0, :] = 20.0
+            log_ins = torch.full((batch, length, vocab_size), -1e9)
+            log_sub = torch.full_like(log_ins, -1e9)
+            log_ins[:, :, 9] = 0.0
+            log_sub[:, :, 10] = 0.0
+            return log_rates, log_ins, log_sub, [0] * batch
+
+        import edit_flows.sampling.oracle as oracle_module
+
+        monkeypatch.setattr(
+            oracle_module, "compute_oracle_model_output", fake_oracle_output,
+        )
+        x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+        x_1 = torch.tensor([[BOS_TOKEN, 9, 4, PAD_TOKEN]])
+
+        result, _ = sample_euler_oracle(
+            x_0, x_1, LinearScheduler(), vocab_size=16,
+            n_steps=1, max_seq_len=16,
+        )
+
+        assert result[0].tolist() == [BOS_TOKEN, 9, 4]
 
     def test_sampling_does_not_mutate_a_device_resident_input(self):
         class ForcedSubstitutionModel(nn.Module):
