@@ -431,6 +431,18 @@ def capture_rng_state(
     return state
 
 
+def _as_cpu_rng_state(value: torch.Tensor) -> torch.Tensor:
+    """Normalize a serialized RNG state for PyTorch restore APIs.
+
+    Checkpoints are loaded with ``map_location=device``.  When ``device`` is
+    CUDA, that remaps the CPU ByteTensors returned by the RNG APIs as well.
+    Both CPU and CUDA RNG restore functions expect their state tensor on CPU.
+    """
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"RNG state must be a tensor, got {type(value)!r}")
+    return value.detach().to(device="cpu", dtype=torch.uint8)
+
+
 def restore_rng_state(
     state: dict,
     train_generator: torch.Generator | None = None,
@@ -444,7 +456,7 @@ def restore_rng_state(
     if "numpy" in state:
         np.random.set_state(state["numpy"])
     if "torch" in state:
-        torch.set_rng_state(state["torch"])
+        torch.set_rng_state(_as_cpu_rng_state(state["torch"]))
     if torch.cuda.is_available() and cuda_device is None:
         if "cuda_device_rng" in state:
             raise ValueError("checkpoint has per-device CUDA RNG state but no CUDA device")
@@ -452,7 +464,9 @@ def restore_rng_state(
             torch.cuda.set_rng_state_all(state["cuda"])
     elif cuda_device is not None and cuda_device.type == "cuda":
         if "cuda_device_rng" in state:
-            torch.cuda.set_rng_state(state["cuda_device_rng"], cuda_device)
+            torch.cuda.set_rng_state(
+                _as_cpu_rng_state(state["cuda_device_rng"]), cuda_device,
+            )
         elif "cuda" in state:
             # Old single-process checkpoints contain a list of all visible
             # device RNG states.  In DDP restore only this rank's device so a
@@ -467,11 +481,15 @@ def restore_rng_state(
                         "checkpoint CUDA RNG state has fewer devices than "
                         f"requested device index {index}"
                     )
-                torch.cuda.set_rng_state(cuda_states[index], cuda_device)
+                torch.cuda.set_rng_state(
+                    _as_cpu_rng_state(cuda_states[index]), cuda_device,
+                )
             else:
-                torch.cuda.set_rng_state(cuda_states, cuda_device)
+                torch.cuda.set_rng_state(
+                    _as_cpu_rng_state(cuda_states), cuda_device,
+                )
     if train_generator is not None and "train_loader" in state:
-        train_generator.set_state(state["train_loader"])
+        train_generator.set_state(_as_cpu_rng_state(state["train_loader"]))
 
 
 def log_metrics(writer, prefix: str, metrics: dict, step: int) -> None:
