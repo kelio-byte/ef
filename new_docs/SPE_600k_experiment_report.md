@@ -6,6 +6,9 @@
 
 本文记录 SPE 分支从 50k pilot 到 600k 主训练的主要实验数据，并说明训练收敛、吞吐和采样结果的正确解读。评估结果均注明数据范围，避免把子集结果误认为完整 USPTO-50K test 结果。
 
+按要求整理的 Atom-level / Fragment-level 必填数据清单见
+[`SPE_atom_fragment_required_data.txt`](SPE_atom_fragment_required_data.txt)。
+
 ## 1. 结论摘要
 
 - SPE 600k 训练链路稳定完成 600,000 steps，没有 NaN/Inf 或 monitor anomaly。
