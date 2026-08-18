@@ -2,7 +2,7 @@
 
 记录日期：2026-08-18 UTC<br>
 训练环境：conda `ef`，单卡 NVIDIA GeForce RTX 3090 24 GB，14 vCPU Intel Xeon Gold 6330<br>
-当前状态：训练已完成；20% shuffled test 子集上的 SPE 对照和 original baseline 评估已完成；完整 test 尚未完成。
+当前状态：训练已完成；20% shuffled test 子集和 validation-dev 上的 SPE 对照已完成；P1/P2 continuation 尚未启动；完整 test 尚未完成。
 
 本文记录 SPE 分支从 50k pilot 到 600k 主训练的主要实验数据，并说明训练收敛、吞吐和采样结果的正确解读。评估结果均注明数据范围，避免把子集结果误认为完整 USPTO-50K test 结果。
 
@@ -13,6 +13,8 @@
 - 本报告的主问题是 SPE 是否优于原 tokenizer，而不是比较两个 sampler。为此，使用同一组 1,001 个 reaction blocks、同一 ordinary Euler N=9 protocol，比较 SPE `checkpoint_step600000.pt` 和 `new_checkpoints/checkpoint_step600000.pt`。
 - 原 tokenizer baseline 的 Top-1/3/5/10 为 **58.541% / 77.622% / 81.918% / 85.614%**，Oracle **90.909%**；SPE final 为 **51.349% / 70.330% / 74.825% / 77.323%**，Oracle **87.612%**。因此当前 600k SPE 在准确率上仍落后 baseline 约 7–8 pp，Oracle 落后 3.297 pp。
 - SPE 的 ordinary Euler 采样速度约为 baseline 的 **2.42×**（58.73% 时间节省），true-unique 候选多 13.929 个/reaction，但 invalid 首候选高 10.185 pp、valid 候选少 18.570 个/reaction。速度和表面多样性收益尚未转化为更高准确率。
+- 在冻结的 validation-dev（1,000 reaction blocks、seed 42）上，原 tokenizer / SPE final 的 Top-1/3/5/10 为 **56.300% / 76.500% / 80.300% / 83.900%** 与 **50.000% / 68.700% / 73.300% / 77.200%**；Oracle 为 **90.200%** 与 **87.200%**。这与 test 子集方向一致，说明差距不是单个 test 子集的偶然波动。
+- SPE Euler 从 100 增至 200 steps 的小规模检查（前 200 个 validation-dev reaction blocks）只使 Top-3 提高 3.5 pp、Top-5 提高 1.5 pp，Oracle 下降 0.5 pp，首候选 invalid 基本不变（+0.2 pp），采样时间约翻倍；目前没有证据表明积分步数是主要瓶颈。
 - R9K1M2/Euler N=9 的结果保留为 SPE 内部 sampler 对照，不作为判断 SPE 有效性的主证据。
 - 这组结果只能作为 20% 子集上的正式预评估，不能替代完整 test。完整 test 有 5,007 个 reaction block、100,140 行；目前没有完整 test 的最终 Top-K 报告。
 - batch 256/512 的吞吐探针只带来约 4.0%–6.1% 的 pairs/s 提升，却改变了有效 batch、学习率和梯度裁剪设置；因此 600k 主训练仍采用原始 batch 128，未把探针结果当作质量结论。
@@ -174,7 +176,7 @@ step 600k 的单个 monitor batch 为 loss 3.0129；该值与 step 580k 的 2.06
 | scorer | 项目正式 `#global#` scorer，Top-K 到 10，按 20 augmentation 聚合 |
 | 输出 | 每组 180,180 条预测（20,020 输入行 × 9 samples） |
 
-当前评估使用包含 action-support 修复的代码状态，metadata 记录 commit `21ec988`。修复的核心是允许合法的 `INS(pos=0)`，禁止改写/删除 BOS，并过滤 special/no-op token；两组模型使用同一套修复后的 sampler 逻辑。
+当前评估使用包含 action-support 修复的代码状态；采样 metadata 记录当前分支 commit `717900a`（工作区仍有实验产物变更）。修复的核心是允许合法的 `INS(pos=0)`，禁止改写/删除 BOS，并过滤 special/no-op token；两组模型使用同一套修复后的 sampler 逻辑。
 
 ### 5.2 主结果：SPE vs 原 tokenizer baseline
 
@@ -231,6 +233,9 @@ step 600k 的单个 monitor batch 为 loss 3.0129；该值与 step 580k 的 2.06
 - [best Euler N=9](../results/spe600k_subset20_seed20260815_best_euler_n9/)
 - [best R9K1M2](../results/spe600k_subset20_seed20260815_best_r9k1m2/)
 - [原 tokenizer matched baseline Euler N=9](../results/original600k_subset20_seed20260815_euler_n9/)
+- [validation-dev 原 tokenizer Euler N=9](../results/spe_followup_p0_dev_original_seed42/)
+- [validation-dev SPE Euler N=9，100 steps](../results/spe_followup_p0_dev_spe_seed42/)
+- [validation-dev SPE Euler N=9，200 steps（前 200 blocks）](../results/spe_followup_p0_dev_spe_nsteps200_200rxn_seed42/)
 
 训练摘要：[training_summary.json](../checkpoints/retro_spe_600k/USPTO_50K_PtoR_aug20_%23global%23_SPE/2026-08-14_15-24-14/training_summary.json)。<br>
 训练日志：[resume_attempt_3.log](../checkpoints/retro_spe_600k/USPTO_50K_PtoR_aug20_%23global%23_SPE/2026-08-14_15-24-14/resume_attempt_3.log)。
@@ -284,7 +289,7 @@ step 600k 的单个 monitor batch 为 loss 3.0129；该值与 step 580k 的 2.06
 
 1. 从 `val` 的 5,001 个 reaction blocks 中，以固定 seed 抽取约 1,000 个完整 block；每个 block 保留 20 条 augmentation。
 2. 为原 tokenizer 和 SPE 各生成一个 matched 表示，并验证去掉 token 空格后的 src/tgt 化学字符串及 reaction indices 完全一致。
-3. 在该 **validation-dev** 上先评估原 tokenizer 600k baseline 和当前 SPE 600k final，使用相同 ordinary Euler：`N=9`、100 steps、cubic、相同 scorer/augmentation/n-best；候选模型用两个 sampling seed 报告均值与范围。
+3. 在该 **validation-dev** 上先评估原 tokenizer 600k baseline 和当前 SPE 600k final，使用相同 ordinary Euler：`N=9`、100 steps、cubic、相同 scorer/augmentation/n-best；本轮先固定 sampling seed=42 完成可比性检查，若后续候选达到继续门槛，再补 seed=43 的均值与范围。
 4. 所有调参与模型选择只依据 validation-dev。只有通过预设门槛的候选，才在当前冻结的 20% test 子集上确认；完整 5,007-block test 留给最终结论。
 
 这样可以避免把 test 集变成超参数搜索集，也能区分 checkpoint/sampler 随机性与真实改进。
@@ -309,11 +314,13 @@ step 600k 的单个 monitor batch 为 loss 3.0129；该值与 step 580k 的 2.06
 
 | 实验 ID | 状态 | checkpoint / sampler | 关键设置 | Top-1 | Top-3 | Top-5 | Top-10 | Oracle | Invalid | true-unique | 时间 | 结论 |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| P0-base | 待执行 | original 600k / Euler | validation-dev，N=9，100 steps，seed 42/43 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | baseline 参照 |
-| P0-spe100 | 待执行 | SPE final 600k / Euler | 同上，100 steps | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 当前 SPE 参照 |
-| P0-spe200 | 待执行 | SPE final 600k / Euler | 同上，200 steps | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 判断积分步数是否是主因 |
+| P0-base | 已完成 | original 600k / Euler | validation-dev，N=9，100 steps，seed 42，1,000 blocks | 56.300% | 76.500% | 80.300% | 83.900% | 90.200% | 11.740% | 22.463 | 3492.5 s | baseline 参照 |
+| P0-spe100 | 已完成 | SPE final 600k / Euler | 同上，100 steps，1,000 blocks | 50.000% | 68.700% | 73.300% | 77.200% | 87.200% | 22.275% | 36.500 | 1464.1 s | 当前 SPE 参照 |
+| P0-spe200 | 已完成（小规模） | SPE final 600k / Euler | 前 200 blocks，N=9，200 steps，seed 42 | 46.500% | 67.500% | 72.000% | 75.000% | 87.000% | 22.475% | 37.655 | 581.0 s | n=200 未改变 Oracle/invalid，暂不继续加步数 |
 
-P0 的判读规则：若 200 steps 仅带来很小的 Top-K/Oracle 变化，且 invalid 基本不降，则停止继续增加 Euler steps；问题主要在模型/表示，而非数值积分。若 200 steps 明显降低 invalid 并提升 Oracle，则将其作为 SPE 的速度匹配推理协议，但仍需与原 tokenizer 在实际时间预算下重新比较。
+P0-spe200 只评分 validation-dev 的前 200 个 reaction blocks；为避免样本范围不同造成误读，n=100 在同一前 200 个 blocks 上的对应结果为 Top-1/3/5/10 = **45.500% / 64.000% / 70.500% / 75.000%**、Oracle **87.500%**、invalid **22.275%**、true-unique **37.615**、valid **138.545**，采样时间按完整 n=100 结果折算约 **292.8 s**。因此同范围比较中，n=200 相对 n=100 为 Top-1 **+1.0 pp**、Top-3 **+3.5 pp**、Top-5 **+1.5 pp**、Top-10 **+0.0 pp**、Oracle **−0.5 pp**、invalid **+0.2 pp**，耗时约 **1.98×**。
+
+P0 的判读规则：若 200 steps 仅带来很小的 Top-K/Oracle 变化，且 invalid 基本不降，则停止继续增加 Euler steps；问题主要在模型/表示，而非数值积分。当前结果符合这一情形：Top-3/Top-5 有小幅改善，但 Oracle 未改善、invalid 未下降、Top-10 不变且耗时近似翻倍。因此暂不把 n=200 设为默认协议，也不继续扫描更高步数；后续优先验证训练适配和表示机制。
 
 P0 已先完成 20 个 reaction blocks 的 smoke check。原 tokenizer 和 SPE 均在 `conda ef`、CUDA、当前 action-support 修复代码下成功生成并评分；scorer 正确识别 `20 reactions × 20 augmentations × 9 candidates` 的布局。smoke 仅用于链路检查，不用于质量结论：
 
@@ -322,7 +329,7 @@ P0 已先完成 20 个 reaction blocks 的 smoke check。原 tokenizer 和 SPE �
 | original，20 reactions | 45.0% | 55.0% | 85.0% | 8.25% | 23.70 | 165.35 | 68.4 s |
 | SPE，20 reactions | 55.0% | 65.0% | 85.0% | 24.0% | 37.15 | 137.60 | 32.1 s |
 
-smoke 期间曾错误地从 base Python 3.8 启动，触发 `tuple[...]` 类型错误；显式激活 `ef`（Python 3.10）后通过。该失败属于环境调用错误，不属于模型、数据或 checkpoint 错误。完整 validation-dev 的 seed 42 结果仍待填入下表。
+smoke 期间曾错误地从 base Python 3.8 启动，触发 `tuple[...]` 类型错误；显式激活 `ef`（Python 3.10）后通过。该失败属于环境调用错误，不属于模型、数据或 checkpoint 错误。完整 validation-dev 的 seed 42 结果已填入上表；本轮尚未补 seed 43，因为当前 SPE 尚未达到进入多 seed 训练/调参的门槛。
 
 #### P1：两条受限的训练 continuation
 
@@ -356,7 +363,7 @@ P1 的判读规则：候选至少应做到 **Top-1 提升 ≥2.0 pp，且同时�
 
 ### 8.4 分阶段止损与继续标准
 
-为了避免“只要略有改善就继续训练”的无止境搜索，预先采用三层标准。所有百分比比较均在 validation-dev 上以两个 sampling seed 的均值判断，并在冻结 test 子集确认。
+为了避免“只要略有改善就继续训练”的无止境搜索，预先采用三层标准。当前 P0 先以 seed=42 做固定协议筛查；只有候选达到继续门槛，才在 validation-dev 上补第二个 sampling seed，并在冻结 test 子集确认。
 
 | 决策层级 | 继续条件 | 停止条件 | 后续动作 |
 |---|---|---|---|
@@ -376,4 +383,4 @@ P1 的判读规则：候选至少应做到 **Top-1 提升 ≥2.0 pp，且同时�
 4. **机制证据**：结合 mode/token 诊断和 invalid 分类，判断提升来自更好的 token 预测、更多有效候选，还是仅来自更激进的采样。
 5. **决策**：明确写“进入下一阶段”“停止超参分支”“停止当前 SPE 主线”三者之一，并引用本节的对应门槛。
 
-本节写入时尚未启动 P0/P1/P2。现有 600k checkpoint、原 tokenizer baseline、20% test 子集结果和所有历史产物均保持不变。
+本次更新已完成 P0 的 validation-dev 对照和 n_steps=200 小规模敏感性检查；P1 continuation 与 P2 medium-vocab SPE 尚未启动。现有 600k checkpoint、原 tokenizer baseline、20% test 子集结果和所有历史产物均保持不变。
