@@ -103,6 +103,8 @@ SPE / Atom-level 对比必填数据
 - Adam epsilon：1e-8
 - 峰值学习率（Peak LR）：6.987712e-4
   （Noam factor=1.0、d_model=256、warmup=8,000；理论峰值在 warmup 末端）
+  - 说明：修复后的 `train_retro.py` 在每次 update 前设置该 Noam LR；历史旧训练路径的
+    第一次 optimizer update 曾误用 Adam 默认 `1e-3`，这不属于配置中的预期 peak LR。
 - Warm-up 步数：8,000
 - 学习率衰减策略：[ ] Cosine Decay [x] Inverse Sqrt [ ] Step Decay
   [x] 其他：Noam（warmup 后按 inverse-square-root 衰减）
