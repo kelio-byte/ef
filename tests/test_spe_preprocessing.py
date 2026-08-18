@@ -28,13 +28,27 @@ def test_preprocess_is_lossless_and_builds_train_only_vocab(tmp_path):
         source,
         output,
         codes,
+        merges=1,
         max_lines=1,
         cache_reset_interval=1,
     )
     assert metadata["splits"]["train"]["pair_count"] == 1
-    assert (output / "train/src-train.txt").read_text().splitlines() == ["CCO"]
+    assert metadata["merges"] == 1
+    assert (output / "train/src-train.txt").read_text().splitlines() == ["C C O"]
     assert (output / "example.vocab.src").is_file()
     assert "<GAP>" not in (output / "train/src-train.txt").read_text()
+
+
+def test_preprocess_rejects_invalid_merge_count(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    with pytest.raises(ValueError, match="merges"):
+        preprocess(
+            source,
+            tmp_path / "output",
+            Path("scripts/preprocessing/SPE_ChEMBL.txt"),
+            merges=-2,
+        )
 
 
 def test_preprocess_rejects_writing_over_source(tmp_path):

@@ -79,7 +79,7 @@ def _paired_lines(
                 break
 
 
-def _load_tokenizer(codes_path: Path):
+def _load_tokenizer(codes_path: Path, *, merges: int = -1):
     try:
         from SmilesPE.tokenizer import SPE_Tokenizer
     except ImportError as exc:  # pragma: no cover - environment dependent
@@ -89,7 +89,7 @@ def _load_tokenizer(codes_path: Path):
         ) from exc
     codes = codes_path.open()
     try:
-        tokenizer = SPE_Tokenizer(codes)
+        tokenizer = SPE_Tokenizer(codes, merges=merges)
     finally:
         codes.close()
     return tokenizer
@@ -225,6 +225,7 @@ def preprocess(
     codes_path: Path = DEFAULT_CODES_PATH,
     *,
     splits: Sequence[str] = SPLITS,
+    merges: int = -1,
     max_lines: int | None = None,
     cache_reset_interval: int = 50_000,
 ) -> dict:
@@ -232,6 +233,8 @@ def preprocess(
     _validate_paths(source_dir, output_dir, codes_path)
     if max_lines is not None and max_lines < 1:
         raise ValueError("max_lines must be positive when provided")
+    if merges < -1:
+        raise ValueError("merges must be -1 (all rules) or non-negative")
     if cache_reset_interval < 0:
         raise ValueError("cache_reset_interval must be non-negative")
     unknown_splits = sorted(set(splits) - set(SPLITS))
@@ -239,7 +242,7 @@ def preprocess(
         raise ValueError(f"unknown split(s): {unknown_splits}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    tokenizer = _load_tokenizer(codes_path)
+    tokenizer = _load_tokenizer(codes_path, merges=merges)
     split_stats = {}
     for split in splits:
         split_stats[split] = _tokenize_split(
@@ -262,6 +265,7 @@ def preprocess(
         "codes_path": str(codes_path.resolve()),
         "codes_sha256": _sha256(codes_path),
         "smilespe_version": "0.0.3",
+        "merges": merges,
         "dropout": 0,
         "max_lines": max_lines,
         "cache_reset_interval": cache_reset_interval,
@@ -280,6 +284,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--codes", type=Path, default=DEFAULT_CODES_PATH)
     parser.add_argument(
+        "--merges", type=int, default=-1,
+        help="Use only the first K merge rules; -1 uses the complete codes file",
+    )
+    parser.add_argument(
         "--splits", nargs="+", choices=SPLITS, default=list(SPLITS),
     )
     parser.add_argument(
@@ -296,6 +304,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.output_dir,
         args.codes,
         splits=args.splits,
+        merges=args.merges,
         max_lines=args.max_lines,
         cache_reset_interval=args.cache_reset_interval,
     )
