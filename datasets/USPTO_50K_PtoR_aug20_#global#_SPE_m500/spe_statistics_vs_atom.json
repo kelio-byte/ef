@@ -1,0 +1,602 @@
+{
+  "baseline": {
+    "aggregate": {
+      "edit_distance_total": 5752040,
+      "operations": {
+        "DEL": {
+          "count": 52980,
+          "rate": 0.009210645266722762
+        },
+        "INS": {
+          "count": 5248098,
+          "rate": 0.9123889959040619
+        },
+        "SUB": {
+          "count": 450962,
+          "rate": 0.07840035882921538
+        }
+      },
+      "pair_count": 1000220
+    },
+    "dataset_dir": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#",
+    "max_seq_len": 256,
+    "splits": {
+      "test": {
+        "alignment": {
+          "aligned_length": {
+            "count": 100140,
+            "max": 157,
+            "mean": 50.67023167565409,
+            "median": 49.0,
+            "p90": 74.0
+          },
+          "edit_distance": {
+            "count": 100140,
+            "max": 68,
+            "mean": 5.842330736968244,
+            "median": 4.0,
+            "p90": 16.0
+          },
+          "gap_token_count": 539732,
+          "operations": {
+            "DEL": {
+              "count": 5389,
+              "rate": 0.00921116278751767
+            },
+            "INS": {
+              "count": 534343,
+              "rate": 0.9133272142086758
+            },
+            "SUB": {
+              "count": 45319,
+              "rate": 0.0774616230038065
+            }
+          },
+          "pair_count": 100140,
+          "projection_mismatch_count": 0,
+          "total_edit_operations": 585051
+        },
+        "integrity": {
+          "aligned_projection_match": true,
+          "aligned_token_length_match": true,
+          "raw_aligned_line_count_match": true,
+          "source_target_line_count_match": true,
+          "spe_round_trip_failure_count": 0,
+          "unaligned_gap_token_count": 0
+        },
+        "oov": {
+          "combined": {
+            "line_count": 100140,
+            "oov_line_count": 21,
+            "oov_line_rate": 0.0002097064110245656,
+            "oov_token_count": 44,
+            "oov_token_rate": 4.579277810422478e-06,
+            "token_count": 9608502
+          },
+          "src": {
+            "line_count": 100140,
+            "oov_line_count": 21,
+            "oov_line_rate": 0.0002097064110245656,
+            "oov_token_count": 22,
+            "oov_token_rate": 4.846056213370974e-06,
+            "token_count": 4539774
+          },
+          "tgt": {
+            "line_count": 100140,
+            "oov_line_count": 21,
+            "oov_line_rate": 0.0002097064110245656,
+            "oov_token_count": 22,
+            "oov_token_rate": 4.340339430326504e-06,
+            "token_count": 5068728
+          }
+        },
+        "pair_count": 100140,
+        "src_length": {
+          "count": 100140,
+          "max": 153,
+          "mean": 45.334272019173156,
+          "median": 44.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 68.0
+        },
+        "tgt_length": {
+          "count": 100140,
+          "max": 157,
+          "mean": 50.61641701617735,
+          "median": 49.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 74.0
+        }
+      },
+      "train": {
+        "alignment": {
+          "aligned_length": {
+            "count": 800060,
+            "max": 164,
+            "mean": 50.808943079269056,
+            "median": 50.0,
+            "p90": 74.0
+          },
+          "edit_distance": {
+            "count": 800060,
+            "max": 57,
+            "mean": 5.740896932730045,
+            "median": 4.0,
+            "p90": 15.0
+          },
+          "gap_token_count": 4231368,
+          "operations": {
+            "DEL": {
+              "count": 42451,
+              "rate": 0.00924241823863906
+            },
+            "INS": {
+              "count": 4188917,
+              "rate": 0.9120096789462019
+            },
+            "SUB": {
+              "count": 361694,
+              "rate": 0.07874790281515903
+            }
+          },
+          "pair_count": 800060,
+          "projection_mismatch_count": 0,
+          "total_edit_operations": 4593062
+        },
+        "integrity": {
+          "aligned_projection_match": true,
+          "aligned_token_length_match": true,
+          "raw_aligned_line_count_match": true,
+          "source_target_line_count_match": true,
+          "spe_round_trip_failure_count": 0,
+          "unaligned_gap_token_count": 0
+        },
+        "oov": {
+          "combined": {
+            "line_count": 800060,
+            "oov_line_count": 0,
+            "oov_line_rate": 0.0,
+            "oov_token_count": 0,
+            "oov_token_rate": 0.0,
+            "token_count": 77069038
+          },
+          "src": {
+            "line_count": 800060,
+            "oov_line_count": 0,
+            "oov_line_rate": 0.0,
+            "oov_token_count": 0,
+            "oov_token_rate": 0.0,
+            "token_count": 36461286
+          },
+          "tgt": {
+            "line_count": 800060,
+            "oov_line_count": 0,
+            "oov_line_rate": 0.0,
+            "oov_token_count": 0,
+            "oov_token_rate": 0.0,
+            "token_count": 40607752
+          }
+        },
+        "pair_count": 800060,
+        "src_length": {
+          "count": 800060,
+          "max": 160,
+          "mean": 45.57318951078669,
+          "median": 45.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 67.0
+        },
+        "tgt_length": {
+          "count": 800060,
+          "max": 164,
+          "mean": 50.75588330875184,
+          "median": 50.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 74.0
+        }
+      },
+      "val": {
+        "alignment": {
+          "aligned_length": {
+            "count": 100020,
+            "max": 132,
+            "mean": 50.73429314137172,
+            "median": 50.0,
+            "p90": 73.0
+          },
+          "edit_distance": {
+            "count": 100020,
+            "max": 55,
+            "mean": 5.738122375524895,
+            "median": 4.0,
+            "p90": 15.0
+          },
+          "gap_token_count": 529978,
+          "operations": {
+            "DEL": {
+              "count": 5140,
+              "rate": 0.008955842816246666
+            },
+            "INS": {
+              "count": 524838,
+              "rate": 0.9144682163411026
+            },
+            "SUB": {
+              "count": 43949,
+              "rate": 0.07657594084265072
+            }
+          },
+          "pair_count": 100020,
+          "projection_mismatch_count": 0,
+          "total_edit_operations": 573927
+        },
+        "integrity": {
+          "aligned_projection_match": true,
+          "aligned_token_length_match": true,
+          "raw_aligned_line_count_match": true,
+          "source_target_line_count_match": true,
+          "spe_round_trip_failure_count": 0,
+          "unaligned_gap_token_count": 0
+        },
+        "oov": {
+          "combined": {
+            "line_count": 100020,
+            "oov_line_count": 20,
+            "oov_line_rate": 0.0001999600079984003,
+            "oov_token_count": 40,
+            "oov_token_rate": 4.158475336602588e-06,
+            "token_count": 9618910
+          },
+          "src": {
+            "line_count": 100020,
+            "oov_line_count": 20,
+            "oov_line_rate": 0.0001999600079984003,
+            "oov_token_count": 20,
+            "oov_token_rate": 4.395985058925982e-06,
+            "token_count": 4549606
+          },
+          "tgt": {
+            "line_count": 100020,
+            "oov_line_count": 20,
+            "oov_line_rate": 0.0001999600079984003,
+            "oov_token_count": 20,
+            "oov_token_rate": 3.945314780885108e-06,
+            "token_count": 5069304
+          }
+        },
+        "pair_count": 100020,
+        "src_length": {
+          "count": 100020,
+          "max": 130,
+          "mean": 45.4869626074785,
+          "median": 45.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 67.0
+        },
+        "tgt_length": {
+          "count": 100020,
+          "max": 132,
+          "mean": 50.68290341931613,
+          "median": 50.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 73.0
+        }
+      }
+    },
+    "vocab": {
+      "model_vocab_size": 73,
+      "path": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/example.vocab.src",
+      "sha256": "60237c2047ca3fbca24f2486f4c718d4241a8a80c56920f9f46269381cab3732",
+      "token_count": 69
+    }
+  },
+  "comparison": {
+    "model_vocab_size_delta": 499,
+    "vocab_token_count_delta": 499
+  },
+  "created_at_utc": "2026-08-18T09:46:58.229564+00:00",
+  "schema_version": 1,
+  "spe": {
+    "aggregate": {
+      "edit_distance_total": 4128124,
+      "operations": {
+        "DEL": {
+          "count": 25366,
+          "rate": 0.006144679762526513
+        },
+        "INS": {
+          "count": 2779918,
+          "rate": 0.6734095196752811
+        },
+        "SUB": {
+          "count": 1322840,
+          "rate": 0.3204458005621924
+        }
+      },
+      "pair_count": 1000220
+    },
+    "dataset_dir": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500",
+    "max_seq_len": 256,
+    "splits": {
+      "test": {
+        "alignment": {
+          "aligned_length": {
+            "count": 100140,
+            "max": 60,
+            "mean": 16.04128220491312,
+            "median": 15.0,
+            "p90": 24.0
+          },
+          "edit_distance": {
+            "count": 100140,
+            "max": 32,
+            "mean": 4.144567605352506,
+            "median": 4.0,
+            "p90": 7.0
+          },
+          "gap_token_count": 281911,
+          "operations": {
+            "DEL": {
+              "count": 2638,
+              "rate": 0.00635605982117257
+            },
+            "INS": {
+              "count": 279273,
+              "rate": 0.6728869956172582
+            },
+            "SUB": {
+              "count": 133126,
+              "rate": 0.3207569445615692
+            }
+          },
+          "pair_count": 100140,
+          "projection_mismatch_count": 0,
+          "total_edit_operations": 415037
+        },
+        "integrity": {
+          "aligned_projection_match": true,
+          "aligned_token_length_match": true,
+          "raw_aligned_line_count_match": true,
+          "source_target_line_count_match": true,
+          "spe_round_trip_failure_count": 0,
+          "unaligned_gap_token_count": 0
+        },
+        "oov": {
+          "combined": {
+            "line_count": 100140,
+            "oov_line_count": 21,
+            "oov_line_rate": 0.0002097064110245656,
+            "oov_token_count": 44,
+            "oov_token_rate": 1.5012776213757367e-05,
+            "token_count": 2930837
+          },
+          "src": {
+            "line_count": 100140,
+            "oov_line_count": 21,
+            "oov_line_rate": 0.0002097064110245656,
+            "oov_token_count": 22,
+            "oov_token_rate": 1.6577487320106005e-05,
+            "token_count": 1327101
+          },
+          "tgt": {
+            "line_count": 100140,
+            "oov_line_count": 21,
+            "oov_line_rate": 0.0002097064110245656,
+            "oov_token_count": 22,
+            "oov_token_rate": 1.3717968543451042e-05,
+            "token_count": 1603736
+          }
+        },
+        "pair_count": 100140,
+        "src_length": {
+          "count": 100140,
+          "max": 50,
+          "mean": 13.25245656081486,
+          "median": 13.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 20.0
+        },
+        "tgt_length": {
+          "count": 100140,
+          "max": 60,
+          "mean": 16.014939085280606,
+          "median": 15.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 23.0
+        }
+      },
+      "train": {
+        "alignment": {
+          "aligned_length": {
+            "count": 800060,
+            "max": 60,
+            "mean": 16.046751493637977,
+            "median": 15.0,
+            "p90": 23.0
+          },
+          "edit_distance": {
+            "count": 800060,
+            "max": 30,
+            "mean": 4.127404194685399,
+            "median": 4.0,
+            "p90": 7.0
+          },
+          "gap_token_count": 2243170,
+          "operations": {
+            "DEL": {
+              "count": 20364,
+              "rate": 0.006166852049757568
+            },
+            "INS": {
+              "count": 2222806,
+              "rate": 0.673134734694236
+            },
+            "SUB": {
+              "count": 1059001,
+              "rate": 0.32069841325600645
+            }
+          },
+          "pair_count": 800060,
+          "projection_mismatch_count": 0,
+          "total_edit_operations": 3302171
+        },
+        "integrity": {
+          "aligned_projection_match": true,
+          "aligned_token_length_match": true,
+          "raw_aligned_line_count_match": true,
+          "source_target_line_count_match": true,
+          "spe_round_trip_failure_count": 0,
+          "unaligned_gap_token_count": 0
+        },
+        "oov": {
+          "combined": {
+            "line_count": 800060,
+            "oov_line_count": 0,
+            "oov_line_rate": 0.0,
+            "oov_token_count": 0,
+            "oov_token_rate": 0.0,
+            "token_count": 23433558
+          },
+          "src": {
+            "line_count": 800060,
+            "oov_line_count": 0,
+            "oov_line_rate": 0.0,
+            "oov_token_count": 0,
+            "oov_token_rate": 0.0,
+            "token_count": 10615558
+          },
+          "tgt": {
+            "line_count": 800060,
+            "oov_line_count": 0,
+            "oov_line_rate": 0.0,
+            "oov_token_count": 0,
+            "oov_token_rate": 0.0,
+            "token_count": 12818000
+          }
+        },
+        "pair_count": 800060,
+        "src_length": {
+          "count": 800060,
+          "max": 57,
+          "mean": 13.268452366072545,
+          "median": 13.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 20.0
+        },
+        "tgt_length": {
+          "count": 800060,
+          "max": 60,
+          "mean": 16.021298402619802,
+          "median": 15.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 23.0
+        }
+      },
+      "val": {
+        "alignment": {
+          "aligned_length": {
+            "count": 100020,
+            "max": 55,
+            "mean": 16.06130773845231,
+            "median": 16.0,
+            "p90": 23.0
+          },
+          "edit_distance": {
+            "count": 100020,
+            "max": 23,
+            "mean": 4.108338332333533,
+            "median": 4.0,
+            "p90": 7.0
+          },
+          "gap_token_count": 280203,
+          "operations": {
+            "DEL": {
+              "count": 2364,
+              "rate": 0.005753000613264025
+            },
+            "INS": {
+              "count": 277839,
+              "rate": 0.6761454895891131
+            },
+            "SUB": {
+              "count": 130713,
+              "rate": 0.31810150979762286
+            }
+          },
+          "pair_count": 100020,
+          "projection_mismatch_count": 0,
+          "total_edit_operations": 410916
+        },
+        "integrity": {
+          "aligned_projection_match": true,
+          "aligned_token_length_match": true,
+          "raw_aligned_line_count_match": true,
+          "source_target_line_count_match": true,
+          "spe_round_trip_failure_count": 0,
+          "unaligned_gap_token_count": 0
+        },
+        "oov": {
+          "combined": {
+            "line_count": 100020,
+            "oov_line_count": 20,
+            "oov_line_rate": 0.0001999600079984003,
+            "oov_token_count": 40,
+            "oov_token_rate": 1.3639303836292891e-05,
+            "token_count": 2932701
+          },
+          "src": {
+            "line_count": 100020,
+            "oov_line_count": 20,
+            "oov_line_rate": 0.0001999600079984003,
+            "oov_token_count": 20,
+            "oov_token_rate": 1.505329241848454e-05,
+            "token_count": 1328613
+          },
+          "tgt": {
+            "line_count": 100020,
+            "oov_line_count": 20,
+            "oov_line_rate": 0.0001999600079984003,
+            "oov_token_count": 20,
+            "oov_token_rate": 1.2468143892355034e-05,
+            "token_count": 1604088
+          }
+        },
+        "pair_count": 100020,
+        "src_length": {
+          "count": 100020,
+          "max": 47,
+          "mean": 13.283473305338932,
+          "median": 13.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 20.0
+        },
+        "tgt_length": {
+          "count": 100020,
+          "max": 55,
+          "mean": 16.037672465506898,
+          "median": 15.0,
+          "over_threshold_count": 0,
+          "over_threshold_rate": 0.0,
+          "p90": 23.0
+        }
+      }
+    },
+    "vocab": {
+      "model_vocab_size": 572,
+      "path": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/example.vocab.src",
+      "sha256": "efb4e3ef2b62c57799287c53089f69abeaadfce1644679907f0fa241003d6483",
+      "token_count": 568
+    }
+  }
+}

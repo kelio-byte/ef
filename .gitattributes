@@ -2,4 +2,13 @@ datasets/USPTO_50K_PtoR_aug20/train/train_aligned_src.txt filter=lfs diff=lfs me
 datasets/USPTO_50K_PtoR_aug20_#global#_SPE/train/*.txt filter=lfs diff=lfs merge=lfs -text
 datasets/USPTO_50K_PtoR_aug20_#global#_SPE/val/*.txt filter=lfs diff=lfs merge=lfs -text
 datasets/USPTO_50K_PtoR_aug20_#global#_SPE/test/*.txt filter=lfs diff=lfs merge=lfs -text
+datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/train/*.txt filter=lfs diff=lfs merge=lfs -text
+datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/val/*.txt filter=lfs diff=lfs merge=lfs -text
+datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/test/*.txt filter=lfs diff=lfs merge=lfs -text
+datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m1000/train/*.txt filter=lfs diff=lfs merge=lfs -text
+datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m1000/val/*.txt filter=lfs diff=lfs merge=lfs -text
+datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m1000/test/*.txt filter=lfs diff=lfs merge=lfs -text
+datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m2000/train/*.txt filter=lfs diff=lfs merge=lfs -text
+datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m2000/val/*.txt filter=lfs diff=lfs merge=lfs -text
+datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m2000/test/*.txt filter=lfs diff=lfs merge=lfs -text
 checkpoints/retro_spe_600k/USPTO_50K_PtoR_aug20_#global#_SPE/2026-08-14_15-24-14/checkpoint_step600000.pt filter=lfs diff=lfs merge=lfs -text
