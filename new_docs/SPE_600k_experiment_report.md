@@ -289,6 +289,14 @@ step 600k 的单个 monitor batch 为 loss 3.0129；该值与 step 580k 的 2.06
 
 这样可以避免把 test 集变成超参数搜索集，也能区分 checkpoint/sampler 随机性与真实改进。
 
+本轮实际采用项目已经构造并审计过的
+`datasets/USPTO_50K_PtoR_aug20_#global#/evaluation_v2/dev_unique1000_aug20/`
+作为 validation-dev：它包含 1,000 个 reaction blocks，选择 seed 为 `20260811`，并隔离了原始 reaction index `[0, 600)`。随后用
+[`scripts/project_reaction_split.py`](../scripts/project_reaction_split.py)
+将完全相同的 reaction indices 投影到
+`datasets/USPTO_50K_PtoR_aug20_#global#_SPE/evaluation_v2/dev_unique1000_aug20/`。
+逐行去除 token 空格后，SPE 与原 tokenizer 的 20,000 条 source/target 字符串均一致；投影脚本、SPE split manifest 和数据已提交。
+
 ### 8.3 待执行任务与实验登记表
 
 #### P0：不训练的诊断与采样敏感性检查
@@ -306,6 +314,15 @@ step 600k 的单个 monitor batch 为 loss 3.0129；该值与 step 580k 的 2.06
 | P0-spe200 | 待执行 | SPE final 600k / Euler | 同上，200 steps | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 判断积分步数是否是主因 |
 
 P0 的判读规则：若 200 steps 仅带来很小的 Top-K/Oracle 变化，且 invalid 基本不降，则停止继续增加 Euler steps；问题主要在模型/表示，而非数值积分。若 200 steps 明显降低 invalid 并提升 Oracle，则将其作为 SPE 的速度匹配推理协议，但仍需与原 tokenizer 在实际时间预算下重新比较。
+
+P0 已先完成 20 个 reaction blocks 的 smoke check。原 tokenizer 和 SPE 均在 `conda ef`、CUDA、当前 action-support 修复代码下成功生成并评分；scorer 正确识别 `20 reactions × 20 augmentations × 9 candidates` 的布局。smoke 仅用于链路检查，不用于质量结论：
+
+| smoke | Top-1 | Top-3 | Oracle | 首候选 invalid | true-unique / reaction | valid / reaction | 采样时间 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| original，20 reactions | 45.0% | 55.0% | 85.0% | 8.25% | 23.70 | 165.35 | 68.4 s |
+| SPE，20 reactions | 55.0% | 65.0% | 85.0% | 24.0% | 37.15 | 137.60 | 32.1 s |
+
+smoke 期间曾错误地从 base Python 3.8 启动，触发 `tuple[...]` 类型错误；显式激活 `ef`（Python 3.10）后通过。该失败属于环境调用错误，不属于模型、数据或 checkpoint 错误。完整 validation-dev 的 seed 42 结果仍待填入下表。
 
 #### P1：两条受限的训练 continuation
 
