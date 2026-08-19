@@ -29,6 +29,7 @@ from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 import json
+from multiprocessing import Pool
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
@@ -39,6 +40,11 @@ DEFAULT_OUTPUT_DIR = Path(
 )
 DEFAULT_CODES_PATH = Path("scripts/preprocessing/SPE_ChEMBL.txt")
 SPLITS = ("train", "val", "test")
+
+
+_WORKER_TOKENIZER = None
+_WORKER_CACHE_RESET_INTERVAL = 0
+_WORKER_PAIR_COUNT = 0
 
 
 def _sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -107,12 +113,65 @@ def tokenize_smiles(tokenizer, smiles: str) -> list[str]:
     return tokens
 
 
+def _tokenize_pair(
+    pair: tuple[int, str, str],
+    tokenizer,
+) -> tuple[list[str], list[str]]:
+    """Tokenize one source/target pair and retain the source line number."""
+    line_no, src_line, tgt_line = pair
+    src_smiles = restore_smiles(src_line)
+    tgt_smiles = restore_smiles(tgt_line)
+    if not src_smiles or not tgt_smiles:
+        raise ValueError(f"empty reconstructed SMILES at line {line_no}")
+    src_tokens = tokenize_smiles(tokenizer, src_smiles)
+    tgt_tokens = tokenize_smiles(tokenizer, tgt_smiles)
+    if "<GAP>" in src_tokens or "<GAP>" in tgt_tokens:
+        raise ValueError(
+            f"<GAP> appeared in unaligned SPE tokens at line {line_no}"
+        )
+    return src_tokens, tgt_tokens
+
+
+def _init_tokenizer_worker(
+    codes_path: str,
+    merges: int,
+    cache_reset_interval: int,
+) -> None:
+    """Create one deterministic SPE tokenizer per multiprocessing worker."""
+    global _WORKER_TOKENIZER
+    global _WORKER_CACHE_RESET_INTERVAL
+    global _WORKER_PAIR_COUNT
+    _WORKER_TOKENIZER = _load_tokenizer(Path(codes_path), merges=merges)
+    _WORKER_CACHE_RESET_INTERVAL = cache_reset_interval
+    _WORKER_PAIR_COUNT = 0
+
+
+def _tokenize_pair_worker(
+    pair: tuple[int, str, str],
+) -> tuple[list[str], list[str]]:
+    """Worker entry point; Pool.imap preserves the input/output order."""
+    global _WORKER_PAIR_COUNT
+    if _WORKER_TOKENIZER is None:  # pragma: no cover - defensive guard
+        raise RuntimeError("SPE tokenizer worker was not initialized")
+    result = _tokenize_pair(pair, _WORKER_TOKENIZER)
+    _WORKER_PAIR_COUNT += 1
+    if (
+        _WORKER_CACHE_RESET_INTERVAL > 0
+        and _WORKER_PAIR_COUNT % _WORKER_CACHE_RESET_INTERVAL == 0
+    ):
+        _WORKER_TOKENIZER.cache.clear()
+    return result
+
+
 def _tokenize_split(
     source_dir: Path,
     output_dir: Path,
     split: str,
     tokenizer,
     *,
+    codes_path: Path,
+    merges: int,
+    num_workers: int,
     max_lines: int | None,
     cache_reset_interval: int,
 ) -> dict:
@@ -132,41 +191,152 @@ def _tokenize_split(
     tgt_token_count = 0
     src_max_tokens = 0
     tgt_max_tokens = 0
-    with (
-        out_src_path.open("w") as out_src,
-        out_tgt_path.open("w") as out_tgt,
-    ):
-        for line_no, src_line, tgt_line in _paired_lines(
-            src_path, tgt_path, max_lines=max_lines,
+    pairs = _paired_lines(src_path, tgt_path, max_lines=max_lines)
+    pool = None
+    if num_workers == 1:
+        tokenized_pairs = (
+            _tokenize_pair(pair, tokenizer)
+            for pair in pairs
+        )
+    else:
+        pool = Pool(
+            processes=num_workers,
+            initializer=_init_tokenizer_worker,
+            initargs=(str(codes_path), merges, cache_reset_interval),
+        )
+        tokenized_pairs = pool.imap(_tokenize_pair_worker, pairs, chunksize=200)
+
+    try:
+        with (
+            out_src_path.open("w") as out_src,
+            out_tgt_path.open("w") as out_tgt,
         ):
-            src_smiles = restore_smiles(src_line)
-            tgt_smiles = restore_smiles(tgt_line)
-            if not src_smiles or not tgt_smiles:
+            for src_tokens, tgt_tokens in tokenized_pairs:
+                out_src.write(" ".join(src_tokens) + "\n")
+                out_tgt.write(" ".join(tgt_tokens) + "\n")
+                pair_count += 1
+                src_token_count += len(src_tokens)
+                tgt_token_count += len(tgt_tokens)
+                src_max_tokens = max(src_max_tokens, len(src_tokens))
+                tgt_max_tokens = max(tgt_max_tokens, len(tgt_tokens))
+                if (
+                    num_workers == 1
+                    and cache_reset_interval > 0
+                    and pair_count % cache_reset_interval == 0
+                ):
+                    # SmilesPE caches every unique complete SMILES. Bounding
+                    # it keeps the full run memory-stable without changing
+                    # deterministic tokenization.
+                    tokenizer.cache.clear()
+    except BaseException:
+        if pool is not None:
+            pool.terminate()
+        raise
+    else:
+        if pool is not None:
+            pool.close()
+    finally:
+        if pool is not None:
+            pool.join()
+
+    return {
+        "pair_count": pair_count,
+        "src_token_count": src_token_count,
+        "tgt_token_count": tgt_token_count,
+        "src_mean_tokens": src_token_count / pair_count if pair_count else 0.0,
+        "tgt_mean_tokens": tgt_token_count / pair_count if pair_count else 0.0,
+        "src_max_tokens": src_max_tokens,
+        "tgt_max_tokens": tgt_max_tokens,
+        "source_sha256": {
+            "src": _sha256(src_path),
+            "tgt": _sha256(tgt_path),
+        },
+        "output_sha256": {
+            "src": _sha256(out_src_path),
+            "tgt": _sha256(out_tgt_path),
+        },
+    }
+
+
+def _summarize_existing_split(
+    source_dir: Path,
+    output_dir: Path,
+    split: str,
+    *,
+    max_lines: int | None,
+) -> dict:
+    """Validate and summarize an already tokenized split.
+
+    This is the safe recovery path after an interrupted preprocessing job that
+    finished writing the split files but stopped before vocabulary/metadata
+    finalization.  It checks every saved token sequence reconstructs exactly
+    to its original input SMILES, so it cannot silently accept shifted,
+    truncated, or malformed output.
+    """
+    split_source_dir = source_dir / split
+    split_output_dir = output_dir / split
+    src_path = split_source_dir / f"src-{split}.txt"
+    tgt_path = split_source_dir / f"tgt-{split}.txt"
+    out_src_path = split_output_dir / f"src-{split}.txt"
+    out_tgt_path = split_output_dir / f"tgt-{split}.txt"
+    for path in (src_path, tgt_path, out_src_path, out_tgt_path):
+        if not path.is_file():
+            raise FileNotFoundError(path)
+
+    pair_count = 0
+    src_token_count = 0
+    tgt_token_count = 0
+    src_max_tokens = 0
+    tgt_max_tokens = 0
+    with (
+        src_path.open() as src_handle,
+        tgt_path.open() as tgt_handle,
+        out_src_path.open() as out_src_handle,
+        out_tgt_path.open() as out_tgt_handle,
+    ):
+        while max_lines is None or pair_count < max_lines:
+            src_line = src_handle.readline()
+            tgt_line = tgt_handle.readline()
+            out_src_line = out_src_handle.readline()
+            out_tgt_line = out_tgt_handle.readline()
+            if not any((src_line, tgt_line, out_src_line, out_tgt_line)):
+                break
+            if not all((src_line, tgt_line, out_src_line, out_tgt_line)):
                 raise ValueError(
-                    f"empty reconstructed SMILES at {split}:{line_no}"
+                    "source/target/output line-count mismatch at "
+                    f"{split}:{pair_count + 1}"
                 )
-            src_tokens = tokenize_smiles(tokenizer, src_smiles)
-            tgt_tokens = tokenize_smiles(tokenizer, tgt_smiles)
+
+            pair_count += 1
+            src_tokens = out_src_line.split()
+            tgt_tokens = out_tgt_line.split()
             if "<GAP>" in src_tokens or "<GAP>" in tgt_tokens:
                 raise ValueError(
                     f"<GAP> appeared in unaligned SPE tokens at "
-                    f"{split}:{line_no}"
+                    f"{split}:{pair_count}"
                 )
-            out_src.write(" ".join(src_tokens) + "\n")
-            out_tgt.write(" ".join(tgt_tokens) + "\n")
-            pair_count += 1
+            if "".join(src_tokens) != restore_smiles(src_line):
+                raise ValueError(
+                    f"saved source SPE tokens do not reconstruct input at "
+                    f"{split}:{pair_count}"
+                )
+            if "".join(tgt_tokens) != restore_smiles(tgt_line):
+                raise ValueError(
+                    f"saved target SPE tokens do not reconstruct input at "
+                    f"{split}:{pair_count}"
+                )
             src_token_count += len(src_tokens)
             tgt_token_count += len(tgt_tokens)
             src_max_tokens = max(src_max_tokens, len(src_tokens))
             tgt_max_tokens = max(tgt_max_tokens, len(tgt_tokens))
-            if (
-                cache_reset_interval > 0
-                and pair_count % cache_reset_interval == 0
-            ):
-                # SmilesPE caches every unique complete SMILES.  Bounding the
-                # cache keeps the full 2M-line run memory-stable without
-                # changing deterministic tokenization.
-                tokenizer.cache.clear()
+
+        # A partial --max-lines build deliberately ignores trailing source
+        # records, but its saved output must contain exactly that many lines.
+        if out_src_handle.readline() or out_tgt_handle.readline():
+            raise ValueError(
+                "existing tokenized output has more lines than requested at "
+                f"{split}"
+            )
 
     return {
         "pair_count": pair_count,
@@ -219,6 +389,62 @@ def _validate_paths(source_dir: Path, output_dir: Path, codes_path: Path) -> Non
         raise FileNotFoundError(source_dir)
 
 
+def _validate_options(
+    *,
+    splits: Sequence[str],
+    merges: int,
+    num_workers: int,
+    max_lines: int | None,
+    cache_reset_interval: int,
+) -> None:
+    if max_lines is not None and max_lines < 1:
+        raise ValueError("max_lines must be positive when provided")
+    if merges < -1:
+        raise ValueError("merges must be -1 (all rules) or non-negative")
+    if num_workers < 1:
+        raise ValueError("num_workers must be positive")
+    if cache_reset_interval < 0:
+        raise ValueError("cache_reset_interval must be non-negative")
+    unknown_splits = sorted(set(splits) - set(SPLITS))
+    if unknown_splits:
+        raise ValueError(f"unknown split(s): {unknown_splits}")
+
+
+def _make_metadata(
+    *,
+    source_dir: Path,
+    output_dir: Path,
+    codes_path: Path,
+    merges: int,
+    num_workers: int,
+    max_lines: int | None,
+    cache_reset_interval: int,
+    split_stats: dict,
+    vocab_stats: dict | None,
+    finalized_existing_outputs: bool = False,
+) -> dict:
+    metadata = {
+        "schema_version": 1,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "source_dir": str(source_dir.resolve()),
+        "output_dir": str(output_dir.resolve()),
+        "codes_path": str(codes_path.resolve()),
+        "codes_sha256": _sha256(codes_path),
+        "smilespe_version": "0.0.3",
+        "merges": merges,
+        "num_workers": num_workers,
+        "dropout": 0,
+        "max_lines": max_lines,
+        "cache_reset_interval": cache_reset_interval,
+        "source_kind": "unaligned src/tgt only; old aligned files ignored",
+        "splits": split_stats,
+        "vocab": vocab_stats,
+    }
+    if finalized_existing_outputs:
+        metadata["finalized_existing_outputs"] = True
+    return metadata
+
+
 def preprocess(
     source_dir: Path = DEFAULT_SOURCE_DIR,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
@@ -226,20 +452,19 @@ def preprocess(
     *,
     splits: Sequence[str] = SPLITS,
     merges: int = -1,
+    num_workers: int = 1,
     max_lines: int | None = None,
     cache_reset_interval: int = 50_000,
 ) -> dict:
     """Create the SPE unaligned files and training-only vocabulary."""
     _validate_paths(source_dir, output_dir, codes_path)
-    if max_lines is not None and max_lines < 1:
-        raise ValueError("max_lines must be positive when provided")
-    if merges < -1:
-        raise ValueError("merges must be -1 (all rules) or non-negative")
-    if cache_reset_interval < 0:
-        raise ValueError("cache_reset_interval must be non-negative")
-    unknown_splits = sorted(set(splits) - set(SPLITS))
-    if unknown_splits:
-        raise ValueError(f"unknown split(s): {unknown_splits}")
+    _validate_options(
+        splits=splits,
+        merges=merges,
+        num_workers=num_workers,
+        max_lines=max_lines,
+        cache_reset_interval=cache_reset_interval,
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     tokenizer = _load_tokenizer(codes_path, merges=merges)
@@ -250,6 +475,9 @@ def preprocess(
             output_dir,
             split,
             tokenizer,
+            codes_path=codes_path,
+            merges=merges,
+            num_workers=num_workers,
             max_lines=max_lines,
             cache_reset_interval=cache_reset_interval,
         )
@@ -257,22 +485,70 @@ def preprocess(
     if "train" in splits:
         vocab_stats = build_vocab(output_dir)
 
-    metadata = {
-        "schema_version": 1,
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "source_dir": str(source_dir.resolve()),
-        "output_dir": str(output_dir.resolve()),
-        "codes_path": str(codes_path.resolve()),
-        "codes_sha256": _sha256(codes_path),
-        "smilespe_version": "0.0.3",
-        "merges": merges,
-        "dropout": 0,
-        "max_lines": max_lines,
-        "cache_reset_interval": cache_reset_interval,
-        "source_kind": "unaligned src/tgt only; old aligned files ignored",
-        "splits": split_stats,
-        "vocab": vocab_stats,
+    metadata = _make_metadata(
+        source_dir=source_dir,
+        output_dir=output_dir,
+        codes_path=codes_path,
+        merges=merges,
+        num_workers=num_workers,
+        max_lines=max_lines,
+        cache_reset_interval=cache_reset_interval,
+        split_stats=split_stats,
+        vocab_stats=vocab_stats,
+    )
+    metadata_path = output_dir / "spe_preprocessing_metadata.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+    return metadata
+
+
+def finalize_existing(
+    source_dir: Path = DEFAULT_SOURCE_DIR,
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
+    codes_path: Path = DEFAULT_CODES_PATH,
+    *,
+    splits: Sequence[str] = SPLITS,
+    merges: int = -1,
+    num_workers: int = 1,
+    max_lines: int | None = None,
+    cache_reset_interval: int = 50_000,
+) -> dict:
+    """Recover vocabulary and metadata after a completed-token-file crash.
+
+    Existing unaligned output is fully checked against source SMILES before
+    anything is written.  ``num_workers`` records the worker count used to
+    produce those files; no new tokenization workers are started here.
+    """
+    _validate_paths(source_dir, output_dir, codes_path)
+    _validate_options(
+        splits=splits,
+        merges=merges,
+        num_workers=num_workers,
+        max_lines=max_lines,
+        cache_reset_interval=cache_reset_interval,
+    )
+
+    split_stats = {
+        split: _summarize_existing_split(
+            source_dir,
+            output_dir,
+            split,
+            max_lines=max_lines,
+        )
+        for split in splits
     }
+    vocab_stats = build_vocab(output_dir) if "train" in splits else None
+    metadata = _make_metadata(
+        source_dir=source_dir,
+        output_dir=output_dir,
+        codes_path=codes_path,
+        merges=merges,
+        num_workers=num_workers,
+        max_lines=max_lines,
+        cache_reset_interval=cache_reset_interval,
+        split_stats=split_stats,
+        vocab_stats=vocab_stats,
+        finalized_existing_outputs=True,
+    )
     metadata_path = output_dir / "spe_preprocessing_metadata.json"
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
     return metadata
@@ -288,6 +564,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Use only the first K merge rules; -1 uses the complete codes file",
     )
     parser.add_argument(
+        "--num-workers", type=int, default=1,
+        help="Parallel SPE tokenization workers; 1 preserves historical serial behavior",
+    )
+    parser.add_argument(
         "--splits", nargs="+", choices=SPLITS, default=list(SPLITS),
     )
     parser.add_argument(
@@ -298,13 +578,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--cache-reset-interval", type=int, default=50_000,
         help="Clear SmilesPE's complete-SMILES cache periodically; 0 disables",
     )
+    parser.add_argument(
+        "--finalize-existing", action="store_true",
+        help=(
+            "Validate existing unaligned output and write its vocabulary/metadata "
+            "without re-tokenizing (interrupted-build recovery)"
+        ),
+    )
     args = parser.parse_args(argv)
-    metadata = preprocess(
+    builder = finalize_existing if args.finalize_existing else preprocess
+    metadata = builder(
         args.source_dir,
         args.output_dir,
         args.codes,
         splits=args.splits,
         merges=args.merges,
+        num_workers=args.num_workers,
         max_lines=args.max_lines,
         cache_reset_interval=args.cache_reset_interval,
     )
