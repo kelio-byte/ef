@@ -7,6 +7,7 @@ from scripts.sample_retro import (
     _apply_sampling_seed,
     _build_sampling_metadata,
     _infer_augmentation,
+    _make_center_bias_batch,
     _outputs_per_product,
     _select_products,
 )
@@ -51,6 +52,36 @@ def test_euler_beam_output_count_uses_runs_times_branches(tmp_path):
     assert _outputs_per_product(args) == 9
     args.sampler = "euler"
     assert _outputs_per_product(args) == 99
+
+
+def test_center_bias_batch_assigns_components_cyclically():
+    product_ids = [[4, 5]]
+    component_a = {
+        "component_id": 0,
+        "atom_maps": [1],
+        "position_scores": [[0.0, 0.0, 0.0]] * 3,
+    }
+    component_b = {
+        "component_id": 1,
+        "atom_maps": [2],
+        "position_scores": [[1.0, 1.0, 1.0]] * 3,
+    }
+    records = [{
+        "input_row_index": 7,
+        "reaction_position": 2,
+        "augmentation_index": 3,
+        "oracle_components": [component_a, component_b],
+    }]
+    scores, metadata = _make_center_bias_batch(
+        product_ids,
+        records,
+        n_samples=5,
+        source="oracle",
+        global_start=7,
+    )
+    assert scores.shape == (5, 3, 3)
+    assert torch.equal(scores[:, 0, 0], torch.tensor([0., 1., 0., 1., 0.]))
+    assert [item["component_id"] for item in metadata] == [0, 1, 0, 1, 0]
 
 
 def test_structured_output_count_uses_trajectory_budget(tmp_path):

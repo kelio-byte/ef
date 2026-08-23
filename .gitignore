@@ -45,6 +45,11 @@ datasets/**/.ipynb_checkpoints/
 datasets/USPTO_50K_PtoR_aug20_#global#_SPE/.ipynb_checkpoints/
 datasets/USPTO_50K_PtoR_aug20_#global#_SPE/*/.ipynb_checkpoints/
 results/
+# Compact, reviewable Stage reports belong with the After-SPE documentation.
+!after_spe/results/
+!after_spe/results/**
+# The broad report allow-rule above must not re-include notebook autosaves.
+after_spe/results/**/.ipynb_checkpoints/
 visualizations/
 analysis_outputs/
 test_sample/

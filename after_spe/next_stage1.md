@@ -1,7 +1,22 @@
 # After-SPE 第一阶段详细计划：反应中心引导首次编辑
 
 更新日期：2026-08-24
-状态：执行前冻结版计划；当前只规划，不修改代码、不训练、不推理。
+状态：执行中。S0–S3/RC0 已完成；S4/RC1 的 CPU 实现、sidecar 和测试已完成，等待 GPU smoke。
+
+## 0. 当前执行进度（2026-08-24）
+
+| 阶段 | 状态 | 当前结论 |
+|---|---|---|
+| S0 baseline 与哈希冻结 | 已完成 | 历史指标可参考，但缺少完整本地预测，因此 RC1 必须同协议重跑 B0 |
+| S1 图级中心标签与 crosswalk | 已完成 | train/val 全部 processed block 可匹配；原始 train 多 5 条被历史预处理过滤的反应 |
+| S2 图中心到 M500 token 映射 | 已完成 | 20,000/20,000 个抽样视图逐 token 精确复现，映射可用 |
+| S3/RC0 局部性审计 | 已完成 | radius-1 仅占 28.737% token，却覆盖 91.088% 已有-token 编辑和 96.343% INS 入口，RC0 通过 |
+| S4/RC1 CPU 准备 | 已完成 | true/pseudo sidecar、首事件位置 bias、hazard 守恒和诊断均通过测试 |
+| S4/RC1 GPU 实验 | 待执行 | 下一步先跑 10 reaction smoke，再决定是否跑 100 与 dev-1000 |
+| S5/RC2 中心预测器 | 未开始 | 只有 RC1 true-center upper bound 通过后才训练 |
+
+当前详细结果见 `after_spe/results/stage1/`。GPU 命令冻结在
+`after_spe/results/stage1/rc1_commands.md`。
 
 ## 1. 第一阶段究竟要回答什么
 

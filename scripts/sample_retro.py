@@ -106,6 +106,102 @@ def _make_batch(product_ids: list[list[int]], n_samples: int,
     return x_0.repeat_interleave(n_samples, dim=0)
 
 
+def _load_center_bias_sidecar(
+    sidecar_dir: str,
+    products_file: str,
+) -> tuple[dict, list[dict]]:
+    directory = os.path.abspath(sidecar_dir)
+    metadata_path = os.path.join(directory, "metadata.json")
+    scores_path = os.path.join(directory, "scores.jsonl")
+    with open(metadata_path) as handle:
+        metadata = json.load(handle)
+    expected_sha256 = metadata["files"]["m500_products"]["sha256"]
+    actual_sha256 = _sha256_file(products_file)
+    if actual_sha256 != expected_sha256:
+        raise ValueError(
+            "center sidecar/input product SHA256 mismatch: "
+            f"{actual_sha256} != {expected_sha256}"
+        )
+    records = []
+    with open(scores_path) as handle:
+        for line_number, line in enumerate(handle):
+            record = json.loads(line)
+            if record.get("status") != "ok":
+                raise ValueError(
+                    "center sidecar contains a failed row at "
+                    f"line {line_number + 1}: {record.get('error')}"
+                )
+            if record.get("input_row_index") != line_number:
+                raise ValueError(
+                    "center sidecar rows are not contiguous input order"
+                )
+            records.append(record)
+    if len(records) != int(metadata["input_row_count"]):
+        raise ValueError(
+            "center sidecar row count differs from metadata: "
+            f"{len(records)} != {metadata['input_row_count']}"
+        )
+    if _sha256_file(scores_path) != metadata["files"]["scores"]["sha256"]:
+        raise ValueError("center sidecar scores SHA256 differs from metadata")
+    return metadata, records
+
+
+def _make_center_bias_batch(
+    product_ids: list[list[int]],
+    sidecar_records: list[dict],
+    *,
+    n_samples: int,
+    source: str,
+    global_start: int,
+) -> tuple[Tensor, list[dict]]:
+    if len(product_ids) != len(sidecar_records):
+        raise ValueError("center sidecar batch does not match product batch")
+    component_field = f"{source}_components"
+    max_length = max(len(ids) for ids in product_ids) + 1
+    scores = torch.zeros(
+        len(product_ids) * n_samples, max_length, 3, dtype=torch.float32
+    )
+    row_metadata = []
+    output_row = 0
+    for product_offset, (ids, record) in enumerate(
+        zip(product_ids, sidecar_records)
+    ):
+        components = record.get(component_field, [])[:3]
+        if not components:
+            raise ValueError(
+                f"center sidecar row {record['input_row_index']} has no "
+                f"{source} component"
+            )
+        for trajectory_index in range(n_samples):
+            component = components[trajectory_index % len(components)]
+            component_scores = torch.tensor(
+                component["position_scores"], dtype=torch.float32
+            )
+            expected_length = len(ids) + 1
+            if component_scores.shape != (expected_length, 3):
+                raise ValueError(
+                    "center score shape differs from tokenized product: "
+                    f"{tuple(component_scores.shape)} != "
+                    f"({expected_length}, 3)"
+                )
+            scores[output_row, :expected_length] = component_scores
+            row_metadata.append(
+                {
+                    "global_input_row": global_start + product_offset,
+                    "input_row_index": record["input_row_index"],
+                    "reaction_position": record["reaction_position"],
+                    "augmentation_index": record["augmentation_index"],
+                    "trajectory_index": trajectory_index,
+                    "center_source": source,
+                    "component_id": component["component_id"],
+                    "component_atom_maps": component["atom_maps"],
+                    "pseudo_relaxation": component.get("relaxation"),
+                }
+            )
+            output_row += 1
+    return scores, row_metadata
+
+
 def _make_euler_beam_sample_seeds(
     base_seed: int,
     global_start: int,
@@ -286,6 +382,7 @@ def _build_sampling_metadata(
     euler_beam_stats: dict | None = None,
     structured_stats: dict | None = None,
     structured_diagnostics_path: str | None = None,
+    center_bias_diagnostics_path: str | None = None,
 ) -> dict:
     # Augmentation describes the actual input layout, so it must not be
     # inferred from the checkpoint's training data directory.  A single
@@ -373,6 +470,33 @@ def _build_sampling_metadata(
             )
     else:
         sampling["n_samples"] = args.n_samples
+        if getattr(args, "first_event_center_sidecar", None):
+            sampling.update({
+                "first_event_center_sidecar": _path_metadata(
+                    os.path.join(
+                        args.first_event_center_sidecar, "metadata.json"
+                    ),
+                    include_sha256=True,
+                ),
+                "first_event_center_source": (
+                    args.first_event_center_source
+                ),
+                "first_event_center_max_multiplier": (
+                    args.first_event_center_max_multiplier
+                ),
+                "first_event_position_only": True,
+                "per_mode_total_hazard_preserved": True,
+                "continuation": (
+                    "ordinary Euler after each trajectory's first non-noop step"
+                ),
+            })
+            if center_bias_diagnostics_path is not None:
+                sampling["first_event_center_diagnostics"] = (
+                    _path_metadata(
+                        center_bias_diagnostics_path,
+                        include_sha256=True,
+                    )
+                )
         if getattr(args, "guidance_checkpoint", None):
             sampling.update({
                 "guidance_checkpoint": _path_metadata(
@@ -468,6 +592,27 @@ def main():
             "Preserve edit rate at each position (legacy) or across each "
             "sample while allowing guidance to move rate between positions"
         ),
+    )
+    parser.add_argument(
+        "--first_event_center_sidecar",
+        type=str,
+        default=None,
+        help=(
+            "Directory containing metadata.json and scores.jsonl for the "
+            "oracle-only RC1 first-event position-bias experiment"
+        ),
+    )
+    parser.add_argument(
+        "--first_event_center_source",
+        choices=("oracle", "pseudo"),
+        default="oracle",
+        help="Use true oracle centers or same-product pseudo centers",
+    )
+    parser.add_argument(
+        "--first_event_center_max_multiplier",
+        type=float,
+        default=3.0,
+        help="Maximum first-event position multiplier at center score 1",
     )
     parser.add_argument("--batch_size", type=int, default=32,
                         help="GPU batch size (number of products per batch)")
@@ -644,6 +789,33 @@ def main():
             "--guidance_checkpoint is currently supported only with "
             "--sampler euler"
         )
+    if args.first_event_center_sidecar:
+        if args.sampler != "euler":
+            raise ValueError(
+                "first_event_center_sidecar requires --sampler euler"
+            )
+        if args.products_file is None or args.product is not None:
+            raise ValueError(
+                "first_event_center_sidecar requires --products_file"
+            )
+        if args.n_samples != 9:
+            raise ValueError(
+                "RC1 is frozen to --n_samples 9 with center sidecars"
+            )
+        if args.guidance_checkpoint:
+            raise ValueError(
+                "center first-event bias and learned guidance cannot be "
+                "combined in RC1"
+            )
+    if (
+        args.first_event_center_max_multiplier < 1
+        or not torch.isfinite(
+            torch.tensor(args.first_event_center_max_multiplier)
+        )
+    ):
+        raise ValueError(
+            "first_event_center_max_multiplier must be finite and >= 1"
+        )
     if args.guidance_beta < 0 or not torch.isfinite(torch.tensor(args.guidance_beta)):
         raise ValueError("guidance_beta must be finite and non-negative")
 
@@ -750,6 +922,31 @@ def main():
         )
     product_ids = [tokenize_smiles(s, token2id) for s in products]
     outputs_per_product = _outputs_per_product(args)
+    center_sidecar_metadata = None
+    selected_center_records = None
+    center_bias_stats = None
+    if args.first_event_center_sidecar:
+        center_sidecar_metadata, all_center_records = (
+            _load_center_bias_sidecar(
+                args.first_event_center_sidecar,
+                args.products_file,
+            )
+        )
+        if selection_end_product > len(all_center_records):
+            raise ValueError(
+                "selected product interval exceeds center sidecar rows: "
+                f"{selection_end_product} > {len(all_center_records)}"
+            )
+        selected_center_records = all_center_records[
+            args.start_product:selection_end_product
+        ]
+        center_bias_stats = {
+            "schema_version": 1,
+            "center_source": args.first_event_center_source,
+            "max_multiplier": args.first_event_center_max_multiplier,
+            "sidecar_metadata": center_sidecar_metadata,
+            "records": [],
+        }
 
     if args.output_dir:
         os.makedirs(args.output_dir, exist_ok=True)
@@ -836,6 +1033,18 @@ def main():
             x_0 = x_0.to(device)
 
             if args.sampler == "euler":
+                center_scores = None
+                center_row_metadata = None
+                if selected_center_records is not None:
+                    center_scores, center_row_metadata = (
+                        _make_center_bias_batch(
+                            batch_products,
+                            selected_center_records[start:end],
+                            n_samples=args.n_samples,
+                            source=args.first_event_center_source,
+                            global_start=args.start_product + start,
+                        )
+                    )
                 results, _ = sample_euler(
                     model, x_0, kappa_scheduler,
                     n_steps=n_sampling_steps,
@@ -850,6 +1059,12 @@ def main():
                     guidance_product=x_0 if guidance_model is not None else None,
                     guidance_beta=args.guidance_beta,
                     guidance_rate_normalization=args.guidance_rate_normalization,
+                    first_event_position_scores=center_scores,
+                    first_event_bias_max_multiplier=(
+                        args.first_event_center_max_multiplier
+                    ),
+                    first_event_bias_stats=center_bias_stats,
+                    first_event_row_metadata=center_row_metadata,
                 )
             elif args.sampler == "euler_beam":
                 B_prod = end - start
@@ -1067,6 +1282,34 @@ def main():
                     sort_keys=True,
                 )
                 f.write("\n")
+        center_bias_diagnostics_path = None
+        if center_bias_stats is not None:
+            center_bias_diagnostics_path = os.path.join(
+                args.output_dir, "center_bias_diagnostics.json"
+            )
+            action_count_histogram = {}
+            center_score_histogram = {}
+            mode_counts = {}
+            for record in center_bias_stats["records"]:
+                action_count = str(record["action_count"])
+                action_count_histogram[action_count] = (
+                    action_count_histogram.get(action_count, 0) + 1
+                )
+                for action in record["actions"]:
+                    score = str(action["center_score"])
+                    center_score_histogram[score] = (
+                        center_score_histogram.get(score, 0) + 1
+                    )
+                    mode = action["mode"]
+                    mode_counts[mode] = mode_counts.get(mode, 0) + 1
+            center_bias_stats["summary"] = {
+                "action_count_histogram": action_count_histogram,
+                "center_score_histogram": center_score_histogram,
+                "mode_counts": mode_counts,
+            }
+            with open(center_bias_diagnostics_path, "w") as f:
+                json.dump(center_bias_stats, f, indent=2, sort_keys=True)
+                f.write("\n")
         metadata = _build_sampling_metadata(
             args,
             cfg,
@@ -1086,6 +1329,7 @@ def main():
             euler_beam_stats=euler_beam_stats,
             structured_stats=structured_stats,
             structured_diagnostics_path=structured_diagnostics_path,
+            center_bias_diagnostics_path=center_bias_diagnostics_path,
         )
         metadata_path = os.path.join(
             args.output_dir, "sampling_metadata.json",

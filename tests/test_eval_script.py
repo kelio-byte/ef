@@ -81,6 +81,20 @@ def test_sample_command_carries_optional_guidance_settings():
     assert "--guidance_rate_normalization per_sample" in rendered
 
 
+def test_sample_command_carries_first_event_center_settings():
+    args = _args(
+        "--sampler", "euler",
+        "--n_samples", "9",
+        "--first_event_center_sidecar", "centers/dev",
+        "--first_event_center_source", "pseudo",
+        "--first_event_center_max_multiplier", "3.0",
+    )
+    rendered = " ".join(eval_script.build_sample_command(args))
+    assert "--first_event_center_sidecar centers/dev" in rendered
+    assert "--first_event_center_source pseudo" in rendered
+    assert "--first_event_center_max_multiplier 3.0" in rendered
+
+
 def test_sample_command_carries_structured_sampler_settings():
     args = _args(
         "--sampler", "structured_diversification",

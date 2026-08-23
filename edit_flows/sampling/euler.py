@@ -7,6 +7,10 @@ from tqdm import tqdm
 from edit_flows.core.rate_scale import apply_rate_parameterization, get_rate_scale
 from edit_flows.core.scheduler import KappaScheduler
 from edit_flows.guidance.sampling import apply_action_guidance
+from edit_flows.sampling.center_bias import (
+    align_position_scores,
+    renormalize_position_biased_log_rates,
+)
 from edit_flows.sampling.ops import (
     apply_ins_del_operations,
     edit_position_masks,
@@ -36,6 +40,9 @@ def _sample_edit_actions(
     adapt_h: Tensor,
     pad_token: int,
     event_prob_mode: str = "poisson",
+    position_scores: Optional[Tensor] = None,
+    position_bias_active: Optional[Tensor] = None,
+    position_bias_max_multiplier: float = 3.0,
 ) -> dict:
     device = x_t.device
 
@@ -58,6 +65,25 @@ def _sample_edit_actions(
     # space and wastes sampling work.
     ins_sample_positions = insert_positions & torch.isfinite(ins_log_normalizer)
     sub_sample_positions = sub_del_positions & torch.isfinite(sub_log_normalizer)
+    position_bias_diagnostics = None
+    if position_scores is not None:
+        if position_bias_active is None:
+            raise ValueError(
+                "position_bias_active is required with position_scores"
+            )
+        legal_position_masks = torch.stack(
+            (ins_sample_positions, sub_sample_positions, sub_del_positions),
+            dim=-1,
+        )
+        log_rates, position_bias_diagnostics = (
+            renormalize_position_biased_log_rates(
+                log_rates,
+                position_scores,
+                legal_position_masks,
+                position_bias_active,
+                max_multiplier=position_bias_max_multiplier,
+            )
+        )
     rates = torch.exp(log_rates)
     lambda_ins = rates[:, :, 0] * ins_sample_positions.to(rates.dtype)
     lambda_sub = rates[:, :, 1] * sub_sample_positions.to(rates.dtype)
@@ -117,6 +143,7 @@ def _sample_edit_actions(
         "sub_token_log_normalizer": sub_log_normalizer,
         "insert_position_mask": insert_positions,
         "sub_del_position_mask": sub_del_positions,
+        "position_bias_diagnostics": position_bias_diagnostics,
     }
 
 
@@ -773,6 +800,10 @@ def sample_euler(
     guidance_rate_normalization: str = "per_position",
     start_time: Optional[Tensor | float] = None,
     initial_origin_mask: Optional[Tensor] = None,
+    first_event_position_scores: Optional[Tensor] = None,
+    first_event_bias_max_multiplier: float = 3.0,
+    first_event_bias_stats: Optional[dict] = None,
+    first_event_row_metadata: Optional[List[dict]] = None,
 ) -> tuple:
     from edit_flows.analysis.first_step import extract_oracle_event_set
     from edit_flows.sampling.oracle import compute_oracle_model_output
@@ -833,6 +864,49 @@ def sample_euler(
     # callers may safely retain an intermediate state for diagnostics or a
     # second continuation without it being silently mutated by this rollout.
     x_t = x_0.to(device).clone()
+    if first_event_position_scores is not None:
+        if (
+            first_event_position_scores.ndim != 3
+            or first_event_position_scores.shape[0] != batch_size
+            or first_event_position_scores.shape[1] != x_0.shape[1]
+            or first_event_position_scores.shape[2] != 3
+        ):
+            raise ValueError(
+                "first_event_position_scores must have shape "
+                "[batch, initial_length, 3]"
+            )
+        first_event_position_scores = first_event_position_scores.to(
+            device=device, dtype=torch.float32
+        )
+        if not torch.isfinite(first_event_position_scores).all():
+            raise ValueError("first_event_position_scores must be finite")
+        if (first_event_position_scores < 0).any() or (
+            first_event_position_scores > 1
+        ).any():
+            raise ValueError("first_event_position_scores must lie in [0, 1]")
+        first_event_bias_active = torch.ones(
+            batch_size, dtype=torch.bool, device=device
+        )
+        if first_event_row_metadata is not None and len(
+            first_event_row_metadata
+        ) != batch_size:
+            raise ValueError(
+                "first_event_row_metadata must have one item per batch row"
+            )
+        if first_event_bias_stats is not None:
+            first_event_bias_stats.setdefault("biased_row_steps", 0)
+            first_event_bias_stats.setdefault("first_event_count", 0)
+            first_event_bias_stats.setdefault("no_event_count", 0)
+            first_event_bias_stats.setdefault(
+                "max_hazard_relative_error", 0.0
+            )
+            first_event_bias_stats.setdefault("records", [])
+    else:
+        if first_event_row_metadata is not None:
+            raise ValueError(
+                "first_event_row_metadata requires first_event_position_scores"
+            )
+        first_event_bias_active = None
     if use_origin_mask:
         if initial_origin_mask is None:
             origin_mask = torch.ones_like(x_t, dtype=torch.bool, device=device)
@@ -960,9 +1034,19 @@ def sample_euler(
             )
 
         adapt_h = get_adaptive_h(default_h, t, scheduler)
+        current_position_scores = (
+            align_position_scores(
+                first_event_position_scores, x_t.shape[1]
+            )
+            if first_event_position_scores is not None
+            else None
+        )
         actions = _sample_edit_actions(
             x_t, log_rates, log_ins_probs, log_sub_probs, adapt_h,
             pad_token=pad_token, event_prob_mode=event_prob_mode,
+            position_scores=current_position_scores,
+            position_bias_active=first_event_bias_active,
+            position_bias_max_multiplier=first_event_bias_max_multiplier,
         )
 
         done = (t >= 1.0).squeeze(-1)
@@ -970,6 +1054,90 @@ def sample_euler(
             actions["ins_mask"][done] = False
             actions["del_mask"][done] = False
             actions["sub_mask"][done] = False
+
+        if first_event_bias_active is not None:
+            bias_diagnostics = actions["position_bias_diagnostics"]
+            if first_event_bias_stats is not None:
+                active_not_done = first_event_bias_active & ~done
+                first_event_bias_stats["biased_row_steps"] += int(
+                    active_not_done.sum().item()
+                )
+                changed_errors = bias_diagnostics["relative_error"][
+                    bias_diagnostics["changed"]
+                ]
+                if changed_errors.numel():
+                    first_event_bias_stats["max_hazard_relative_error"] = max(
+                        first_event_bias_stats[
+                            "max_hazard_relative_error"
+                        ],
+                        float(changed_errors.max().item()),
+                    )
+            first_bias_event_mask = (
+                actions["ins_mask"]
+                | actions["del_mask"]
+                | actions["sub_mask"]
+            )
+            newly_finished = (
+                first_event_bias_active
+                & ~done
+                & first_bias_event_mask.any(dim=1)
+            )
+            if first_event_bias_stats is not None:
+                for sample_idx in torch.nonzero(
+                    newly_finished, as_tuple=False
+                ).squeeze(-1).tolist():
+                    action_rows = []
+                    for mode_name, mode_index, mask_name in (
+                        ("INS", 0, "ins_mask"),
+                        ("SUB", 1, "sub_mask"),
+                        ("DEL", 2, "del_mask"),
+                    ):
+                        for position in torch.nonzero(
+                            actions[mask_name][sample_idx],
+                            as_tuple=False,
+                        ).squeeze(-1).tolist():
+                            action_rows.append(
+                                {
+                                    "mode": mode_name,
+                                    "position": int(position),
+                                    "token_id": (
+                                        int(
+                                            actions[
+                                                "ins_tokens"
+                                                if mode_name == "INS"
+                                                else "sub_tokens"
+                                            ][sample_idx, position].item()
+                                        )
+                                        if mode_name in {"INS", "SUB"}
+                                        else None
+                                    ),
+                                    "center_score": float(
+                                        current_position_scores[
+                                            sample_idx,
+                                            position,
+                                            mode_index,
+                                        ].item()
+                                    ),
+                                }
+                            )
+                    record = {
+                        "batch_row": int(sample_idx),
+                        "first_event_step_idx": int(
+                            (t[sample_idx, 0] * n_steps).item()
+                        ),
+                        "first_event_t": float(t[sample_idx, 0].item()),
+                        "action_count": len(action_rows),
+                        "actions": action_rows,
+                    }
+                    if first_event_row_metadata is not None:
+                        record["row_metadata"] = (
+                            first_event_row_metadata[sample_idx]
+                        )
+                    first_event_bias_stats["records"].append(record)
+                first_event_bias_stats["first_event_count"] += int(
+                    newly_finished.sum().item()
+                )
+            first_event_bias_active[newly_finished] = False
 
         # Compact correction analysis only needs an oracle at the first real
         # event of each path.  Recomputing the dynamic Levenshtein oracle at
@@ -1206,6 +1374,10 @@ def sample_euler(
 
     if verbose:
         pbar.close()
+    if first_event_bias_stats is not None and first_event_bias_active is not None:
+        first_event_bias_stats["no_event_count"] += int(
+            first_event_bias_active.sum().item()
+        )
     if record_all_events:
         return x_t, trajectory, all_events
     if record_compact_events:
