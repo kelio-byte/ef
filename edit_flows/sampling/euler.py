@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import torch
 from torch import Tensor
@@ -370,6 +370,111 @@ def _extract_first_event_summary(
     return summary
 
 
+def _oracle_token_support(
+    log_probs: Optional[Tensor],
+    *,
+    tolerance: float = 1e-6,
+) -> List[int]:
+    """Return tied maximum-probability oracle tokens without storing logits.
+
+    ``compute_oracle_model_output`` represents unsupported actions with a
+    very small positive rate, so checking merely for finite log-probability
+    would incorrectly mark the whole vocabulary as supported.  The oracle
+    support is therefore the set of tokens tied at the maximum log
+    probability (within a small numerical tolerance).
+    """
+    if log_probs is None or log_probs.numel() == 0:
+        return []
+    finite = log_probs > -1e8
+    if not bool(finite.any().item()):
+        return []
+    maximum = log_probs[finite].max()
+    support = finite & (log_probs >= maximum - tolerance)
+    return torch.nonzero(support, as_tuple=False).squeeze(-1).tolist()
+
+
+def _extract_compact_event(
+    sample_idx: int,
+    x_t: Tensor,
+    actions: dict,
+    t: Tensor,
+    oracle: Optional[dict],
+    oracle_out: Optional[tuple[Tensor, Tensor, Tensor, List[int]]],
+    *,
+    step_idx: int,
+    oracle_sample_idx: Optional[int] = None,
+) -> dict:
+    """Extract an event trace without retaining model distributions.
+
+    This is intentionally separate from ``record_all_events``: the latter is
+    a visualization-oriented diagnostic and stores several full tensors per
+    event.  Compact traces are intended for thousands of trajectories.
+    """
+    ins_mask = actions["ins_mask"][sample_idx]
+    del_mask = actions["del_mask"][sample_idx]
+    sub_mask = actions["sub_mask"][sample_idx]
+    event_mask = ins_mask | del_mask | sub_mask
+    positions = torch.nonzero(event_mask, as_tuple=False).squeeze(-1).tolist()
+
+    action_rows = []
+    for position in positions:
+        if bool(sub_mask[position].item()):
+            action_type = "sub"
+            token = int(actions["sub_tokens"][sample_idx, position].item())
+        elif bool(ins_mask[position].item()) and bool(del_mask[position].item()):
+            action_type = "replace"
+            token = int(actions["ins_tokens"][sample_idx, position].item())
+        elif bool(del_mask[position].item()):
+            action_type = "del"
+            token = None
+        else:
+            action_type = "ins"
+            token = int(actions["ins_tokens"][sample_idx, position].item())
+        action_rows.append({
+            "position": int(position),
+            "type": action_type,
+            "token": token,
+        })
+
+    oracle_rows = []
+    if oracle is not None:
+        oracle_idx = sample_idx if oracle_sample_idx is None else oracle_sample_idx
+        oracle_ins_probs = oracle_out[1][oracle_idx] if oracle_out is not None else None
+        oracle_sub_probs = oracle_out[2][oracle_idx] if oracle_out is not None else None
+        oracle_positions = torch.nonzero(
+            oracle["pos_mask"][oracle_idx], as_tuple=False,
+        ).squeeze(-1).tolist()
+        for position in oracle_positions:
+            types = []
+            ins_support = []
+            sub_support = []
+            if bool(oracle["ins_mask"][oracle_idx, position].item()):
+                types.append("ins")
+                if oracle_ins_probs is not None:
+                    ins_support = _oracle_token_support(oracle_ins_probs[position])
+            if bool(oracle["sub_mask"][oracle_idx, position].item()):
+                types.append("sub")
+                if oracle_sub_probs is not None:
+                    sub_support = _oracle_token_support(oracle_sub_probs[position])
+            if bool(oracle["del_mask"][oracle_idx, position].item()):
+                types.append("del")
+            oracle_rows.append({
+                "position": int(position),
+                "types": types,
+                "ins_token_support": ins_support,
+                "sub_token_support": sub_support,
+            })
+
+    return {
+        "step_idx": int(step_idx),
+        "t": float(t[sample_idx, 0].item()),
+        "x_t": x_t[sample_idx].detach().cpu().tolist(),
+        "actions": action_rows,
+        "oracle_available": oracle is not None,
+        "oracle": oracle_rows,
+    }
+
+
 def _override_with_anchor_event(
     sample_idx: int,
     actions: dict,
@@ -657,6 +762,8 @@ def sample_euler(
     event_prob_mode: str = "poisson",
     record_first_events: bool = False,
     record_all_events: bool = False,
+    record_compact_events: bool = False,
+    first_event_intervention: Optional[Callable] = None,
     x_1: Optional[Tensor] = None,
     vocab_size: Optional[int] = None,
     use_origin_mask: bool = False,
@@ -669,6 +776,19 @@ def sample_euler(
 ) -> tuple:
     from edit_flows.analysis.first_step import extract_oracle_event_set
     from edit_flows.sampling.oracle import compute_oracle_model_output
+
+    if record_all_events and record_compact_events:
+        raise ValueError(
+            "record_all_events and record_compact_events are mutually exclusive"
+        )
+    # The recording block below also owns the optional intervention hook.  A
+    # no-op hook keeps that block active for the historical recording modes
+    # without changing ordinary sampling when all diagnostics are disabled.
+    if (
+        first_event_intervention is None
+        and (record_first_events or record_all_events or record_compact_events)
+    ):
+        first_event_intervention = lambda *_args: None
 
     device = next(model.parameters()).device
     batch_size = x_0.shape[0]
@@ -755,6 +875,14 @@ def sample_euler(
     trajectory: List[Tensor] = []
     first_events: List[Optional[dict]] = [None for _ in range(batch_size)]
     all_events: List[List[dict]] = [[] for _ in range(batch_size)] if record_all_events else []
+    compact_events: List[List[dict]] = [[] for _ in range(batch_size)] if record_compact_events else []
+    intervention_done = (
+        torch.zeros(batch_size, dtype=torch.bool, device=device)
+        if first_event_intervention is not None else None
+    )
+    intervention_infos: List[Optional[dict]] = [
+        None for _ in range(batch_size)
+    ]
     if record_trajectory:
         trajectory.append(x_t.cpu().clone())
 
@@ -762,6 +890,7 @@ def sample_euler(
         pbar = tqdm(total=n_steps, desc="Euler Sampling")
     while (t < 1.0).any():
         recorded_event_samples: List[int] = []
+        recorded_compact_event_samples: List[int] = []
         x_pad_mask = x_t == pad_token
 
         t_model = _compute_model_time(t, scheduler, time_input, train_scheduler)
@@ -842,18 +971,96 @@ def sample_euler(
             actions["del_mask"][done] = False
             actions["sub_mask"][done] = False
 
-        if record_first_events or record_all_events:
+        # Compact correction analysis only needs an oracle at the first real
+        # event of each path.  Recomputing the dynamic Levenshtein oracle at
+        # every later Euler step is needlessly CPU-heavy and defeats the point
+        # of the compact recorder.  Full event recording keeps its historical
+        # behavior and still computes an oracle for every recorded step.
+        event_mask = actions["ins_mask"] | actions["del_mask"] | actions["sub_mask"]
+        compact_needs_oracle = record_compact_events and any(
+            not compact_events[sample_idx]
+            for sample_idx in range(batch_size)
+        )
+        compact_oracle_by_sample: Dict[int, tuple[dict, tuple]] = {}
+        if record_first_events or record_all_events or record_compact_events:
             oracle_out = None
             oracle = None
             if x_1 is not None and vocab_size is not None:
-                oracle_out = compute_oracle_model_output(
-                    x_t, x_1.to(device), t, scheduler, vocab_size,
-                    pad_token=pad_token, bos_token=bos_token,
-                )
-                oracle = extract_oracle_event_set(
-                    oracle_out[0], oracle_out[1], oracle_out[2], x_t,
-                )
+                if record_first_events or record_all_events:
+                    oracle_out = compute_oracle_model_output(
+                        x_t, x_1.to(device), t, scheduler, vocab_size,
+                        pad_token=pad_token, bos_token=bos_token,
+                    )
+                    oracle = extract_oracle_event_set(
+                        oracle_out[0], oracle_out[1], oracle_out[2], x_t,
+                    )
+                elif record_compact_events and compact_needs_oracle:
+                    compact_indices = [
+                        sample_idx
+                        for sample_idx in range(batch_size)
+                        if not compact_events[sample_idx]
+                        and not bool(done[sample_idx].item())
+                        and bool(event_mask[sample_idx].any().item())
+                    ]
+                    if compact_indices:
+                        index_tensor = torch.tensor(
+                            compact_indices, dtype=torch.long, device=device,
+                        )
+                        compact_x_t = x_t.index_select(0, index_tensor)
+                        compact_x_1 = x_1.to(device).index_select(0, index_tensor)
+                        compact_t = t.index_select(0, index_tensor)
+                        compact_oracle_out = compute_oracle_model_output(
+                            compact_x_t, compact_x_1, compact_t,
+                            scheduler, vocab_size,
+                            pad_token=pad_token, bos_token=bos_token,
+                        )
+                        compact_oracle = extract_oracle_event_set(
+                            compact_oracle_out[0], compact_oracle_out[1],
+                            compact_oracle_out[2], compact_x_t,
+                        )
+                        for compact_idx, sample_idx in enumerate(compact_indices):
+                            compact_oracle_by_sample[sample_idx] = (
+                                {
+                                    key: value[compact_idx:compact_idx + 1]
+                                    for key, value in compact_oracle.items()
+                                },
+                                (
+                                    compact_oracle_out[0][compact_idx:compact_idx + 1],
+                                    compact_oracle_out[1][compact_idx:compact_idx + 1],
+                                    compact_oracle_out[2][compact_idx:compact_idx + 1],
+                                    [compact_oracle_out[3][compact_idx]],
+                                ),
+                            )
 
+        if first_event_intervention is not None:
+            for sample_idx in range(batch_size):
+                if bool(intervention_done[sample_idx].item()):
+                    continue
+                if bool(done[sample_idx].item()):
+                    continue
+                if not bool(event_mask[sample_idx].any().item()):
+                    continue
+                compact_oracle_data = compact_oracle_by_sample.get(sample_idx)
+                if compact_oracle_data is not None:
+                    callback_oracle = compact_oracle_data[0]
+                    callback_oracle_out = compact_oracle_data[1]
+                    callback_sample_idx = 0
+                elif oracle is not None and oracle_out is not None:
+                    callback_oracle = oracle
+                    callback_oracle_out = oracle_out
+                    callback_sample_idx = sample_idx
+                else:
+                    continue
+                intervention_infos[sample_idx] = first_event_intervention(
+                    sample_idx,
+                    actions,
+                    x_t,
+                    callback_oracle,
+                    callback_oracle_out,
+                    callback_sample_idx,
+                    x_1[sample_idx] if x_1 is not None else None,
+                )
+                intervention_done[sample_idx] = True
             event_mask = actions["ins_mask"] | actions["del_mask"] | actions["sub_mask"]
 
             if record_first_events:
@@ -922,6 +1129,42 @@ def sample_euler(
                         all_events[sample_idx].append(event)
                         recorded_event_samples.append(sample_idx)
 
+            if record_compact_events:
+                for sample_idx in range(batch_size):
+                    if done[sample_idx]:
+                        continue
+                    if bool(event_mask[sample_idx].any().item()):
+                        is_first_compact_event = not compact_events[sample_idx]
+                        compact_oracle_data = compact_oracle_by_sample.get(sample_idx)
+                        compact_events[sample_idx].append(
+                            _extract_compact_event(
+                                sample_idx=sample_idx,
+                                x_t=x_t,
+                                actions=actions,
+                                t=t,
+                                oracle=(
+                                    compact_oracle_data[0]
+                                    if compact_oracle_data is not None
+                                    else None
+                                ),
+                                oracle_out=(
+                                    compact_oracle_data[1]
+                                    if compact_oracle_data is not None
+                                    else None
+                                ),
+                                step_idx=int((t[sample_idx, 0] * n_steps).item()),
+                                oracle_sample_idx=0 if compact_oracle_data is not None else None,
+                            )
+                        )
+                        if (
+                            intervention_infos[sample_idx] is not None
+                            and is_first_compact_event
+                        ):
+                            compact_events[sample_idx][-1]["intervention"] = (
+                                intervention_infos[sample_idx]
+                            )
+                        recorded_compact_event_samples.append(sample_idx)
+
         x_t[actions["sub_mask"]] = actions["sub_tokens"][actions["sub_mask"]]
         if use_origin_mask:
             origin_markers = torch.where(
@@ -947,6 +1190,10 @@ def sample_euler(
             all_events[sample_idx][-1]["x_next"] = (
                 x_t[sample_idx].cpu().clone()
             )
+        for sample_idx in recorded_compact_event_samples:
+            compact_events[sample_idx][-1]["x_next"] = (
+                x_t[sample_idx].cpu().tolist()
+            )
 
         t = t + adapt_h
         if record_trajectory and (
@@ -961,6 +1208,8 @@ def sample_euler(
         pbar.close()
     if record_all_events:
         return x_t, trajectory, all_events
+    if record_compact_events:
+        return x_t, trajectory, compact_events
     if record_first_events:
         return x_t, trajectory, first_events
     return x_t, trajectory

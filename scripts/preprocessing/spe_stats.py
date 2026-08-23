@@ -39,6 +39,8 @@ def _summary(values: list[int], *, threshold: int | None = None) -> dict:
         "mean": sum(values) / len(values) if values else 0.0,
         "median": _percentile(values, 0.5),
         "p90": _percentile(values, 0.9),
+        "p95": _percentile(values, 0.95),
+        "p99": _percentile(values, 0.99),
         "max": max(values) if values else 0,
     }
     if threshold is not None:
@@ -119,6 +121,7 @@ def _operation_stats(
     counts = Counter()
     distances = []
     aligned_lengths = []
+    edit_densities = []
     gap_count = 0
     pair_count = 0
     projection_mismatch_count = 0
@@ -156,8 +159,10 @@ def _operation_stats(
                 distance += 1
         distances.append(distance)
         aligned_lengths.append(len(src_tokens))
+        edit_densities.append(distance / len(src_tokens) if src_tokens else 0.0)
         pair_count += 1
     total_edits = sum(counts.values())
+    total_aligned_tokens = sum(aligned_lengths)
     counts_with_rates = {
         name: {"count": int(counts[name]), "rate": counts[name] / total_edits if total_edits else 0.0}
         for name in ("INS", "DEL", "SUB")
@@ -165,9 +170,16 @@ def _operation_stats(
     return {
         "pair_count": pair_count,
         "edit_distance": _summary(distances),
+        "edit_density": _summary(edit_densities),
         "aligned_length": _summary(aligned_lengths),
         "operations": counts_with_rates,
         "total_edit_operations": total_edits,
+        "total_aligned_token_count": total_aligned_tokens,
+        "keep_token_count": total_aligned_tokens - total_edits,
+        "keep_rate": (
+            (total_aligned_tokens - total_edits) / total_aligned_tokens
+            if total_aligned_tokens else 0.0
+        ),
         "gap_token_count": gap_count,
         "projection_mismatch_count": projection_mismatch_count,
     }
