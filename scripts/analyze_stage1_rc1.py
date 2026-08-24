@@ -429,6 +429,14 @@ def analyze(args: argparse.Namespace) -> dict:
                 draws=args.bootstrap_draws, seed=args.seed,
             ),
         },
+        # This is deliberately reported separately from the baseline
+        # comparisons: it asks whether the *correct* local region helps more
+        # than an otherwise comparable, deliberately wrong local region.
+        # The direction is B1 - B2 throughout.
+        "paired_bootstrap_b1_minus_b2": _paired_bootstrap(
+            performance_arrays["b2_pseudo"], performance_arrays["b1_oracle"],
+            draws=args.bootstrap_draws, seed=args.seed,
+        ),
     }
     return result
 
