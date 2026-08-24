@@ -72,7 +72,7 @@ def test_center_bias_batch_assigns_components_cyclically():
         "augmentation_index": 3,
         "oracle_components": [component_a, component_b],
     }]
-    scores, metadata = _make_center_bias_batch(
+    scores, metadata, enabled = _make_center_bias_batch(
         product_ids,
         records,
         n_samples=5,
@@ -82,6 +82,39 @@ def test_center_bias_batch_assigns_components_cyclically():
     assert scores.shape == (5, 3, 3)
     assert torch.equal(scores[:, 0, 0], torch.tensor([0., 1., 0., 1., 0.]))
     assert [item["component_id"] for item in metadata] == [0, 1, 0, 1, 0]
+    assert torch.equal(enabled, torch.ones(5, dtype=torch.bool))
+    assert {item["trajectory_role"] for item in metadata} == {"center_guided"}
+
+
+def test_center_bias_batch_can_mix_guided_and_ordinary_trajectories():
+    product_ids = [[4, 5]]
+    component = {
+        "component_id": 0,
+        "atom_maps": [1],
+        "position_scores": [[1.0, 1.0, 1.0]] * 3,
+    }
+    records = [{
+        "input_row_index": 7,
+        "reaction_position": 2,
+        "augmentation_index": 3,
+        "oracle_components": [component],
+    }]
+    scores, metadata, enabled = _make_center_bias_batch(
+        product_ids,
+        records,
+        n_samples=5,
+        source="oracle",
+        global_start=7,
+        guided_trajectories=2,
+    )
+    assert scores.shape == (5, 3, 3)
+    assert torch.equal(
+        enabled, torch.tensor([True, True, False, False, False])
+    )
+    assert [item["trajectory_role"] for item in metadata] == [
+        "center_guided", "center_guided", "ordinary_euler",
+        "ordinary_euler", "ordinary_euler",
+    ]
 
 
 def test_structured_output_count_uses_trajectory_budget(tmp_path):

@@ -88,11 +88,13 @@ def test_sample_command_carries_first_event_center_settings():
         "--first_event_center_sidecar", "centers/dev",
         "--first_event_center_source", "pseudo",
         "--first_event_center_max_multiplier", "3.0",
+        "--first_event_center_guided_trajectories", "3",
     )
     rendered = " ".join(eval_script.build_sample_command(args))
     assert "--first_event_center_sidecar centers/dev" in rendered
     assert "--first_event_center_source pseudo" in rendered
     assert "--first_event_center_max_multiplier 3.0" in rendered
+    assert "--first_event_center_guided_trajectories 3" in rendered
 
 
 def test_sample_command_carries_structured_sampler_settings():

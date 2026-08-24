@@ -153,13 +153,23 @@ def _make_center_bias_batch(
     n_samples: int,
     source: str,
     global_start: int,
-) -> tuple[Tensor, list[dict]]:
+    guided_trajectories: int | None = None,
+) -> tuple[Tensor, list[dict], Tensor]:
     if len(product_ids) != len(sidecar_records):
         raise ValueError("center sidecar batch does not match product batch")
+    if guided_trajectories is None:
+        guided_trajectories = n_samples
+    if not 0 <= guided_trajectories <= n_samples:
+        raise ValueError(
+            "guided_trajectories must be between 0 and n_samples inclusive"
+        )
     component_field = f"{source}_components"
     max_length = max(len(ids) for ids in product_ids) + 1
     scores = torch.zeros(
         len(product_ids) * n_samples, max_length, 3, dtype=torch.float32
+    )
+    bias_enabled = torch.zeros(
+        len(product_ids) * n_samples, dtype=torch.bool
     )
     row_metadata = []
     output_row = 0
@@ -185,6 +195,8 @@ def _make_center_bias_batch(
                     f"({expected_length}, 3)"
                 )
             scores[output_row, :expected_length] = component_scores
+            is_guided = trajectory_index < guided_trajectories
+            bias_enabled[output_row] = is_guided
             row_metadata.append(
                 {
                     "global_input_row": global_start + product_offset,
@@ -192,6 +204,13 @@ def _make_center_bias_batch(
                     "reaction_position": record["reaction_position"],
                     "augmentation_index": record["augmentation_index"],
                     "trajectory_index": trajectory_index,
+                    # In RC1.5 every row retains true-center scores for
+                    # diagnostics, while only this fixed subset actually
+                    # reweights its first-event rates.  The remaining rows
+                    # are ordinary Euler trajectories.
+                    "trajectory_role": (
+                        "center_guided" if is_guided else "ordinary_euler"
+                    ),
                     "center_source": source,
                     "component_id": component["component_id"],
                     "component_atom_maps": component["atom_maps"],
@@ -199,7 +218,7 @@ def _make_center_bias_batch(
                 }
             )
             output_row += 1
-    return scores, row_metadata
+    return scores, row_metadata, bias_enabled
 
 
 def _make_euler_beam_sample_seeds(
@@ -484,6 +503,22 @@ def _build_sampling_metadata(
                 "first_event_center_max_multiplier": (
                     args.first_event_center_max_multiplier
                 ),
+                "first_event_center_guided_trajectories": (
+                    args.first_event_center_guided_trajectories
+                    if args.first_event_center_guided_trajectories is not None
+                    else args.n_samples
+                ),
+                "first_event_center_ordinary_trajectories": (
+                    args.n_samples - (
+                        args.first_event_center_guided_trajectories
+                        if args.first_event_center_guided_trajectories is not None
+                        else args.n_samples
+                    )
+                ),
+                "first_event_center_trajectory_assignment": (
+                    "trajectory indices [0, guided_count) are center-guided; "
+                    "the remainder are ordinary Euler"
+                ),
                 "first_event_position_only": True,
                 "per_mode_total_hazard_preserved": True,
                 "continuation": (
@@ -613,6 +648,15 @@ def main():
         type=float,
         default=3.0,
         help="Maximum first-event position multiplier at center score 1",
+    )
+    parser.add_argument(
+        "--first_event_center_guided_trajectories",
+        type=int,
+        default=None,
+        help=(
+            "Fixed number of leading Euler trajectories whose first event "
+            "uses the center position bias; default: all trajectories"
+        ),
     )
     parser.add_argument("--batch_size", type=int, default=32,
                         help="GPU batch size (number of products per batch)")
@@ -807,6 +851,20 @@ def main():
                 "center first-event bias and learned guidance cannot be "
                 "combined in RC1"
             )
+        if (
+            args.first_event_center_guided_trajectories is not None
+            and not 0 <= args.first_event_center_guided_trajectories
+            <= args.n_samples
+        ):
+            raise ValueError(
+                "first_event_center_guided_trajectories must be between 0 "
+                "and n_samples inclusive"
+            )
+    elif args.first_event_center_guided_trajectories is not None:
+        raise ValueError(
+            "first_event_center_guided_trajectories requires "
+            "first_event_center_sidecar"
+        )
     if (
         args.first_event_center_max_multiplier < 1
         or not torch.isfinite(
@@ -925,6 +983,7 @@ def main():
     center_sidecar_metadata = None
     selected_center_records = None
     center_bias_stats = None
+    guided_center_trajectories = None
     if args.first_event_center_sidecar:
         center_sidecar_metadata, all_center_records = (
             _load_center_bias_sidecar(
@@ -940,10 +999,19 @@ def main():
         selected_center_records = all_center_records[
             args.start_product:selection_end_product
         ]
+        guided_center_trajectories = (
+            args.first_event_center_guided_trajectories
+            if args.first_event_center_guided_trajectories is not None
+            else args.n_samples
+        )
         center_bias_stats = {
-            "schema_version": 1,
+            "schema_version": 2,
             "center_source": args.first_event_center_source,
             "max_multiplier": args.first_event_center_max_multiplier,
+            "guided_trajectories_per_product": guided_center_trajectories,
+            "ordinary_euler_trajectories_per_product": (
+                args.n_samples - guided_center_trajectories
+            ),
             "sidecar_metadata": center_sidecar_metadata,
             "records": [],
         }
@@ -1011,6 +1079,14 @@ def main():
             f"  guidance_checkpoint={args.guidance_checkpoint}, "
             f"guidance_beta={args.guidance_beta}"
         )
+    if selected_center_records is not None:
+        print(
+            "  first_event_center_source="
+            f"{args.first_event_center_source}, multiplier="
+            f"{args.first_event_center_max_multiplier}, guided="
+            f"{guided_center_trajectories}/{args.n_samples}, ordinary="
+            f"{args.n_samples - guided_center_trajectories}"
+        )
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -1035,14 +1111,20 @@ def main():
             if args.sampler == "euler":
                 center_scores = None
                 center_row_metadata = None
+                center_bias_enabled = None
                 if selected_center_records is not None:
-                    center_scores, center_row_metadata = (
+                    (
+                        center_scores,
+                        center_row_metadata,
+                        center_bias_enabled,
+                    ) = (
                         _make_center_bias_batch(
                             batch_products,
                             selected_center_records[start:end],
                             n_samples=args.n_samples,
                             source=args.first_event_center_source,
                             global_start=args.start_product + start,
+                            guided_trajectories=guided_center_trajectories,
                         )
                     )
                 results, _ = sample_euler(
@@ -1060,6 +1142,7 @@ def main():
                     guidance_beta=args.guidance_beta,
                     guidance_rate_normalization=args.guidance_rate_normalization,
                     first_event_position_scores=center_scores,
+                    first_event_position_bias_enabled=center_bias_enabled,
                     first_event_bias_max_multiplier=(
                         args.first_event_center_max_multiplier
                     ),
@@ -1290,7 +1373,19 @@ def main():
             action_count_histogram = {}
             center_score_histogram = {}
             mode_counts = {}
+            first_event_role_counts = {}
+            reweighted_event_role_counts = {}
             for record in center_bias_stats["records"]:
+                role = str(record.get("row_metadata", {}).get(
+                    "trajectory_role", "unspecified"
+                ))
+                first_event_role_counts[role] = (
+                    first_event_role_counts.get(role, 0) + 1
+                )
+                if record.get("position_bias_reweighted", False):
+                    reweighted_event_role_counts[role] = (
+                        reweighted_event_role_counts.get(role, 0) + 1
+                    )
                 action_count = str(record["action_count"])
                 action_count_histogram[action_count] = (
                     action_count_histogram.get(action_count, 0) + 1
@@ -1306,6 +1401,10 @@ def main():
                 "action_count_histogram": action_count_histogram,
                 "center_score_histogram": center_score_histogram,
                 "mode_counts": mode_counts,
+                "first_event_trajectory_role_counts": first_event_role_counts,
+                "reweighted_first_event_trajectory_role_counts": (
+                    reweighted_event_role_counts
+                ),
             }
             with open(center_bias_diagnostics_path, "w") as f:
                 json.dump(center_bias_stats, f, indent=2, sort_keys=True)

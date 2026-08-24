@@ -156,6 +156,7 @@ def test_first_event_bias_deactivates_each_row_after_its_first_edit():
     assert stats["first_event_count"] == 2
     assert stats["no_event_count"] == 0
     assert stats["biased_row_steps"] == 2
+    assert stats["guided_row_steps"] == 2
     assert len(stats["records"]) == 2
     assert all(record["action_count"] == 1 for record in stats["records"])
     assert all(
@@ -167,3 +168,38 @@ def test_first_event_bias_deactivates_each_row_after_its_first_edit():
         for record in stats["records"]
     )
     assert stats["max_hazard_relative_error"] < 1e-6
+
+
+def test_first_event_bias_can_leave_some_rows_as_ordinary_euler():
+    model = _ForcedFirstSubstitution()
+    x_0 = torch.tensor(
+        [
+            [BOS_TOKEN, 4, 5, PAD_TOKEN],
+            [BOS_TOKEN, 6, 7, PAD_TOKEN],
+        ]
+    )
+    scores = torch.zeros(2, 4, 3)
+    scores[:, 1, 1] = 1.0
+    stats = {}
+    result, _ = sample_euler(
+        model,
+        x_0,
+        LinearScheduler(),
+        n_steps=2,
+        max_seq_len=16,
+        first_event_position_scores=scores,
+        first_event_position_bias_enabled=torch.tensor([True, False]),
+        first_event_bias_stats=stats,
+        first_event_row_metadata=[
+            {"trajectory_role": "center_guided"},
+            {"trajectory_role": "ordinary_euler"},
+        ],
+    )
+    assert torch.equal(result[:, 1], torch.tensor([9, 9]))
+    assert stats["first_event_count"] == 2
+    assert stats["biased_row_steps"] == 2
+    assert stats["guided_row_steps"] == 1
+    assert [record["position_bias_enabled"] for record in stats["records"]] == [
+        True, False,
+    ]
+    assert stats["records"][1]["position_bias_reweighted"] is False

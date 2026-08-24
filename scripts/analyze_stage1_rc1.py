@@ -27,15 +27,67 @@ from edit_flows.data.dataset import load_vocab
 from edit_flows.utils.tokens import BOS_TOKEN
 
 
-PERFORMANCE_GROUPS = {
-    "b0": "b0_plain",
-    "b1_oracle": "b1_oracle",
-    "b2_pseudo": "b2_pseudo",
-}
-EVENT_GROUPS = {
-    "b0": "b0_trace",
-    "b1_oracle": "b1_oracle",
-    "b2_pseudo": "b2_pseudo",
+EXPERIMENTS = {
+    "rc1": {
+        "performance_groups": {
+            "b0": "b0_plain",
+            "b1_oracle": "b1_oracle",
+            "b2_pseudo": "b2_pseudo",
+        },
+        "event_groups": {
+            "b0": "b0_trace",
+            "b1_oracle": "b1_oracle",
+            "b2_pseudo": "b2_pseudo",
+        },
+        "conditions": {
+            "b0": (
+                "ordinary Euler N=9 (with B0-trace only for identical "
+                "event recording)"
+            ),
+            "b1_oracle": (
+                "ORACLE / NOT DEPLOYABLE: true-center first-event position "
+                "bias, multiplier=3"
+            ),
+            "b2_pseudo": (
+                "same-product pseudo-center first-event position bias, "
+                "multiplier=3"
+            ),
+        },
+        "b0_candidates": ("b1_oracle", "b2_pseudo"),
+        "between_key": "paired_bootstrap_b1_minus_b2",
+        "between_base": "b2_pseudo",
+        "between_candidate": "b1_oracle",
+    },
+    "rc15": {
+        "performance_groups": {
+            "b0": "b0_plain",
+            "b1_oracle": "b1_oracle",
+            "rc15_mixed": "rc15_mixed",
+        },
+        "event_groups": {
+            "b0": "b0_trace",
+            "b1_oracle": "b1_oracle",
+            "rc15_mixed": "rc15_mixed",
+        },
+        "conditions": {
+            "b0": (
+                "ordinary Euler N=9 (with B0-trace only for identical "
+                "event recording)"
+            ),
+            "b1_oracle": (
+                "ORACLE / NOT DEPLOYABLE: all nine trajectories use "
+                "true-center first-event position bias, multiplier=3"
+            ),
+            "rc15_mixed": (
+                "ORACLE / NOT DEPLOYABLE: three true-center-guided first "
+                "events plus six ordinary Euler trajectories, multiplier=3"
+            ),
+        },
+        "b0_candidates": ("b1_oracle", "rc15_mixed"),
+        "between_key": "paired_bootstrap_b1_minus_rc15_mixed",
+        "between_base": "rc15_mixed",
+        "between_candidate": "b1_oracle",
+    },
 }
 TOP_KS = (1, 3, 5, 10)
 
@@ -158,14 +210,29 @@ def _event_summary(
     *,
     max_seq_len: int,
     expected_trajectories: int,
+    trajectory_role: str | None = None,
 ) -> dict:
     diagnostics_path = group_dir / "center_bias_diagnostics.json"
     diagnostics = json.loads(diagnostics_path.read_text())
-    records = diagnostics["records"]
-    if len(records) != int(diagnostics["first_event_count"]):
+    all_records = diagnostics["records"]
+    if len(all_records) != int(diagnostics["first_event_count"]):
         raise ValueError(
-            f"{diagnostics_path}: records={len(records)} disagrees with "
+            f"{diagnostics_path}: records={len(all_records)} disagrees with "
             f"first_event_count={diagnostics['first_event_count']}"
+        )
+    if trajectory_role is None:
+        records = all_records
+        no_event_count = int(diagnostics["no_event_count"])
+    else:
+        records = [
+            record for record in all_records
+            if record.get("row_metadata", {}).get("trajectory_role")
+            == trajectory_role
+        ]
+        no_event_count = int(
+            diagnostics.get("no_event_trajectory_role_counts", {}).get(
+                trajectory_role, 0
+            )
         )
 
     progress = Counter()
@@ -212,7 +279,6 @@ def _event_summary(
         event_max_scores[_center_bucket(max(scores))] += 1
 
     first_event_count = len(records)
-    no_event_count = int(diagnostics["no_event_count"])
     if first_event_count + no_event_count != expected_trajectories:
         raise ValueError(
             f"{diagnostics_path}: first/no-event total "
@@ -222,6 +288,7 @@ def _event_summary(
     return {
         "path": str(group_dir),
         "center_source": diagnostics["center_source"],
+        "trajectory_role": trajectory_role,
         # Scores are always relative to the region assigned to this group.
         # In particular, B2's score is proximity to its pseudo-center, not
         # proximity to the true reaction center.
@@ -366,6 +433,9 @@ def _runtime(group_dir: Path) -> dict:
 
 
 def analyze(args: argparse.Namespace) -> dict:
+    experiment = EXPERIMENTS[args.experiment]
+    performance_groups = experiment["performance_groups"]
+    event_groups = experiment["event_groups"]
     run_root = Path(args.run_root)
     products = _read_lines(Path(args.products_file))
     targets = _read_lines(Path(args.targets_file))
@@ -380,7 +450,7 @@ def analyze(args: argparse.Namespace) -> dict:
     ]
 
     b0_metadata = json.loads(
-        (run_root / PERFORMANCE_GROUPS["b0"] / "sampling_metadata.json").read_text()
+        (run_root / performance_groups["b0"] / "sampling_metadata.json").read_text()
     )
     expected_trajectories = int(b0_metadata["product_count"]) * int(
         b0_metadata["sampling"]["n_samples"]
@@ -390,7 +460,7 @@ def analyze(args: argparse.Namespace) -> dict:
     performance = {}
     performance_arrays = {}
     runtimes = {}
-    for label, dirname in PERFORMANCE_GROUPS.items():
+    for label, dirname in performance_groups.items():
         performance[label], performance_arrays[label] = _performance_rows(
             run_root / dirname
         )
@@ -405,10 +475,53 @@ def analyze(args: argparse.Namespace) -> dict:
             max_seq_len=max_seq_len,
             expected_trajectories=expected_trajectories,
         )
-        for label, dirname in EVENT_GROUPS.items()
+        for label, dirname in event_groups.items()
     }
+    event_quality_by_trajectory_role = {}
+    if args.experiment == "rc15":
+        mix_metadata = json.loads(
+            (run_root / performance_groups["rc15_mixed"] /
+             "sampling_metadata.json").read_text()
+        )
+        mix_sampling = mix_metadata["sampling"]
+        guided_count = int(
+            mix_sampling["first_event_center_guided_trajectories"]
+        )
+        ordinary_count = int(
+            mix_sampling["first_event_center_ordinary_trajectories"]
+        )
+        if guided_count + ordinary_count != int(mix_sampling["n_samples"]):
+            raise ValueError("RC1.5 guided/ordinary trajectory counts disagree")
+        role_counts = {
+            "center_guided": guided_count,
+            "ordinary_euler": ordinary_count,
+        }
+        for role, trajectories_per_product in role_counts.items():
+            event_quality_by_trajectory_role[role] = _event_summary(
+                run_root / event_groups["rc15_mixed"],
+                source_ids,
+                target_ids,
+                before_distances,
+                max_seq_len=max_seq_len,
+                expected_trajectories=(
+                    int(mix_metadata["product_count"])
+                    * trajectories_per_product
+                ),
+                trajectory_role=role,
+            )
+
+    paired_vs_b0 = {
+        label: _paired_bootstrap(
+            performance_arrays["b0"], performance_arrays[label],
+            draws=args.bootstrap_draws, seed=args.seed,
+        )
+        for label in experiment["b0_candidates"]
+    }
+    between_base = experiment["between_base"]
+    between_candidate = experiment["between_candidate"]
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "experiment": args.experiment,
         "run_root": str(run_root),
         "input": {
             "products_file": str(Path(args.products_file)),
@@ -419,39 +532,30 @@ def analyze(args: argparse.Namespace) -> dict:
             "expected_trajectories": expected_trajectories,
             "max_seq_len": max_seq_len,
         },
-        "conditions": {
-            "b0": "ordinary Euler N=9 (with B0-trace only for identical event recording)",
-            "b1_oracle": "ORACLE / NOT DEPLOYABLE: true-center first-event position bias, multiplier=3",
-            "b2_pseudo": "same-product pseudo-center first-event position bias, multiplier=3",
-        },
+        "conditions": experiment["conditions"],
         "performance": performance,
         "runtimes": runtimes,
         "event_quality": event_quality,
-        "paired_bootstrap_vs_b0": {
-            "b1_oracle": _paired_bootstrap(
-                performance_arrays["b0"], performance_arrays["b1_oracle"],
-                draws=args.bootstrap_draws, seed=args.seed,
-            ),
-            "b2_pseudo": _paired_bootstrap(
-                performance_arrays["b0"], performance_arrays["b2_pseudo"],
-                draws=args.bootstrap_draws, seed=args.seed,
-            ),
-        },
-        # This is deliberately reported separately from the baseline
-        # comparisons: it asks whether the *correct* local region helps more
-        # than an otherwise comparable, deliberately wrong local region.
-        # The direction is B1 - B2 throughout.
-        "paired_bootstrap_b1_minus_b2": _paired_bootstrap(
-            performance_arrays["b2_pseudo"], performance_arrays["b1_oracle"],
+        "paired_bootstrap_vs_b0": paired_vs_b0,
+        experiment["between_key"]: _paired_bootstrap(
+            performance_arrays[between_base], performance_arrays[between_candidate],
             draws=args.bootstrap_draws, seed=args.seed,
         ),
     }
+    if event_quality_by_trajectory_role:
+        result["event_quality_by_trajectory_role"] = (
+            event_quality_by_trajectory_role
+        )
     return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-root", required=True)
+    parser.add_argument(
+        "--experiment", choices=tuple(EXPERIMENTS), default="rc1",
+        help="RC1 all-guided/pseudo control analysis or RC1.5 mixed analysis",
+    )
     parser.add_argument("--products-file", required=True)
     parser.add_argument("--targets-file", required=True)
     parser.add_argument("--vocab-file", required=True)

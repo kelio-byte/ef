@@ -801,6 +801,7 @@ def sample_euler(
     start_time: Optional[Tensor | float] = None,
     initial_origin_mask: Optional[Tensor] = None,
     first_event_position_scores: Optional[Tensor] = None,
+    first_event_position_bias_enabled: Optional[Tensor] = None,
     first_event_bias_max_multiplier: float = 3.0,
     first_event_bias_stats: Optional[dict] = None,
     first_event_row_metadata: Optional[List[dict]] = None,
@@ -884,9 +885,30 @@ def sample_euler(
             first_event_position_scores > 1
         ).any():
             raise ValueError("first_event_position_scores must lie in [0, 1]")
+        # ``first_event_bias_active`` tracks rows until their first actual
+        # edit.  ``first_event_position_bias_enabled`` is separate on
+        # purpose: RC1.5 records the first event for all nine trajectories,
+        # but only reweights positions for its guided subset.  The remaining
+        # rows therefore follow ordinary Euler exactly while still producing
+        # comparable first-event diagnostics.
         first_event_bias_active = torch.ones(
             batch_size, dtype=torch.bool, device=device
         )
+        if first_event_position_bias_enabled is None:
+            first_event_position_bias_enabled = torch.ones(
+                batch_size, dtype=torch.bool, device=device
+            )
+        else:
+            if first_event_position_bias_enabled.shape != (batch_size,):
+                raise ValueError(
+                    "first_event_position_bias_enabled must have shape "
+                    "[batch]"
+                )
+            first_event_position_bias_enabled = (
+                first_event_position_bias_enabled.to(
+                    device=device, dtype=torch.bool
+                )
+            )
         if first_event_row_metadata is not None and len(
             first_event_row_metadata
         ) != batch_size:
@@ -895,6 +917,7 @@ def sample_euler(
             )
         if first_event_bias_stats is not None:
             first_event_bias_stats.setdefault("biased_row_steps", 0)
+            first_event_bias_stats.setdefault("guided_row_steps", 0)
             first_event_bias_stats.setdefault("first_event_count", 0)
             first_event_bias_stats.setdefault("no_event_count", 0)
             first_event_bias_stats.setdefault(
@@ -902,6 +925,11 @@ def sample_euler(
             )
             first_event_bias_stats.setdefault("records", [])
     else:
+        if first_event_position_bias_enabled is not None:
+            raise ValueError(
+                "first_event_position_bias_enabled requires "
+                "first_event_position_scores"
+            )
         if first_event_row_metadata is not None:
             raise ValueError(
                 "first_event_row_metadata requires first_event_position_scores"
@@ -1045,7 +1073,12 @@ def sample_euler(
             x_t, log_rates, log_ins_probs, log_sub_probs, adapt_h,
             pad_token=pad_token, event_prob_mode=event_prob_mode,
             position_scores=current_position_scores,
-            position_bias_active=first_event_bias_active,
+            position_bias_active=(
+                first_event_bias_active
+                & first_event_position_bias_enabled
+                if first_event_bias_active is not None
+                else None
+            ),
             position_bias_max_multiplier=first_event_bias_max_multiplier,
         )
 
@@ -1061,6 +1094,12 @@ def sample_euler(
                 active_not_done = first_event_bias_active & ~done
                 first_event_bias_stats["biased_row_steps"] += int(
                     active_not_done.sum().item()
+                )
+                guided_not_done = (
+                    active_not_done & first_event_position_bias_enabled
+                )
+                first_event_bias_stats["guided_row_steps"] += int(
+                    guided_not_done.sum().item()
                 )
                 changed_errors = bias_diagnostics["relative_error"][
                     bias_diagnostics["changed"]
@@ -1128,6 +1167,14 @@ def sample_euler(
                         "first_event_t": float(t[sample_idx, 0].item()),
                         "action_count": len(action_rows),
                         "actions": action_rows,
+                        "position_bias_enabled": bool(
+                            first_event_position_bias_enabled[
+                                sample_idx
+                            ].item()
+                        ),
+                        "position_bias_reweighted": bool(
+                            bias_diagnostics["changed"][sample_idx].any().item()
+                        ),
                     }
                     if first_event_row_metadata is not None:
                         record["row_metadata"] = (
@@ -1375,9 +1422,21 @@ def sample_euler(
     if verbose:
         pbar.close()
     if first_event_bias_stats is not None and first_event_bias_active is not None:
-        first_event_bias_stats["no_event_count"] += int(
-            first_event_bias_active.sum().item()
-        )
+        no_event_indices = torch.nonzero(
+            first_event_bias_active, as_tuple=False
+        ).squeeze(-1).tolist()
+        first_event_bias_stats["no_event_count"] += len(no_event_indices)
+        if first_event_row_metadata is not None:
+            by_role = first_event_bias_stats.setdefault(
+                "no_event_trajectory_role_counts", {}
+            )
+            for sample_idx in no_event_indices:
+                role = str(
+                    first_event_row_metadata[sample_idx].get(
+                        "trajectory_role", "unspecified"
+                    )
+                )
+                by_role[role] = int(by_role.get(role, 0)) + 1
     if record_all_events:
         return x_t, trajectory, all_events
     if record_compact_events:

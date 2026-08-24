@@ -104,6 +104,13 @@ def build_parser() -> argparse.ArgumentParser:
     sampling.add_argument(
         "--first_event_center_max_multiplier", type=float, default=3.0,
     )
+    sampling.add_argument(
+        "--first_event_center_guided_trajectories", type=int, default=None,
+        help=(
+            "Number of Euler trajectories using center bias before their "
+            "first actual edit; the remaining trajectories are ordinary Euler"
+        ),
+    )
     sampling.add_argument("--n_branches", type=int, default=3)
     sampling.add_argument("--n_children", type=int, default=2)
     sampling.add_argument("--n_runs", type=int, default=3)
@@ -269,6 +276,11 @@ def build_sample_command(args: argparse.Namespace) -> list[str]:
             "--first_event_center_max_multiplier",
             str(args.first_event_center_max_multiplier),
         ))
+        _add_value(
+            command,
+            "--first_event_center_guided_trajectories",
+            args.first_event_center_guided_trajectories,
+        )
     _add_value(
         command,
         "--euler_beam_initial_seed_groups",
