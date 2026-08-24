@@ -2,6 +2,8 @@
 
 日期：2026-08-24
 
+正式 smoke、pilot100 和 dev-1000 已完成；最终结果见 [stage1_report.md](stage1_report.md)。以下命令保留用于复现，不应再以 dev 扫描新的 bias 倍率。
+
 ## 推荐入口
 
 GPU 开机并进入 `ef` 环境后，先运行：
@@ -24,7 +26,7 @@ bash scripts/run_stage1_rc1.sh pilot100
 bash scripts/run_stage1_rc1.sh dev1000
 ```
 
-脚本每次建立带 UTC 时间戳的新目录，不覆盖旧结果。也可用 `OUTPUT_ROOT=/指定目录` 固定输出位置。默认使用当前环境的 `python`、CUDA 第 0 张卡、batch size 32。
+脚本每次建立带 UTC 时间戳的新目录，不覆盖旧结果。也可用 `OUTPUT_ROOT=/指定目录` 固定输出位置。脚本会切到项目根目录并设置 `PYTHONPATH`；优先使用 `/root/miniconda3/envs/ef/bin/python`，其次使用 `/root/autodl-tmp/ef/bin/python`，也可用 `PYTHON_BIN=/路径/python` 显式覆盖。默认 CUDA 第 0 张卡、batch size 32。
 
 ## 每个规模会跑什么
 

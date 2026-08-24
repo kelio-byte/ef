@@ -18,7 +18,22 @@ case "$MODE" in
     ;;
 esac
 
-PYTHON_BIN="${PYTHON_BIN:-python}"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
+export PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+
+# The local AutoDL setup keeps the project environment here.  Prefer it when
+# the caller did not explicitly provide a Python executable, but retain the
+# override for a different machine or conda environment.
+if [[ -n "${PYTHON_BIN:-}" ]]; then
+  PYTHON_BIN="$PYTHON_BIN"
+elif [[ -x /root/miniconda3/envs/ef/bin/python ]]; then
+  PYTHON_BIN="/root/miniconda3/envs/ef/bin/python"
+elif [[ -x /root/autodl-tmp/ef/bin/python ]]; then
+  PYTHON_BIN="/root/autodl-tmp/ef/bin/python"
+else
+  PYTHON_BIN="python"
+fi
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/after_spe_stage1/rc1_runs/${RUN_ID}_${MODE}}"
 CHECKPOINT="new_checkpoints/spe_m500_checkpoints/checkpoint_step490000.pt"
