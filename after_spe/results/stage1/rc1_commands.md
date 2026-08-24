@@ -4,6 +4,8 @@
 
 正式 smoke、pilot100、dev-1000 和独立 confirm-1000 已完成；当前结论见 [stage1_report.md](stage1_report.md) 与 [rc1_confirm1000_report.md](rc1_confirm1000_report.md)。以下命令保留用于复现，不应再以 dev 扫描新的 bias 倍率。
 
+RC1.5 的 dev-1000 也已完成，报告见 [rc15_dev1000_report.md](rc15_dev1000_report.md)。它固定为 3 条真实中心引导轨迹 + 6 条普通 Euler 轨迹；下一次允许的中心实验是同配方的 confirm-1000，不是继续扫倍率或轨迹比例。
+
 ## 推荐入口
 
 GPU 开机并进入 `ef` 环境后，先运行：
@@ -48,3 +50,27 @@ bash scripts/run_stage1_rc1.sh confirm1000
 B0-trace 用 `max_multiplier=1.0` 收集普通 Euler 的首事件。脚本会逐字节比较 B0 和 B0-trace 的预测；不同则立即失败。正式运行时间以没有诊断开销的 B0 为准，B1/B2 的时间包含 sidecar 与首事件记录开销。
 
 所有组固定为 M500@490K、Euler N=9、100 steps、seed=42、20 augmentation 和相同评分协议。
+
+## RC1.5 混合轨迹入口
+
+先做新接口的 smoke：
+
+```bash
+bash scripts/run_stage1_rc15.sh smoke
+```
+
+已完成的 dev 复现命令：
+
+```bash
+bash scripts/run_stage1_rc15.sh dev1000
+```
+
+该命令只重新生成 RC1.5；它会验证并复用已完成的同协议 B0、B0-trace、B1 输出，避免无意义地重复三遍完整推理。本次提交前的 smoke 已确认新代码的 B0、B0-trace、B1 与旧 RC1 smoke 逐字节一致。
+
+如要执行下一次独立复核，命令固定为：
+
+```bash
+bash scripts/run_stage1_rc15.sh confirm1000
+```
+
+`confirm1000` 使用 `confirm_unique1000_aug20`、其独立 center sidecar 和既有的 confirm B0/B1 输出；脚本会核验输入哈希、采样协议和 B0/B0-trace 的逐字节一致性。不要在该命令中改 checkpoint、倍率、trajectory 数、seed 或步数。

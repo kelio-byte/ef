@@ -10,13 +10,23 @@ case "$MODE" in
   smoke)
     MAX_PRODUCTS=200
     REUSE_REFERENCE=0
+    DEFAULT_EVALUATION_SPLIT="dev_unique1000_aug20"
+    DEFAULT_REFERENCE_RC1_ROOT=""
     ;;
   dev1000)
     MAX_PRODUCTS=20000
     REUSE_REFERENCE=1
+    DEFAULT_EVALUATION_SPLIT="dev_unique1000_aug20"
+    DEFAULT_REFERENCE_RC1_ROOT="results/after_spe_stage1/rc1_runs/20260823T225828Z_dev1000"
+    ;;
+  confirm1000)
+    MAX_PRODUCTS=20000
+    REUSE_REFERENCE=1
+    DEFAULT_EVALUATION_SPLIT="confirm_unique1000_aug20"
+    DEFAULT_REFERENCE_RC1_ROOT="results/after_spe_stage1/rc1_runs/20260824T055400Z_confirm1000"
     ;;
   *)
-    echo "Usage: $0 {smoke|dev1000}" >&2
+    echo "Usage: $0 {smoke|dev1000|confirm1000}" >&2
     exit 2
     ;;
 esac
@@ -37,10 +47,10 @@ fi
 
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/after_spe_stage1/rc15_runs/${RUN_ID}_${MODE}}"
-REFERENCE_RC1_ROOT="${REFERENCE_RC1_ROOT:-results/after_spe_stage1/rc1_runs/20260823T225828Z_dev1000}"
+REFERENCE_RC1_ROOT="${REFERENCE_RC1_ROOT:-$DEFAULT_REFERENCE_RC1_ROOT}"
 CHECKPOINT="new_checkpoints/spe_m500_checkpoints/checkpoint_step490000.pt"
 DATA_DIR="datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500"
-EVALUATION_SPLIT="dev_unique1000_aug20"
+EVALUATION_SPLIT="${EVALUATION_SPLIT:-$DEFAULT_EVALUATION_SPLIT}"
 PRODUCTS="${DATA_DIR}/evaluation_v2/${EVALUATION_SPLIT}/src.txt"
 TARGETS="${DATA_DIR}/evaluation_v2/${EVALUATION_SPLIT}/tgt.txt"
 VOCAB="${DATA_DIR}/example.vocab.src"
@@ -243,8 +253,8 @@ run_group rc15_mixed \
 
 verify_mixed_sanity
 
-if [[ "$MODE" == "dev1000" ]]; then
-  SUMMARY_JSON="after_spe/results/stage1/rc15_dev1000_summary.json"
+if [[ "$MODE" == "dev1000" || "$MODE" == "confirm1000" ]]; then
+  SUMMARY_JSON="after_spe/results/stage1/rc15_${MODE}_summary.json"
 else
   SUMMARY_JSON="$OUTPUT_ROOT/summary.json"
 fi

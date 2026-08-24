@@ -533,6 +533,13 @@ def analyze(args: argparse.Namespace) -> dict:
             "max_seq_len": max_seq_len,
         },
         "conditions": experiment["conditions"],
+        # RC1.5 can reuse validated B0/B1 outputs through directory links.
+        # Store the resolved origin of every group so a committed summary
+        # remains auditable even when the run root itself only contains links.
+        "group_sources": {
+            label: str((run_root / dirname).resolve())
+            for label, dirname in performance_groups.items()
+        },
         "performance": performance,
         "runtimes": runtimes,
         "event_quality": event_quality,

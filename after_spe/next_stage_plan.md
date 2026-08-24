@@ -1,7 +1,7 @@
 # SPE 之后的下一阶段改进方案
 
 更新日期：2026-08-24
-状态：已根据 RC1 dev-1000 与独立 confirm-1000 的完成结果更新。真实中心首步偏向有可复现的正向机制信号，但当前全中心偏向设计尚未冻结为可部署路线。
+状态：已根据全 B1 的 dev/confirm 与 RC1.5 dev-1000 结果更新。真实中心首步偏向有可复现的正向机制信号；3+6 混合设计缓解了全 B1 的覆盖损失，但还需独立 confirm 才能冻结为 predictor 的上界路线。
 
 ## 1. 结论先行
 
@@ -14,7 +14,7 @@ SPE 的 tokenizer 选择已经冻结为 **global R-SMILES + SPE-M500**。下一�
 
 | 优先级 | 方向 | 先做什么 | 是否需要重训基础模型 | 当前判断 |
 |---:|---|---|---:|---|
-| 1 | 反应中心感知的首编辑采样 | 先做 3 条中心偏向 + 6 条普通 Euler 的 oracle 混合设计；通过后才训练 product-only 中心预测器 | 否 | 当前最值得验证 |
+| 1 | 反应中心感知的首编辑采样 | 固定复核 3 条中心偏向 + 6 条普通 Euler 的 oracle 混合设计；通过后才训练 product-only 中心预测器 | 否 | 当前最值得确认 |
 | 2 | 不可变产物条件 | 给动态状态提供始终可见的 product memory | 是 | 最值得进行的训练改造 |
 | 3 | 自生成错误上的恢复训练 | 用错误中间状态训练模型恢复到目标 | 是 | 有直接诊断依据，但应接在 product memory 后 |
 | 4 | DEL 稀有操作处理 | 先做 DEL 子集诊断，再决定辅助损失或 roll-in | 可能 | 保留 DEL，不能直接删除 |
@@ -22,9 +22,9 @@ SPE 的 tokenizer 选择已经冻结为 **global R-SMILES + SPE-M500**。下一�
 
 最推荐的下一个实质实验是：
 
-> **在不训练任何新模型的前提下，用真实中心做一个 3 条中心偏向 + 6 条普通 Euler 的九轨迹混合上界实验；首编辑以后全部恢复普通 Euler。**
+> **不改任何配置，在独立 confirm-1000 上复核已经完成的 3 条中心偏向 + 6 条普通 Euler 九轨迹混合上界实验；首编辑以后全部恢复普通 Euler。**
 
-原因是当前全 B1 方案在 dev/confirm 的 Top-1 都优于 B0（`+1.1/+1.5 pp`），但也稳定减少真正不同候选。先修复这个 oracle 设计的覆盖损失，才能判断一个信息更弱的 product-only predictor 是否值得训练。
+原因是当前全 B1 方案在 dev/confirm 的 Top-1 都优于 B0（`+1.1/+1.5 pp`），但也减少真正不同候选。RC1.5 在 dev 上保留 `+1.1 pp` Top-1，且 Top-3/5/10/Oracle 的点估计均不低于 B0；现在要确认这不是 dev 内偶然波动，才能判断一个信息更弱的 product-only predictor 是否值得训练。
 
 它同时具有三点优势：直接针对早期有害编辑；不需要重训已有 M500 基础模型；不同中心天然提供比“随机选择 INS/SUB/DEL”更有化学意义的候选多样性。
 
@@ -118,7 +118,7 @@ SPE token 可能包含括号、环号或多个原子，因此不应把每个 SPE
 
 随后做一个只用于诊断的 **true-center upper bound**：在 dev 上用真实中心偏置首编辑，但真实中心绝不进入正式推理。如果连真实中心都不能在同预算下改善首事件质量或 Top-k，则说明当前字符串编辑与图中心的映射不兼容，应停止该方向，不必训练中心预测器。
 
-2026-08-24 更新：全中心偏向 B1 已完成 dev 与独立 confirm；两者的 Top-1 相对 B0 均为正，但 B1 损失真正不同候选，且 confirm 的单 split 区间仍包含 0。因此在 RC-P1 前增加一个冻结的 **RC-P0.5**：只测试 `3` 条 B1 轨迹 + `6` 条 B0 轨迹，验证是否能同时保留 Top-1 信号与候选覆盖。完整数据见 `after_spe/results/stage1/rc1_confirm1000_report.md`。
+2026-08-24 更新：全中心偏向 B1 已完成 dev 与独立 confirm；两者的 Top-1 相对 B0 均为正，但 B1 损失真正不同候选，且 confirm 的单 split 区间仍包含 0。冻结的 **RC-P0.5/RC1.5**（`3` 条 B1 轨迹 + `6` 条 B0 轨迹）已在 dev 完成：Top-1 `61.2%`（B0 `60.1%`），Top-3/5/10/Oracle 点估计均高于 B0，unique 的降幅也小于全 B1。其相对 B0 的区间仍覆盖 0，因此下一步是一次不改参数的 confirm 复核，而不是直接训练 RC-P1。完整数据见 `after_spe/results/stage1/rc15_dev1000_report.md`。
 
 #### RC-P1：product-only 中心预测器
 
@@ -329,8 +329,8 @@ M500 仍有约 12% 的 rank-1 invalid。可以研究括号、环号和特殊 tok
 1. 构建 atom-mapped reaction center 标签和 raw→M500 crosswalk；
 2. 完成 RC-P0 locality audit；
 3. 用 true-center 做首编辑 upper bound；
-4. 在既有上界基础上运行固定的 RC-P0.5（3 条中心偏向 + 6 条普通 Euler）；
-5. RC-P0.5 通过后训练仅看产物的反应中心预测器；
+4. 在既有上界基础上完成固定 RC-P0.5 的独立 confirm 复核（3 条中心偏向 + 6 条普通 Euler）；
+5. RC-P0.5 在 confirm 也通过后训练仅看产物的反应中心预测器；
 6. 运行 Top-3 center × 3 trajectories 的 RC-P2；
 
 这一阶段只回答：化学中心是否能为当前 M500 Euler 提供真实增量。操作集合调整不纳入本阶段。
@@ -363,7 +363,7 @@ M500 仍有约 12% 的 rank-1 invalid。可以研究括号、环号和特殊 tok
 
 ## 9. 当前建议的明确答案
 
-1. **反应中心：继续做，但先不训练 predictor。** 真实中心 upper bound 的正向方向已在 dev/confirm 复现；下一步先用 3 条中心偏向 + 6 条普通 Euler 修复覆盖损失，只有通过后才训练仅看产物图的中心预测器。
+1. **反应中心：继续做，但先不训练 predictor。** 真实中心 upper bound 的正向方向已在 dev/confirm 复现；3+6 混合设计也已在 dev 缓解覆盖损失。下一步只做其独立 confirm，只有 confirm 也通过后才训练仅看产物图的中心预测器。
 2. **DGM：不要原样重跑。** 只有反应中心信号通过简单采样 gate 后，才尝试 center/action guidance；旧 forward reward、旧 ranker 和旧按位置归一化方案不继续。
 3. **训练改造：优先 product memory，其次 roll-in。** 这是当前模型结构和纠错实验共同指出的缺口。
 
