@@ -20,6 +20,10 @@ from torch import Tensor
 
 from edit_flows.core.rate_scale import apply_rate_parameterization, get_rate_scale
 from edit_flows.core.scheduler import KappaScheduler
+from edit_flows.sampling.center_bias import (
+    align_position_scores,
+    renormalize_position_biased_log_rates,
+)
 from edit_flows.sampling.euler import (
     _compute_model_time,
     _event_probability,
@@ -46,7 +50,8 @@ class _BranchState:
 
     __slots__ = (
         "x_t", "weight", "path_log_p", "log_mass", "t", "seed", "state_key",
-        "first_edit_signature",
+        "first_edit_signature", "first_event_pending", "first_event_record",
+        "first_event_reweighted",
     )
 
     def __init__(
@@ -59,6 +64,9 @@ class _BranchState:
         seed: int = 0,       # 随机种子
         state_key: Optional[Tuple[int, ...]] = None,
         first_edit_signature: FirstEditSignature = None,
+        first_event_pending: bool = False,
+        first_event_record: Optional[dict] = None,
+        first_event_reweighted: bool = False,
     ):
         self.x_t = x_t
         self.weight = weight
@@ -68,6 +76,9 @@ class _BranchState:
         self.seed = seed
         self.state_key = state_key
         self.first_edit_signature = first_edit_signature
+        self.first_event_pending = first_event_pending
+        self.first_event_record = first_event_record
+        self.first_event_reweighted = first_event_reweighted
 
     def clone(self) -> _BranchState:
         return _BranchState(
@@ -79,6 +90,9 @@ class _BranchState:
             seed=self.seed,
             state_key=self.state_key,
             first_edit_signature=self.first_edit_signature,
+            first_event_pending=self.first_event_pending,
+            first_event_record=self.first_event_record,
+            first_event_reweighted=self.first_event_reweighted,
         )
 
 
@@ -645,10 +659,12 @@ def _sample_actions_per_branch(
     pad_token: int,
     event_prob_mode: str,
     step: int,
+    position_scores: Optional[Tensor] = None,
+    position_bias_active: Optional[Tensor] = None,
+    position_bias_max_multiplier: float = 3.0,
 ) -> dict:
     """按 branch seed 无状态、批量地采样所有分支动作。"""
     seeds = branch_seeds.to(device=x_t.device, dtype=torch.int64)
-    rates = torch.exp(log_rates)
     legal_log_ins_probs, ins_log_normalizer = legal_token_log_probs(
         log_ins_probs,
     )
@@ -664,6 +680,26 @@ def _sample_actions_per_branch(
     # becoming silent no-ops and keeps proposal sampling aligned with scoring.
     ins_sample_positions = insert_positions & torch.isfinite(ins_log_normalizer)
     sub_sample_positions = sub_del_positions & torch.isfinite(sub_log_normalizer)
+    position_bias_diagnostics = None
+    if position_scores is not None:
+        if position_bias_active is None:
+            raise ValueError(
+                "position_bias_active is required with position_scores"
+            )
+        legal_position_masks = torch.stack(
+            (ins_sample_positions, sub_sample_positions, sub_del_positions),
+            dim=-1,
+        )
+        log_rates, position_bias_diagnostics = (
+            renormalize_position_biased_log_rates(
+                log_rates,
+                position_scores,
+                legal_position_masks,
+                position_bias_active,
+                max_multiplier=position_bias_max_multiplier,
+            )
+        )
+    rates = torch.exp(log_rates)
     lambda_ins = rates[:, :, 0] * ins_sample_positions.to(rates.dtype)
     lambda_sub = rates[:, :, 1] * sub_sample_positions.to(rates.dtype)
     lambda_del = rates[:, :, 2] * sub_del_positions.to(rates.dtype)
@@ -715,7 +751,52 @@ def _sample_actions_per_branch(
         "sub_token_log_normalizer": sub_log_normalizer,
         "insert_position_mask": insert_positions,
         "sub_del_position_mask": sub_del_positions,
+        # Beam ranking must score the same (possibly center-reweighted)
+        # proposal distribution from which the child was sampled.
+        "effective_log_rates": log_rates,
+        "position_bias_diagnostics": position_bias_diagnostics,
     }
+
+
+def _first_event_actions_from_row(
+    actions: dict,
+    row_index: int,
+    position_scores: Tensor,
+) -> list[dict]:
+    """Serialize one selected lineage's first sampled action set.
+
+    This is intentionally invoked only for diagnostic runs.  The normal
+    R9K1M2 full-test path keeps a compact aggregate instead of materializing
+    one large JSON record per sampled trajectory.
+    """
+    action_rows = []
+    for mode_name, mode_index, mask_name in (
+        ("INS", 0, "ins_mask"),
+        ("SUB", 1, "sub_mask"),
+        ("DEL", 2, "del_mask"),
+    ):
+        positions = torch.nonzero(
+            actions[mask_name][row_index], as_tuple=False,
+        ).squeeze(-1).tolist()
+        for position in positions:
+            token_name = (
+                "ins_tokens" if mode_name == "INS" else "sub_tokens"
+            )
+            action_rows.append(
+                {
+                    "mode": mode_name,
+                    "position": int(position),
+                    "token_id": (
+                        int(actions[token_name][row_index, position].item())
+                        if mode_name in {"INS", "SUB"}
+                        else None
+                    ),
+                    "center_score": float(
+                        position_scores[row_index, position, mode_index].item()
+                    ),
+                }
+            )
+    return action_rows
 
 
 def _set_second_child_noop(actions: dict, n_children: int) -> None:
@@ -893,6 +974,12 @@ def sample_euler_beam(
     first_edit_diversity: bool = False,
     initial_branch_seeds: Optional[List[List[int]]] = None,
     sampling_stats: Optional[Dict[str, int]] = None,
+    first_event_position_scores: Optional[Tensor] = None,
+    first_event_position_bias_enabled: Optional[Tensor] = None,
+    first_event_bias_max_multiplier: float = 3.0,
+    first_event_bias_stats: Optional[dict] = None,
+    first_event_row_metadata: Optional[List[dict]] = None,
+    first_event_bias_record_events: bool = False,
 ) -> Tensor:
     """Euler 采样 + 分支维护。
 
@@ -915,6 +1002,14 @@ def sample_euler_beam(
             1.0保持checkpoint原始分布。
         first_edit_diversity: 在多后继模式下，首次真实状态变化时优先保留
             不同的编辑 signature；不增加模型前向或最终输出槽位。
+        first_event_position_scores: 固定初始产物位置的 [B,L,3] 中心分数。
+            仅在每条 lineage 的第一个真实编辑前重加权 INS/SUB/DEL 的
+            位置速率；每个 mode 的合法总 hazard 保持不变。
+        first_event_position_bias_enabled: [B]；允许同一批中一部分 run
+            接受中心偏向，其他 run 仍按原 R9K1M2 采样。
+        first_event_bias_record_events: 仅诊断用。True 时保留每条最终
+            lineage 的首事件详情；False 时只保留轻量计数，避免全量 test
+            写出大体积 JSON。
 
     Returns:
         x_final: (B * n_branches, L_out) 每条样本的全部排名分支，按样本优先
@@ -1010,6 +1105,88 @@ def sample_euler_beam(
     origin_keys = _token_keys_batch(x_0, pad_token, bos_token)
     noop_step = min(n_steps - 1, int(0.9 * n_steps))
 
+    if first_event_position_scores is not None:
+        if (
+            first_event_position_scores.ndim != 3
+            or first_event_position_scores.shape[0] != B
+            or first_event_position_scores.shape[1] != x_0.shape[1]
+            or first_event_position_scores.shape[2] != 3
+        ):
+            raise ValueError(
+                "first_event_position_scores must have shape "
+                "[batch, initial_length, 3]"
+            )
+        first_event_position_scores = first_event_position_scores.to(
+            device=device, dtype=torch.float32,
+        )
+        if not torch.isfinite(first_event_position_scores).all():
+            raise ValueError("first_event_position_scores must be finite")
+        if (first_event_position_scores < 0).any() or (
+            first_event_position_scores > 1
+        ).any():
+            raise ValueError("first_event_position_scores must lie in [0, 1]")
+        if first_event_position_bias_enabled is None:
+            first_event_position_bias_enabled = torch.ones(
+                B, dtype=torch.bool, device=device,
+            )
+        else:
+            if first_event_position_bias_enabled.shape != (B,):
+                raise ValueError(
+                    "first_event_position_bias_enabled must have shape "
+                    "[batch]"
+                )
+            first_event_position_bias_enabled = (
+                first_event_position_bias_enabled.to(
+                    device=device, dtype=torch.bool,
+                )
+            )
+        if first_event_row_metadata is not None and len(
+            first_event_row_metadata
+        ) != B:
+            raise ValueError(
+                "first_event_row_metadata must have one item per batch row"
+            )
+        if (
+            first_event_bias_max_multiplier < 1
+            or not torch.isfinite(
+                torch.tensor(first_event_bias_max_multiplier)
+            )
+        ):
+            raise ValueError(
+                "first_event_bias_max_multiplier must be finite and >= 1"
+            )
+        if (
+            first_event_bias_stats is not None
+            and first_event_position_scores is not None
+        ):
+            first_event_bias_stats.setdefault("biased_row_steps", 0)
+            first_event_bias_stats.setdefault("guided_row_steps", 0)
+            first_event_bias_stats.setdefault("first_event_count", 0)
+            first_event_bias_stats.setdefault("no_event_count", 0)
+            first_event_bias_stats.setdefault(
+                "max_hazard_relative_error", 0.0,
+            )
+            first_event_bias_stats.setdefault("records", [])
+            first_event_bias_stats.setdefault(
+                "record_event_details", first_event_bias_record_events,
+            )
+    else:
+        if first_event_position_bias_enabled is not None:
+            raise ValueError(
+                "first_event_position_bias_enabled requires "
+                "first_event_position_scores"
+            )
+        if first_event_row_metadata is not None:
+            raise ValueError(
+                "first_event_row_metadata requires "
+                "first_event_position_scores"
+            )
+        if first_event_bias_record_events:
+            raise ValueError(
+                "first_event_bias_record_events requires "
+                "first_event_position_scores"
+            )
+
     # ── 初始化: 每条样本创建 n_branches 条分支 ──
     all_branches: List[List[_BranchState]] = []
     for b in range(B):
@@ -1032,6 +1209,12 @@ def sample_euler_beam(
                 t=0.0,
                 seed=branch_seed,
                 state_key=origin_keys[b],
+                # Unlike the bias itself, this flag remains active for
+                # unguided rows too so mixed designs can still count their
+                # first real action fairly.
+                first_event_pending=(
+                    first_event_position_scores is not None
+                ),
             ))
         all_branches.append(branches)
 
@@ -1205,6 +1388,37 @@ def sample_euler_beam(
         child_seeds = torch.tensor(
             child_seed_values, dtype=torch.int64, device=device,
         )
+        candidate_position_scores = None
+        candidate_position_bias_active = None
+        parent_first_event_pending = None
+        parent_center_bias_enabled = None
+        if first_event_position_scores is not None:
+            parent_sample_indices = torch.tensor(
+                [b for b, _, _ in flat],
+                dtype=torch.long,
+                device=device,
+            )
+            parent_position_scores = first_event_position_scores.index_select(
+                0, parent_sample_indices,
+            )
+            candidate_position_scores = align_position_scores(
+                parent_position_scores.index_select(0, parent_indices),
+                x_candidates.shape[1],
+            )
+            parent_first_event_pending = torch.tensor(
+                [branch.first_event_pending for _, _, branch in flat],
+                dtype=torch.bool,
+                device=device,
+            )
+            parent_center_bias_enabled = (
+                first_event_position_bias_enabled.index_select(
+                    0, parent_sample_indices,
+                )
+            )
+            candidate_position_bias_active = (
+                parent_first_event_pending
+                & parent_center_bias_enabled
+            ).index_select(0, parent_indices)
         actions_batch = _sample_actions_per_branch(
             child_seeds,
             x_candidates,
@@ -1214,9 +1428,44 @@ def sample_euler_beam(
             adapt_h_candidates,
             pad_token=pad_token, event_prob_mode=event_prob_mode,
             step=step,
+            position_scores=candidate_position_scores,
+            position_bias_active=candidate_position_bias_active,
+            position_bias_max_multiplier=first_event_bias_max_multiplier,
         )
         if child_policy == "stochastic_noop" and step == noop_step:
             _set_second_child_noop(actions_batch, n_children)
+        effective_lr_candidates = actions_batch.get(
+            "effective_log_rates", lr_candidates,
+        )
+        if (
+            first_event_bias_stats is not None
+            and first_event_position_scores is not None
+        ):
+            # Count logical selected parents, not their M children.  This is
+            # directly comparable with ordinary Euler's per-trajectory count.
+            first_event_bias_stats["biased_row_steps"] += int(
+                parent_first_event_pending.sum().item()
+            )
+            first_event_bias_stats["guided_row_steps"] += int(
+                (
+                    parent_first_event_pending
+                    & parent_center_bias_enabled
+                ).sum().item()
+            )
+            bias_diagnostics = actions_batch.get(
+                "position_bias_diagnostics"
+            )
+            if bias_diagnostics is not None:
+                changed_errors = bias_diagnostics["relative_error"][
+                    bias_diagnostics["changed"]
+                ]
+                if changed_errors.numel():
+                    first_event_bias_stats["max_hazard_relative_error"] = max(
+                        first_event_bias_stats[
+                            "max_hazard_relative_error"
+                        ],
+                        float(changed_errors.max().item()),
+                    )
         _profile_finish(
             profile, "child_proposal_seconds", section_started, device,
         )
@@ -1225,7 +1474,7 @@ def sample_euler_beam(
         section_started = _profile_start(profile, device)
         step_log_ps = _step_log_p_batch(
             actions_batch,
-            lr_candidates,
+            effective_lr_candidates,
             lip_candidates,
             lsp_candidates,
             adapt_h_candidates,
@@ -1279,6 +1528,18 @@ def sample_euler_beam(
             profile, "apply_edits_seconds", section_started, device,
         )
 
+        candidate_has_events = (
+            actions_batch["ins_mask"]
+            | actions_batch["sub_mask"]
+            | actions_batch["del_mask"]
+        ).any(dim=1).detach().cpu().tolist()
+        candidate_position_reweighted = None
+        bias_diagnostics = actions_batch.get("position_bias_diagnostics")
+        if bias_diagnostics is not None:
+            candidate_position_reweighted = (
+                bias_diagnostics["changed"].any(dim=1).detach().cpu().tolist()
+            )
+
         section_started = _profile_start(profile, device)
         new_branches: Dict[int, List[_BranchState]] = {b: [] for b in range(B)}
         new_keys: Dict[int, List[Tuple[int, ...]]] = {b: [] for b in range(B)}
@@ -1289,6 +1550,47 @@ def sample_euler_beam(
             first_edit_signature = s.first_edit_signature
             if first_edit_signature is None:
                 first_edit_signature = first_edit_signatures[i]
+            first_event_record = s.first_event_record
+            child_has_event = bool(candidate_has_events[i])
+            first_event_reweighted = s.first_event_reweighted
+            if (
+                first_event_position_scores is not None
+                and s.first_event_pending
+                and child_has_event
+                and first_event_bias_record_events
+            ):
+                action_rows = _first_event_actions_from_row(
+                    actions_batch, i, candidate_position_scores,
+                )
+                first_event_record = {
+                    "batch_row": int(b),
+                    "first_event_step_idx": int(step),
+                    "first_event_t": float(s.t),
+                    "action_count": len(action_rows),
+                    "actions": action_rows,
+                    "position_bias_enabled": bool(
+                        first_event_position_bias_enabled[b].item()
+                    ),
+                    "position_bias_reweighted": bool(
+                        candidate_position_reweighted[i]
+                        if candidate_position_reweighted is not None
+                        else False
+                    ),
+                }
+                if first_event_row_metadata is not None:
+                    first_event_record["row_metadata"] = (
+                        first_event_row_metadata[b]
+                    )
+            if (
+                first_event_position_scores is not None
+                and s.first_event_pending
+                and child_has_event
+            ):
+                first_event_reweighted = bool(
+                    candidate_position_reweighted[i]
+                    if candidate_position_reweighted is not None
+                    else False
+                )
             new_branches[b].append(_BranchState(
                 x_t=x_next_batch[i:i + 1],
                 weight=(1.0 if n_children > 1 else s.weight),
@@ -1301,6 +1603,11 @@ def sample_euler_beam(
                 seed=child_seed_values[i],
                 state_key=next_keys[i],
                 first_edit_signature=first_edit_signature,
+                first_event_pending=(
+                    s.first_event_pending and not child_has_event
+                ),
+                first_event_record=first_event_record,
+                first_event_reweighted=first_event_reweighted,
             ))
             new_keys[b].append(next_keys[i])
 
@@ -1418,6 +1725,10 @@ def sample_euler_beam(
                     t=parent.t,
                     seed=parent.seed + 10000 + len(all_branches[b]),
                     state_key=parent.state_key,
+                    first_edit_signature=parent.first_edit_signature,
+                    first_event_pending=parent.first_event_pending,
+                    first_event_record=parent.first_event_record,
+                    first_event_reweighted=parent.first_event_reweighted,
                 ))
         if first_edit_diversity and n_branches == 1:
             for group_start in range(0, B, profile_sample_group_size):
@@ -1477,6 +1788,24 @@ def sample_euler_beam(
     results: List[Tensor] = []
     shortfall_samples = 0
     shortfall_outputs = 0
+    if (
+        first_event_bias_stats is not None
+        and first_event_position_scores is not None
+        and not first_event_bias_record_events
+    ):
+        # The normal full-test path deliberately retains only counts.  A
+        # detailed record for every augmented R9 lineage would otherwise be
+        # hundreds of MB and add avoidable CPU serialization work.
+        first_event_bias_stats["summary_from_final_lineages"] = True
+        first_event_bias_stats.setdefault(
+            "first_event_trajectory_role_counts", {},
+        )
+        first_event_bias_stats.setdefault(
+            "reweighted_first_event_trajectory_role_counts", {},
+        )
+        first_event_bias_stats.setdefault(
+            "no_event_trajectory_role_counts", {},
+        )
     for b in range(B):
         if n_children > 1 and score_mode == "full_probability":
             ranked = all_branches[b]
@@ -1491,6 +1820,52 @@ def sample_euler_beam(
             shortfall_outputs += missing
             selected.extend([ranked[0]] * missing)
         results.extend(branch.x_t for branch in selected)
+        if (
+            first_event_bias_stats is not None
+            and first_event_position_scores is not None
+        ):
+            if first_event_row_metadata is None:
+                role = "unspecified"
+            else:
+                role = str(
+                    first_event_row_metadata[b].get(
+                        "trajectory_role", "unspecified",
+                    )
+                )
+            for branch_rank, branch in enumerate(selected):
+                if branch.first_event_pending:
+                    first_event_bias_stats["no_event_count"] += 1
+                    no_event_counts = first_event_bias_stats.setdefault(
+                        "no_event_trajectory_role_counts", {},
+                    )
+                    no_event_counts[role] = int(
+                        no_event_counts.get(role, 0)
+                    ) + 1
+                    continue
+                first_event_bias_stats["first_event_count"] += 1
+                if first_event_bias_record_events:
+                    if branch.first_event_record is None:
+                        raise RuntimeError(
+                            "first-event diagnostics lost a selected "
+                            "lineage record"
+                        )
+                    record = dict(branch.first_event_record)
+                    record["beam_branch_rank"] = int(branch_rank)
+                    first_event_bias_stats["records"].append(record)
+                    continue
+                first_event_counts = first_event_bias_stats[
+                    "first_event_trajectory_role_counts"
+                ]
+                first_event_counts[role] = int(
+                    first_event_counts.get(role, 0)
+                ) + 1
+                if branch.first_event_reweighted:
+                    reweighted_counts = first_event_bias_stats[
+                        "reweighted_first_event_trajectory_role_counts"
+                    ]
+                    reweighted_counts[role] = int(
+                        reweighted_counts.get(role, 0)
+                    ) + 1
 
     if sampling_stats is not None:
         sampling_stats["final_branch_shortfall_samples"] = (

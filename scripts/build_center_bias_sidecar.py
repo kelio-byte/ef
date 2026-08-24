@@ -250,6 +250,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--evaluation_split", default="dev_unique1000_aug20")
     parser.add_argument(
+        "--all_processed_blocks",
+        action="store_true",
+        help=(
+            "Build a sidecar for every complete augmentation block in the "
+            "provided product files (used for the held-out test set; does "
+            "not read the evaluation manifest)"
+        ),
+    )
+    parser.add_argument(
         "--global_products",
         type=Path,
         default=Path(
@@ -307,20 +316,43 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    manifest = json.loads(args.manifest.read_text())
-    reaction_indices = [
-        int(value)
-        for value in manifest["splits"][args.evaluation_split][
-            "original_reaction_indices"
+    if args.augmentation <= 0:
+        raise ValueError("augmentation must be positive")
+    global_all_rows = args.global_products.read_text().splitlines()
+    m500_all_rows = args.m500_products.read_text().splitlines()
+    if len(global_all_rows) != len(m500_all_rows):
+        raise ValueError(
+            "global and M500 product files have different row counts: "
+            f"{len(global_all_rows)} != {len(m500_all_rows)}"
+        )
+
+    manifest = None
+    if args.all_processed_blocks:
+        if len(global_all_rows) % args.augmentation:
+            raise ValueError(
+                "all_processed_blocks requires complete augmentation blocks: "
+                f"{len(global_all_rows)} % {args.augmentation} != 0"
+            )
+        reaction_indices = list(
+            range(len(global_all_rows) // args.augmentation)
+        )
+        selection_name = "all_processed_blocks"
+    else:
+        manifest = json.loads(args.manifest.read_text())
+        reaction_indices = [
+            int(value)
+            for value in manifest["splits"][args.evaluation_split][
+                "original_reaction_indices"
+            ]
         ]
-    ]
+        selection_name = args.evaluation_split
     if args.max_reactions is not None:
         if args.max_reactions <= 0:
             raise ValueError("max_reactions must be positive")
         reaction_indices = reaction_indices[: args.max_reactions]
     expected_rows = len(reaction_indices) * args.augmentation
-    global_rows = args.global_products.read_text().splitlines()[:expected_rows]
-    m500_rows = args.m500_products.read_text().splitlines()[:expected_rows]
+    global_rows = global_all_rows[:expected_rows]
+    m500_rows = m500_all_rows[:expected_rows]
     if len(global_rows) != expected_rows or len(m500_rows) != expected_rows:
         raise ValueError("evaluation product files have too few rows")
 
@@ -335,9 +367,25 @@ def main() -> int:
     tasks = []
     pseudo_relaxations = {}
     for reaction_position, block_index in enumerate(reaction_indices):
+        if block_index not in crosswalk:
+            raise ValueError(
+                "no raw-to-processed crosswalk entry for processed block "
+                f"{block_index}"
+            )
         match = crosswalk[block_index]
-        label = labels[match["raw_index"]]
-        raw_row = raw[match["raw_index"]]
+        raw_index = match["raw_index"]
+        if raw_index not in labels or raw_index not in raw:
+            raise ValueError(
+                "crosswalk points to a missing raw label/row: "
+                f"processed block {block_index}, raw index {raw_index}"
+            )
+        label = labels[raw_index]
+        raw_row = raw[raw_index]
+        if label.get("status") != "ok":
+            raise ValueError(
+                "reaction-center label is not usable for processed block "
+                f"{block_index}: {label.get('status')}"
+            )
         pseudo = _pseudo_components(
             label,
             raw_row["product"],
@@ -385,6 +433,33 @@ def main() -> int:
     with scores_path.open("w") as handle:
         for record in records:
             handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+    files = {
+        "global_products": {
+            "path": str(args.global_products),
+            "sha256": _sha256(args.global_products),
+        },
+        "m500_products": {
+            "path": str(args.m500_products),
+            "sha256": _sha256(args.m500_products),
+        },
+        "labels": {
+            "path": str(args.labels),
+            "sha256": _sha256(args.labels),
+        },
+        "crosswalk": {
+            "path": str(args.crosswalk),
+            "sha256": _sha256(args.crosswalk),
+        },
+        "scores": {
+            "path": str(scores_path),
+            "sha256": _sha256(scores_path),
+        },
+    }
+    if manifest is not None:
+        files["manifest"] = {
+            "path": str(args.manifest),
+            "sha256": _sha256(args.manifest),
+        }
     metadata = {
         "schema_version": 1,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -392,7 +467,11 @@ def main() -> int:
             "RC1 oracle true-center and same-product pseudo-center scores"
         ),
         "deployable": False,
-        "evaluation_split": args.evaluation_split,
+        "evaluation_split": selection_name,
+        "selection_kind": (
+            "all_processed_blocks"
+            if args.all_processed_blocks else "manifest_split"
+        ),
         "reaction_count": len(reaction_indices),
         "augmentation": args.augmentation,
         "input_row_count": expected_rows,
@@ -406,32 +485,7 @@ def main() -> int:
             "distance_1": 0.5,
             "distance_ge_2": 0.0,
         },
-        "files": {
-            "manifest": {
-                "path": str(args.manifest),
-                "sha256": _sha256(args.manifest),
-            },
-            "global_products": {
-                "path": str(args.global_products),
-                "sha256": _sha256(args.global_products),
-            },
-            "m500_products": {
-                "path": str(args.m500_products),
-                "sha256": _sha256(args.m500_products),
-            },
-            "labels": {
-                "path": str(args.labels),
-                "sha256": _sha256(args.labels),
-            },
-            "crosswalk": {
-                "path": str(args.crosswalk),
-                "sha256": _sha256(args.crosswalk),
-            },
-            "scores": {
-                "path": str(scores_path),
-                "sha256": _sha256(scores_path),
-            },
-        },
+        "files": files,
         "status_counts": {
             status: sum(record["status"] == status for record in records)
             for status in sorted({record["status"] for record in records})

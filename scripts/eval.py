@@ -111,6 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
             "first actual edit; the remaining trajectories are ordinary Euler"
         ),
     )
+    sampling.add_argument(
+        "--first_event_center_diagnostics",
+        choices=("auto", "full", "summary"),
+        default="auto",
+        help="Detail level for first-event center diagnostics",
+    )
     sampling.add_argument("--n_branches", type=int, default=3)
     sampling.add_argument("--n_children", type=int, default=2)
     sampling.add_argument("--n_runs", type=int, default=3)
@@ -281,6 +287,10 @@ def build_sample_command(args: argparse.Namespace) -> list[str]:
             "--first_event_center_guided_trajectories",
             args.first_event_center_guided_trajectories,
         )
+        command.extend((
+            "--first_event_center_diagnostics",
+            args.first_event_center_diagnostics,
+        ))
     _add_value(
         command,
         "--euler_beam_initial_seed_groups",

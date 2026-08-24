@@ -277,6 +277,158 @@ class _StochasticModel(torch.nn.Module):
         )
 
 
+def test_beam_center_bias_reweights_only_legal_positions_and_preserves_hazard():
+    x_t = torch.tensor([[BOS_TOKEN, 4, 5, PAD_TOKEN]])
+    log_rates = torch.zeros(1, 4, 3)
+    log_probs = torch.log_softmax(torch.zeros(1, 4, 16), dim=-1)
+    scores = torch.zeros(1, 4, 3)
+    scores[:, 1, 1] = 1.0
+    actions = _sample_actions_per_branch(
+        torch.tensor([123]),
+        x_t,
+        log_rates,
+        log_probs,
+        log_probs,
+        torch.tensor([[0.01]]),
+        PAD_TOKEN,
+        "poisson",
+        step=0,
+        position_scores=scores,
+        position_bias_active=torch.tensor([True]),
+        position_bias_max_multiplier=3.0,
+    )
+
+    effective = actions["effective_log_rates"]
+    diagnostics = actions["position_bias_diagnostics"]
+    legal = torch.stack((
+        actions["insert_position_mask"],
+        actions["sub_del_position_mask"],
+        actions["sub_del_position_mask"],
+    ), dim=-1)
+    assert torch.allclose(
+        torch.exp(effective).masked_fill(~legal, 0.0).sum(dim=1),
+        torch.exp(log_rates).masked_fill(~legal, 0.0).sum(dim=1),
+        atol=1e-6,
+    )
+    assert diagnostics["relative_error"].max() < 1e-6
+    # At the two legal SUB positions, the score-1 position has triple the
+    # relative rate of its score-0 neighbour after per-mode renormalization.
+    ratio = torch.exp(effective[0, 1, 1] - effective[0, 2, 1])
+    assert torch.allclose(ratio, torch.tensor(3.0), atol=1e-6)
+
+
+class _ForcedFirstSubstitution(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.anchor = torch.nn.Parameter(torch.zeros(()))
+
+    def forward(self, tokens, time_step, padding_mask, origin_mask=None):
+        batch, length = tokens.shape
+        log_rates = torch.full(
+            (batch, length, 3), -30.0, device=tokens.device,
+        )
+        log_rates[:, 1, 1] = 20.0
+        log_ins = torch.full(
+            (batch, length, 16), -1e9, device=tokens.device,
+        )
+        log_sub = torch.full_like(log_ins, -1e9)
+        log_ins[:, :, 9] = 0.0
+        log_sub[:, :, 9] = 0.0
+        return log_rates, log_ins, log_sub
+
+
+def test_r9_style_center_bias_tracks_selected_lineage_first_event():
+    model = _ForcedFirstSubstitution()
+    x_0 = torch.tensor([
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 6, 7, PAD_TOKEN],
+        [BOS_TOKEN, 8, 10, PAD_TOKEN],
+    ])
+    scores = torch.zeros(3, 4, 3)
+    scores[:, 1, 1] = 1.0
+    stats = {}
+    result = sample_euler_beam(
+        model,
+        x_0,
+        LinearScheduler(),
+        n_branches=1,
+        n_children=2,
+        n_steps=2,
+        max_seq_len=16,
+        sample_seeds=[101, 202, 303],
+        score_mode="full_probability",
+        changed_state_bonus=0.5,
+        child_policy="stochastic_noop",
+        profile_sample_group_size=3,
+        first_event_position_scores=scores,
+        first_event_position_bias_enabled=torch.tensor([True, False, True]),
+        first_event_bias_max_multiplier=3.0,
+        first_event_bias_stats=stats,
+        first_event_row_metadata=[
+            {"trajectory_role": "center_guided"},
+            {"trajectory_role": "ordinary_euler"},
+            {"trajectory_role": "center_guided"},
+        ],
+        first_event_bias_record_events=True,
+    )
+
+    assert torch.equal(result[:, 1], torch.tensor([9, 9, 9]))
+    # All three selected lineages edit at step zero, so the center mechanism
+    # cannot remain active during their ordinary R9K1M2 continuation.
+    assert stats["first_event_count"] == 3
+    assert stats["no_event_count"] == 0
+    assert stats["biased_row_steps"] == 3
+    assert stats["guided_row_steps"] == 2
+    assert stats["max_hazard_relative_error"] < 1e-6
+    assert len(stats["records"]) == 3
+    assert [record["position_bias_enabled"] for record in stats["records"]] == [
+        True, False, True,
+    ]
+    assert [record["position_bias_reweighted"] for record in stats["records"]] == [
+        True, False, True,
+    ]
+    assert all(record["first_event_step_idx"] == 0 for record in stats["records"])
+    assert all(record["beam_branch_rank"] == 0 for record in stats["records"])
+    assert all(record["actions"][0]["center_score"] == 1.0
+               for record in stats["records"])
+
+
+def test_r9_style_center_bias_multiplier_one_is_bitwise_neutral():
+    model = _StochasticModel()
+    x_0 = torch.tensor([
+        [BOS_TOKEN, 4, 5, 6, PAD_TOKEN],
+        [BOS_TOKEN, 7, 8, PAD_TOKEN, PAD_TOKEN],
+        [BOS_TOKEN, 9, 10, 11, PAD_TOKEN],
+    ])
+    scores = torch.rand(3, 5, 3)
+    common = dict(
+        scheduler=LinearScheduler(),
+        n_branches=1,
+        n_children=2,
+        n_steps=4,
+        max_seq_len=32,
+        sample_seeds=[101, 202, 303],
+        score_mode="full_probability",
+        changed_state_bonus=0.5,
+        child_policy="stochastic_noop",
+        profile_sample_group_size=3,
+    )
+    plain = sample_euler_beam(model, x_0, **common)
+    stats = {}
+    neutral = sample_euler_beam(
+        model,
+        x_0,
+        first_event_position_scores=scores,
+        first_event_bias_max_multiplier=1.0,
+        first_event_bias_stats=stats,
+        **common,
+    )
+    assert torch.equal(plain, neutral)
+    assert stats["first_event_count"] + stats["no_event_count"] == 3
+    assert stats["max_hazard_relative_error"] == 0.0
+    assert stats["summary_from_final_lineages"] is True
+
+
 def test_sample_euler_beam_same_seed_is_reproducible():
     model = _StochasticModel()
     x_0 = torch.tensor([

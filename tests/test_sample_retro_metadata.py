@@ -6,6 +6,7 @@ import pytest
 from scripts.sample_retro import (
     _apply_sampling_seed,
     _build_sampling_metadata,
+    _is_frozen_r9k1m2,
     _infer_augmentation,
     _make_center_bias_batch,
     _outputs_per_product,
@@ -52,6 +53,16 @@ def test_euler_beam_output_count_uses_runs_times_branches(tmp_path):
     assert _outputs_per_product(args) == 9
     args.sampler = "euler"
     assert _outputs_per_product(args) == 99
+
+
+def test_center_bias_beam_guard_accepts_only_frozen_r9k1m2(tmp_path):
+    args = _euler_beam_args(tmp_path)
+    args.n_runs = 9
+    args.n_branches = 1
+    args.n_children = 2
+    assert _is_frozen_r9k1m2(args)
+    args.euler_beam_share_identical_forwards = True
+    assert not _is_frozen_r9k1m2(args)
 
 
 def test_center_bias_batch_assigns_components_cyclically():

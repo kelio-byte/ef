@@ -325,6 +325,28 @@ def _outputs_per_product(args) -> int:
     return args.n_samples
 
 
+def _center_trajectory_count(args) -> int:
+    """Number of independent paths eligible for a first-event bias."""
+    return args.n_runs if args.sampler == "euler_beam" else args.n_samples
+
+
+def _is_frozen_r9k1m2(args) -> bool:
+    """Return whether the CLI exactly describes the reported R9K1M2 setup."""
+    return (
+        args.sampler == "euler_beam"
+        and args.n_runs == 9
+        and args.n_branches == 1
+        and args.n_children == 2
+        and args.euler_beam_score_mode == "full_probability"
+        and args.euler_beam_child_policy == "stochastic_noop"
+        and args.euler_beam_changed_state_bonus == 0.5
+        and args.euler_beam_q_temperature == 1.0
+        and not args.euler_beam_first_edit_diversity
+        and not args.euler_beam_share_identical_forwards
+        and args.euler_beam_initial_seed_groups is None
+    )
+
+
 def _euler_beam_output_row_indices(
     product_index: int,
     n_runs: int,
@@ -490,49 +512,6 @@ def _build_sampling_metadata(
             )
     else:
         sampling["n_samples"] = args.n_samples
-        if getattr(args, "first_event_center_sidecar", None):
-            sampling.update({
-                "first_event_center_sidecar": _path_metadata(
-                    os.path.join(
-                        args.first_event_center_sidecar, "metadata.json"
-                    ),
-                    include_sha256=True,
-                ),
-                "first_event_center_source": (
-                    args.first_event_center_source
-                ),
-                "first_event_center_max_multiplier": (
-                    args.first_event_center_max_multiplier
-                ),
-                "first_event_center_guided_trajectories": (
-                    args.first_event_center_guided_trajectories
-                    if args.first_event_center_guided_trajectories is not None
-                    else args.n_samples
-                ),
-                "first_event_center_ordinary_trajectories": (
-                    args.n_samples - (
-                        args.first_event_center_guided_trajectories
-                        if args.first_event_center_guided_trajectories is not None
-                        else args.n_samples
-                    )
-                ),
-                "first_event_center_trajectory_assignment": (
-                    "trajectory indices [0, guided_count) are center-guided; "
-                    "the remainder are ordinary Euler"
-                ),
-                "first_event_position_only": True,
-                "per_mode_total_hazard_preserved": True,
-                "continuation": (
-                    "ordinary Euler after each trajectory's first non-noop step"
-                ),
-            })
-            if center_bias_diagnostics_path is not None:
-                sampling["first_event_center_diagnostics"] = (
-                    _path_metadata(
-                        center_bias_diagnostics_path,
-                        include_sha256=True,
-                    )
-                )
         if getattr(args, "guidance_checkpoint", None):
             sampling.update({
                 "guidance_checkpoint": _path_metadata(
@@ -548,6 +527,56 @@ def _build_sampling_metadata(
             "global torch RNG"
             if args.sampler == "euler" else "sampler-specific"
         )
+
+    if getattr(args, "first_event_center_sidecar", None):
+        center_trajectory_count = _center_trajectory_count(args)
+        guided_count = (
+            args.first_event_center_guided_trajectories
+            if args.first_event_center_guided_trajectories is not None
+            else center_trajectory_count
+        )
+        sampling.update({
+            "first_event_center_sidecar": _path_metadata(
+                os.path.join(
+                    args.first_event_center_sidecar, "metadata.json"
+                ),
+                include_sha256=True,
+            ),
+            "first_event_center_source": args.first_event_center_source,
+            "first_event_center_max_multiplier": (
+                args.first_event_center_max_multiplier
+            ),
+            "first_event_center_guided_trajectories": guided_count,
+            "first_event_center_ordinary_trajectories": (
+                center_trajectory_count - guided_count
+            ),
+            "first_event_center_trajectory_assignment": (
+                "trajectory indices [0, guided_count) are center-guided; "
+                "the remainder are ordinary sampler trajectories"
+            ),
+            "first_event_center_diagnostic_detail": getattr(
+                args, "first_event_center_diagnostics_resolved", "full",
+            ),
+            "first_event_position_only": True,
+            "per_mode_total_hazard_preserved": True,
+            "continuation": (
+                "ordinary Euler after each trajectory's first non-noop step"
+                if args.sampler == "euler"
+                else "ordinary R9K1M2 after each selected lineage's first "
+                "non-noop step"
+            ),
+        })
+        if args.sampler == "euler_beam":
+            sampling["first_event_center_beam_semantics"] = (
+                "each of the nine independent R9 runs receives its own "
+                "first-event bias; child selection remains the frozen K1M2 "
+                "full-probability rule"
+            )
+        if center_bias_diagnostics_path is not None:
+            sampling["first_event_center_diagnostics"] = _path_metadata(
+                center_bias_diagnostics_path,
+                include_sha256=True,
+            )
 
     runtime = {
         "elapsed_seconds": elapsed_seconds,
@@ -671,8 +700,17 @@ def main():
         type=int,
         default=None,
         help=(
-            "Fixed number of leading Euler trajectories whose first event "
-            "uses the center position bias; default: all trajectories"
+            "Fixed number of leading independent trajectories/runs whose "
+            "first event uses the center position bias; default: all"
+        ),
+    )
+    parser.add_argument(
+        "--first_event_center_diagnostics",
+        choices=("auto", "full", "summary"),
+        default="auto",
+        help=(
+            "First-event diagnostic detail: auto keeps full records for "
+            "ordinary Euler and compact counts for Euler-Beam"
         ),
     )
     parser.add_argument("--batch_size", type=int, default=32,
@@ -851,35 +889,58 @@ def main():
             "--sampler euler"
         )
     if args.first_event_center_sidecar:
-        if args.sampler != "euler":
+        if args.sampler not in {"euler", "euler_beam"}:
             raise ValueError(
-                "first_event_center_sidecar requires --sampler euler"
+                "first_event_center_sidecar requires --sampler euler or "
+                "the frozen R9K1M2 Euler-Beam layout"
             )
         if args.products_file is None or args.product is not None:
             raise ValueError(
                 "first_event_center_sidecar requires --products_file"
             )
-        if args.n_samples != 9:
+        if args.sampler == "euler" and args.n_samples != 9:
             raise ValueError(
-                "RC1 is frozen to --n_samples 9 with center sidecars"
+                "RC1 Euler is frozen to --n_samples 9 with center sidecars"
+            )
+        if args.sampler == "euler_beam" and not _is_frozen_r9k1m2(args):
+            raise ValueError(
+                "Euler-Beam center bias is frozen to R9K1M2: "
+                "n_runs=9, n_branches=1, n_children=2, "
+                "score_mode=full_probability, stochastic_noop, "
+                "changed_state_bonus=0.5, q_temperature=1.0, "
+                "without first-edit diversity or forward sharing"
             )
         if args.guidance_checkpoint:
             raise ValueError(
                 "center first-event bias and learned guidance cannot be "
                 "combined in RC1"
             )
+        center_trajectory_count = _center_trajectory_count(args)
         if (
             args.first_event_center_guided_trajectories is not None
             and not 0 <= args.first_event_center_guided_trajectories
-            <= args.n_samples
+            <= center_trajectory_count
         ):
             raise ValueError(
                 "first_event_center_guided_trajectories must be between 0 "
-                "and n_samples inclusive"
+                "and the number of independent trajectories inclusive"
+            )
+        if args.first_event_center_diagnostics == "auto":
+            args.first_event_center_diagnostics_resolved = (
+                "full" if args.sampler == "euler" else "summary"
+            )
+        else:
+            args.first_event_center_diagnostics_resolved = (
+                args.first_event_center_diagnostics
             )
     elif args.first_event_center_guided_trajectories is not None:
         raise ValueError(
             "first_event_center_guided_trajectories requires "
+            "first_event_center_sidecar"
+        )
+    elif args.first_event_center_diagnostics != "auto":
+        raise ValueError(
+            "first_event_center_diagnostics requires "
             "first_event_center_sidecar"
         )
     if (
@@ -1031,6 +1092,7 @@ def main():
     selected_center_records = None
     center_bias_stats = None
     guided_center_trajectories = None
+    center_trajectory_count = None
     if args.first_event_center_sidecar:
         center_sidecar_metadata, all_center_records = (
             _load_center_bias_sidecar(
@@ -1049,15 +1111,21 @@ def main():
         guided_center_trajectories = (
             args.first_event_center_guided_trajectories
             if args.first_event_center_guided_trajectories is not None
-            else args.n_samples
+            else _center_trajectory_count(args)
         )
+        center_trajectory_count = _center_trajectory_count(args)
         center_bias_stats = {
-            "schema_version": 2,
+            "schema_version": 3,
+            "sampler": args.sampler,
             "center_source": args.first_event_center_source,
             "max_multiplier": args.first_event_center_max_multiplier,
             "guided_trajectories_per_product": guided_center_trajectories,
             "ordinary_euler_trajectories_per_product": (
-                args.n_samples - guided_center_trajectories
+                center_trajectory_count - guided_center_trajectories
+            ),
+            "independent_trajectories_per_product": center_trajectory_count,
+            "diagnostic_detail": (
+                args.first_event_center_diagnostics_resolved
             ),
             "sidecar_metadata": center_sidecar_metadata,
             "records": [],
@@ -1131,8 +1199,9 @@ def main():
             "  first_event_center_source="
             f"{args.first_event_center_source}, multiplier="
             f"{args.first_event_center_max_multiplier}, guided="
-            f"{guided_center_trajectories}/{args.n_samples}, ordinary="
-            f"{args.n_samples - guided_center_trajectories}"
+            f"{guided_center_trajectories}/{center_trajectory_count}, ordinary="
+            f"{center_trajectory_count - guided_center_trajectories}, detail="
+            f"{args.first_event_center_diagnostics_resolved}"
         )
 
     if device.type == "cuda":
@@ -1171,25 +1240,24 @@ def main():
             else:
                 x_0 = _make_batch(batch_products, n_rep, PAD_TOKEN).to(device)
 
+            center_scores = None
+            center_row_metadata = None
+            center_bias_enabled = None
+            if selected_center_records is not None:
+                (
+                    center_scores,
+                    center_row_metadata,
+                    center_bias_enabled,
+                ) = _make_center_bias_batch(
+                    batch_products,
+                    selected_center_records[start:end],
+                    n_samples=n_rep,
+                    source=args.first_event_center_source,
+                    global_start=args.start_product + start,
+                    guided_trajectories=guided_center_trajectories,
+                )
+
             if args.sampler == "euler":
-                center_scores = None
-                center_row_metadata = None
-                center_bias_enabled = None
-                if selected_center_records is not None:
-                    (
-                        center_scores,
-                        center_row_metadata,
-                        center_bias_enabled,
-                    ) = (
-                        _make_center_bias_batch(
-                            batch_products,
-                            selected_center_records[start:end],
-                            n_samples=args.n_samples,
-                            source=args.first_event_center_source,
-                            global_start=args.start_product + start,
-                            guided_trajectories=guided_center_trajectories,
-                        )
-                    )
                 results, _ = sample_euler(
                     model, x_0, kappa_scheduler,
                     n_steps=n_sampling_steps,
@@ -1266,6 +1334,20 @@ def main():
                     ),
                     initial_branch_seeds=initial_branch_seeds,
                     sampling_stats=euler_beam_stats,
+                    first_event_position_scores=center_scores,
+                    first_event_position_bias_enabled=center_bias_enabled,
+                    first_event_bias_max_multiplier=(
+                        args.first_event_center_max_multiplier
+                    ),
+                    first_event_bias_stats=center_bias_stats,
+                    first_event_row_metadata=center_row_metadata,
+                    first_event_bias_record_events=(
+                        getattr(
+                            args,
+                            "first_event_center_diagnostics_resolved",
+                            None,
+                        ) == "full"
+                    ),
                 )
             elif args.sampler == "structured_diversification":
                 B_prod = end - start
@@ -1435,42 +1517,65 @@ def main():
             center_bias_diagnostics_path = os.path.join(
                 args.output_dir, "center_bias_diagnostics.json"
             )
-            action_count_histogram = {}
-            center_score_histogram = {}
-            mode_counts = {}
-            first_event_role_counts = {}
-            reweighted_event_role_counts = {}
-            for record in center_bias_stats["records"]:
-                role = str(record.get("row_metadata", {}).get(
-                    "trajectory_role", "unspecified"
-                ))
-                first_event_role_counts[role] = (
-                    first_event_role_counts.get(role, 0) + 1
-                )
-                if record.get("position_bias_reweighted", False):
-                    reweighted_event_role_counts[role] = (
-                        reweighted_event_role_counts.get(role, 0) + 1
+            if center_bias_stats.get("summary_from_final_lineages", False):
+                # Euler-Beam full-test mode deliberately avoids a potentially
+                # huge per-trajectory JSON list.  The sampler has already
+                # accumulated the lineage-level counts needed to verify that
+                # B1 was active and hazard-preserving.
+                center_bias_stats["summary"] = {
+                    "action_count_histogram": {},
+                    "center_score_histogram": {},
+                    "mode_counts": {},
+                    "first_event_trajectory_role_counts": (
+                        center_bias_stats.get(
+                            "first_event_trajectory_role_counts", {}
+                        )
+                    ),
+                    "reweighted_first_event_trajectory_role_counts": (
+                        center_bias_stats.get(
+                            "reweighted_first_event_trajectory_role_counts",
+                            {},
+                        )
+                    ),
+                    "detail_omitted": True,
+                }
+            else:
+                action_count_histogram = {}
+                center_score_histogram = {}
+                mode_counts = {}
+                first_event_role_counts = {}
+                reweighted_event_role_counts = {}
+                for record in center_bias_stats["records"]:
+                    role = str(record.get("row_metadata", {}).get(
+                        "trajectory_role", "unspecified"
+                    ))
+                    first_event_role_counts[role] = (
+                        first_event_role_counts.get(role, 0) + 1
                     )
-                action_count = str(record["action_count"])
-                action_count_histogram[action_count] = (
-                    action_count_histogram.get(action_count, 0) + 1
-                )
-                for action in record["actions"]:
-                    score = str(action["center_score"])
-                    center_score_histogram[score] = (
-                        center_score_histogram.get(score, 0) + 1
+                    if record.get("position_bias_reweighted", False):
+                        reweighted_event_role_counts[role] = (
+                            reweighted_event_role_counts.get(role, 0) + 1
+                        )
+                    action_count = str(record["action_count"])
+                    action_count_histogram[action_count] = (
+                        action_count_histogram.get(action_count, 0) + 1
                     )
-                    mode = action["mode"]
-                    mode_counts[mode] = mode_counts.get(mode, 0) + 1
-            center_bias_stats["summary"] = {
-                "action_count_histogram": action_count_histogram,
-                "center_score_histogram": center_score_histogram,
-                "mode_counts": mode_counts,
-                "first_event_trajectory_role_counts": first_event_role_counts,
-                "reweighted_first_event_trajectory_role_counts": (
-                    reweighted_event_role_counts
-                ),
-            }
+                    for action in record["actions"]:
+                        score = str(action["center_score"])
+                        center_score_histogram[score] = (
+                            center_score_histogram.get(score, 0) + 1
+                        )
+                        mode = action["mode"]
+                        mode_counts[mode] = mode_counts.get(mode, 0) + 1
+                center_bias_stats["summary"] = {
+                    "action_count_histogram": action_count_histogram,
+                    "center_score_histogram": center_score_histogram,
+                    "mode_counts": mode_counts,
+                    "first_event_trajectory_role_counts": first_event_role_counts,
+                    "reweighted_first_event_trajectory_role_counts": (
+                        reweighted_event_role_counts
+                    ),
+                }
             with open(center_bias_diagnostics_path, "w") as f:
                 json.dump(center_bias_stats, f, indent=2, sort_keys=True)
                 f.write("\n")
