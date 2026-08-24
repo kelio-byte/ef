@@ -631,6 +631,7 @@ def evaluate_model(
                 x_0, x_1, scheduler, align_fn,
                 model_vocab_size=model_vocab,
                 use_origin_mask=cfg.get("use_origin_mask", False),
+                use_product_memory=cfg.get("use_product_memory", False),
             )
             batch = {key: value.to(device) for key, value in batch.items()}
             metrics = evaluate_step(
@@ -890,6 +891,13 @@ def run_training(args, context: DistributedContext) -> None:
             activation=cfg["activation"],
             pos_encoding_scale=cfg["pos_encoding_scale"],
             use_origin_mask=cfg.get("use_origin_mask", False),
+            use_product_memory=cfg.get("use_product_memory", False),
+            product_memory_encoder_layers=cfg.get(
+                "product_memory_encoder_layers", 0,
+            ),
+            product_memory_fusion_after_layers=cfg.get(
+                "product_memory_fusion_after_layers",
+            ),
         ).to(device)
 
         resume_checkpoint = None
@@ -965,6 +973,16 @@ def run_training(args, context: DistributedContext) -> None:
             f"(max={cfg.get('clamp_max', 50.0)})",
         )
         rank_zero_print(context, f"Origin mask: {cfg.get('use_origin_mask', False)}")
+        if cfg.get("use_product_memory", False):
+            rank_zero_print(
+                context,
+                "Product memory: enabled "
+                f"(encoder_layers={cfg.get('product_memory_encoder_layers')}, "
+                "fusion_after_layers="
+                f"{cfg.get('product_memory_fusion_after_layers')})",
+            )
+        else:
+            rank_zero_print(context, "Product memory: disabled")
 
         start_step = 0
         best_val_loss = float("inf")
@@ -1176,6 +1194,7 @@ def run_training(args, context: DistributedContext) -> None:
                     x_0, x_1, kappa_scheduler, align_fn,
                     model_vocab_size=model_vocab,
                     use_origin_mask=cfg.get("use_origin_mask", False),
+                    use_product_memory=cfg.get("use_product_memory", False),
                 )
                 batch = {
                     key: value.to(device, non_blocking=device.type == "cuda")

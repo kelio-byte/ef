@@ -20,6 +20,7 @@ def prepare_batch(
     bos_token: int = BOS_TOKEN,
     pad_token: int = PAD_TOKEN,
     use_origin_mask: bool = False,
+    use_product_memory: bool = False,
 ) -> dict:
     B = x_0.shape[0]
     device = x_0.device
@@ -70,6 +71,33 @@ def prepare_batch(
         )
         batch["origin_mask"] = origin_mask
 
+    if use_product_memory:
+        # Preserve the *unaligned* product before noising.  Pre-aligned
+        # training files contain GAP symbols that do not exist at inference;
+        # remove them here and prepend BOS so the static-memory sequence is
+        # exactly the same representation built by sample_retro._make_batch.
+        # Unlike origin_mask, this also retains source tokens that disappear
+        # from the dynamic state x_t later in the trajectory.
+        product_source_mask = (x_0 != pad_token) & (x_0 != GAP_TOKEN)
+        product_lengths = product_source_mask.sum(dim=1)
+        max_product_length = int(product_lengths.max().item())
+        product_tokens = torch.full(
+            (B, max_product_length + 1),
+            pad_token,
+            dtype=x_0.dtype,
+            device=device,
+        )
+        product_tokens[:, 0] = bos_token
+        source_rows, source_columns = product_source_mask.nonzero(as_tuple=True)
+        if source_rows.numel() > 0:
+            product_positions = product_source_mask.long().cumsum(dim=1)
+            product_tokens[
+                source_rows,
+                product_positions[source_rows, source_columns],
+            ] = x_0[source_rows, source_columns]
+        batch["product_tokens"] = product_tokens
+        batch["product_padding_mask"] = product_tokens == pad_token
+
     return batch
 
 
@@ -104,9 +132,23 @@ def _forward_loss_and_metrics(
     if origin_mask is not None:
         origin_mask = origin_mask.to(device)
 
-    log_rates, log_ins_probs, log_sub_probs = model(
-        x_t, t_model, x_pad_mask, origin_mask=origin_mask,
-    )
+    product_tokens = batch_data.get("product_tokens")
+    product_padding_mask = batch_data.get("product_padding_mask")
+    if (product_tokens is None) != (product_padding_mask is None):
+        raise ValueError(
+            "product_tokens and product_padding_mask must be supplied together"
+        )
+    if product_tokens is not None:
+        product_tokens = product_tokens.to(device)
+        product_padding_mask = product_padding_mask.to(device)
+
+    model_kwargs = {"origin_mask": origin_mask}
+    if product_tokens is not None:
+        model_kwargs.update({
+            "product_tokens": product_tokens,
+            "product_padding_mask": product_padding_mask,
+        })
+    log_rates, log_ins_probs, log_sub_probs = model(x_t, t_model, x_pad_mask, **model_kwargs)
 
     log_lambda_ins = log_rates[:, :, 0]
     log_lambda_sub = log_rates[:, :, 1]

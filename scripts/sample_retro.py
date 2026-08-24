@@ -395,6 +395,7 @@ def _build_sampling_metadata(
     train_scheduler_name: str,
     use_origin_mask: bool,
     elapsed_seconds: float,
+    use_product_memory: bool = False,
     peak_cuda_allocated_bytes: int | None = None,
     peak_cuda_reserved_bytes: int | None = None,
     euler_beam_profile: dict | None = None,
@@ -585,6 +586,22 @@ def _build_sampling_metadata(
         "model": {
             "configured_use_origin_mask": cfg.get("use_origin_mask", False),
             "effective_use_origin_mask": use_origin_mask,
+            "configured_use_product_memory": cfg.get(
+                "use_product_memory", False,
+            ),
+            "effective_use_product_memory": use_product_memory,
+            "product_memory_encoder_layers": (
+                cfg.get("product_memory_encoder_layers")
+                if use_product_memory else None
+            ),
+            "product_memory_fusion_after_layers": (
+                cfg.get("product_memory_fusion_after_layers")
+                if use_product_memory else None
+            ),
+            "product_memory_sampling_cache": (
+                "encode_x0_once_per_input_row_then_repeat_per_trajectory"
+                if use_product_memory else None
+            ),
         },
         "git": _git_state(),
     }
@@ -915,6 +932,29 @@ def main():
               "origin_embedding weights. Falling back to use_origin_mask=False.")
         use_origin_mask = False
 
+    use_product_memory = bool(cfg.get("use_product_memory", False))
+    has_product_memory = any(
+        key.startswith("product_memory_encoder_layers.")
+        or key.startswith("product_memory_fusion_layers.")
+        for key in ckpt["model_state_dict"]
+    )
+    if use_product_memory and not has_product_memory:
+        raise ValueError(
+            "checkpoint config has use_product_memory=True but its state "
+            "dict lacks product-memory weights"
+        )
+    if not use_product_memory and has_product_memory:
+        raise ValueError(
+            "checkpoint state dict contains product-memory weights but its "
+            "config has use_product_memory=False"
+        )
+    if use_product_memory and args.sampler != "euler":
+        raise ValueError(
+            "product-memory checkpoints currently support only --sampler "
+            "euler; beam/structured samplers need cache-aware branch "
+            "bookkeeping before they can be compared fairly"
+        )
+
     model = EditFlowsTransformer(
         vocab_size=model_vocab,
         hidden_dim=cfg["hidden_dim"],
@@ -927,6 +967,13 @@ def main():
         activation=cfg.get("activation", "relu"),
         pos_encoding_scale=cfg.get("pos_encoding_scale", True),
         use_origin_mask=use_origin_mask,
+        use_product_memory=use_product_memory,
+        product_memory_encoder_layers=cfg.get(
+            "product_memory_encoder_layers", 0,
+        ),
+        product_memory_fusion_after_layers=cfg.get(
+            "product_memory_fusion_after_layers",
+        ),
     ).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
@@ -1105,8 +1152,24 @@ def main():
             else:
                 n_rep = args.n_samples
 
-            x_0 = _make_batch(batch_products, n_rep, PAD_TOKEN)
-            x_0 = x_0.to(device)
+            # Product memory encodes each immutable input only once.  Rows are
+            # product-major both here and in _make_batch, so repeat_interleave
+            # aligns each cache row with its n_rep Euler trajectories.
+            product_memory = None
+            product_memory_padding_mask = None
+            if use_product_memory:
+                x_0_unique = _make_batch(batch_products, 1, PAD_TOKEN).to(device)
+                x_0 = x_0_unique.repeat_interleave(n_rep, dim=0)
+                product_memory_padding_mask = x_0_unique == PAD_TOKEN
+                with torch.no_grad():
+                    product_memory = model.encode_product(
+                        x_0_unique, product_memory_padding_mask,
+                    ).repeat_interleave(n_rep, dim=0)
+                product_memory_padding_mask = (
+                    product_memory_padding_mask.repeat_interleave(n_rep, dim=0)
+                )
+            else:
+                x_0 = _make_batch(batch_products, n_rep, PAD_TOKEN).to(device)
 
             if args.sampler == "euler":
                 center_scores = None
@@ -1137,6 +1200,8 @@ def main():
                     time_input=time_input,
                     train_scheduler=train_scheduler,
                     use_origin_mask=use_origin_mask,
+                    product_memory=product_memory,
+                    product_memory_padding_mask=product_memory_padding_mask,
                     guidance_model=guidance_model,
                     guidance_product=x_0 if guidance_model is not None else None,
                     guidance_beta=args.guidance_beta,
@@ -1421,6 +1486,7 @@ def main():
             sample_scheduler_name=sample_scheduler_name,
             train_scheduler_name=train_scheduler_name,
             use_origin_mask=use_origin_mask,
+            use_product_memory=use_product_memory,
             elapsed_seconds=elapsed_seconds,
             peak_cuda_allocated_bytes=peak_cuda_allocated_bytes,
             peak_cuda_reserved_bytes=peak_cuda_reserved_bytes,

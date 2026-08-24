@@ -1,4 +1,5 @@
 import math
+from collections.abc import Sequence
 
 import torch
 import torch.nn as nn
@@ -84,6 +85,48 @@ class PreNormEncoderLayer(nn.Module):
         return x
 
 
+class PreNormCrossAttentionLayer(nn.Module):
+    """Residual cross-attention from a dynamic edit state to static memory.
+
+    The state remains the query sequence.  Product memory is only used as
+    keys/values, so this layer never creates edit positions for the product
+    sequence itself.
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dropout: float = 0.1,
+        attention_dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.state_norm = nn.LayerNorm(d_model)
+        self.memory_norm = nn.LayerNorm(d_model)
+        self.cross_attn = nn.MultiheadAttention(
+            d_model,
+            nhead,
+            dropout=attention_dropout,
+            batch_first=False,
+        )
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        state: Tensor,
+        memory: Tensor,
+        memory_key_padding_mask: Tensor | None = None,
+    ) -> Tensor:
+        normalized_memory = self.memory_norm(memory)
+        attended = self.cross_attn(
+            self.state_norm(state),
+            normalized_memory,
+            normalized_memory,
+            key_padding_mask=memory_key_padding_mask,
+        )[0]
+        return state + self.dropout(attended)
+
+
 LOG_EPS = -1e9
 
 
@@ -115,6 +158,9 @@ class EditFlowsTransformer(nn.Module):
         activation: str = "relu",
         pos_encoding_scale: bool = True,
         use_origin_mask: bool = False,
+        use_product_memory: bool = False,
+        product_memory_encoder_layers: int = 0,
+        product_memory_fusion_after_layers: Sequence[int] | None = None,
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -122,6 +168,7 @@ class EditFlowsTransformer(nn.Module):
         self.num_layers = num_layers
         self.max_seq_len = max_seq_len
         self.pos_encoding_scale = pos_encoding_scale
+        self.use_product_memory = bool(use_product_memory)
 
         self.token_embedding = nn.Embedding(vocab_size, hidden_dim)
         self.time_embedding = nn.Sequential(
@@ -149,6 +196,69 @@ class EditFlowsTransformer(nn.Module):
         ])
         self.final_layer_norm = nn.LayerNorm(hidden_dim)
 
+        if self.use_product_memory:
+            if product_memory_encoder_layers <= 0:
+                raise ValueError(
+                    "use_product_memory=True requires "
+                    "product_memory_encoder_layers >= 1"
+                )
+            if product_memory_fusion_after_layers is None:
+                product_memory_fusion_after_layers = (num_layers,)
+            fusion_after_layers = tuple(
+                int(layer) for layer in product_memory_fusion_after_layers
+            )
+            if not fusion_after_layers:
+                raise ValueError(
+                    "use_product_memory=True requires at least one "
+                    "product_memory_fusion_after_layers entry"
+                )
+            if (
+                len(set(fusion_after_layers)) != len(fusion_after_layers)
+                or any(layer < 1 or layer > num_layers for layer in fusion_after_layers)
+            ):
+                raise ValueError(
+                    "product_memory_fusion_after_layers must contain unique "
+                    f"1-based layer indices in [1, {num_layers}], got "
+                    f"{fusion_after_layers}"
+                )
+            self.product_memory_encoder_layers = nn.ModuleList([
+                PreNormEncoderLayer(
+                    d_model=hidden_dim,
+                    nhead=num_heads,
+                    dim_feedforward=dim_feedforward,
+                    dropout=dropout,
+                    attention_dropout=attention_dropout,
+                    activation=activation,
+                )
+                for _ in range(product_memory_encoder_layers)
+            ])
+            self.product_memory_final_layer_norm = nn.LayerNorm(hidden_dim)
+            self.product_memory_fusion_after_layers = fusion_after_layers
+            self.product_memory_fusion_layers = nn.ModuleDict({
+                str(layer): PreNormCrossAttentionLayer(
+                    d_model=hidden_dim,
+                    nhead=num_heads,
+                    dropout=dropout,
+                    attention_dropout=attention_dropout,
+                )
+                for layer in fusion_after_layers
+            })
+        else:
+            if product_memory_encoder_layers not in (0, None):
+                raise ValueError(
+                    "product_memory_encoder_layers requires "
+                    "use_product_memory=True"
+                )
+            if product_memory_fusion_after_layers not in (None, (), []):
+                raise ValueError(
+                    "product_memory_fusion_after_layers requires "
+                    "use_product_memory=True"
+                )
+            self.product_memory_encoder_layers = None
+            self.product_memory_final_layer_norm = None
+            self.product_memory_fusion_after_layers = ()
+            self.product_memory_fusion_layers = None
+
         self.rates_out = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(),
@@ -175,12 +285,121 @@ class EditFlowsTransformer(nn.Module):
             elif isinstance(module, nn.Embedding):
                 nn.init.normal_(module.weight, std=0.02)
 
+    def encode_product(
+        self,
+        product_tokens: Tensor,
+        product_padding_mask: Tensor,
+    ) -> Tensor:
+        """Encode the immutable initial product once for later reuse.
+
+        This path deliberately omits the time embedding: it represents the
+        original product ``x_0``, not a dynamic edit state.  Token embeddings
+        are shared with the state encoder, while the contextual encoder is
+        separate.
+        """
+        if not self.use_product_memory:
+            raise RuntimeError("encode_product requires use_product_memory=True")
+        if product_tokens.ndim != 2:
+            raise ValueError(
+                "product_tokens must have shape [batch, length], got "
+                f"{tuple(product_tokens.shape)}"
+            )
+        if product_padding_mask.shape != product_tokens.shape:
+            raise ValueError(
+                "product_padding_mask must match product_tokens, got "
+                f"{tuple(product_padding_mask.shape)} and "
+                f"{tuple(product_tokens.shape)}"
+            )
+        batch_size, product_len = product_tokens.shape
+        if product_len == 0:
+            raise ValueError("product memory requires a non-empty x_0 sequence")
+
+        token_emb = self.token_embedding(product_tokens)
+        if self.pos_encoding_scale:
+            token_emb = token_emb * math.sqrt(self.hidden_dim)
+        pos_enc = sinusoidal_position_encoding(
+            product_len, self.hidden_dim, product_tokens.device,
+        )
+        product = token_emb + pos_enc.unsqueeze(0).expand(batch_size, -1, -1)
+        product = product.transpose(0, 1)
+
+        for layer in self.product_memory_encoder_layers:
+            product = layer(product, src_key_padding_mask=product_padding_mask)
+
+        product = product.transpose(0, 1)
+        return self.product_memory_final_layer_norm(product)
+
+    def _resolve_product_memory(
+        self,
+        *,
+        batch_size: int,
+        product_tokens: Tensor | None,
+        product_padding_mask: Tensor | None,
+        product_memory: Tensor | None,
+        product_memory_padding_mask: Tensor | None,
+    ) -> tuple[Tensor | None, Tensor | None]:
+        """Validate or build static memory for a forward call."""
+        supplied = (
+            product_tokens,
+            product_padding_mask,
+            product_memory,
+            product_memory_padding_mask,
+        )
+        if not self.use_product_memory:
+            if any(value is not None for value in supplied):
+                raise ValueError(
+                    "product memory inputs were supplied but "
+                    "use_product_memory=False"
+                )
+            return None, None
+
+        if product_memory is None:
+            if product_tokens is None or product_padding_mask is None:
+                raise ValueError(
+                    "use_product_memory=True requires either cached "
+                    "product_memory/product_memory_padding_mask or "
+                    "product_tokens/product_padding_mask"
+                )
+            product_memory = self.encode_product(
+                product_tokens, product_padding_mask,
+            )
+            product_memory_padding_mask = product_padding_mask
+        elif product_memory_padding_mask is None:
+            raise ValueError(
+                "cached product_memory requires product_memory_padding_mask"
+            )
+
+        if product_memory.ndim != 3:
+            raise ValueError(
+                "product_memory must have shape [batch, length, hidden], got "
+                f"{tuple(product_memory.shape)}"
+            )
+        if product_memory.shape[0] != batch_size:
+            raise ValueError(
+                "product_memory batch size must match dynamic state, got "
+                f"{product_memory.shape[0]} and {batch_size}"
+            )
+        if product_memory.shape[2] != self.hidden_dim:
+            raise ValueError(
+                "product_memory hidden dimension must match model hidden_dim, "
+                f"got {product_memory.shape[2]} and {self.hidden_dim}"
+            )
+        if product_memory_padding_mask.shape != product_memory.shape[:2]:
+            raise ValueError(
+                "product_memory_padding_mask must match memory [batch, length]"
+            )
+        return product_memory, product_memory_padding_mask
+
     def forward(
         self,
         tokens: Tensor,
         time_step: Tensor,
         padding_mask: Tensor,
         origin_mask: Tensor = None,
+        product_tokens: Tensor | None = None,
+        product_padding_mask: Tensor | None = None,
+        product_memory: Tensor | None = None,
+        product_memory_padding_mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor, Tensor]:
         batch_size, seq_len = tokens.shape
         if seq_len == 0:
@@ -188,6 +407,14 @@ class EditFlowsTransformer(nn.Module):
             ins = torch.empty(batch_size, 0, self.vocab_size, device=tokens.device)
             sub = torch.empty(batch_size, 0, self.vocab_size, device=tokens.device)
             return rates, ins, sub
+
+        product_memory, product_memory_padding_mask = self._resolve_product_memory(
+            batch_size=batch_size,
+            product_tokens=product_tokens,
+            product_padding_mask=product_padding_mask,
+            product_memory=product_memory,
+            product_memory_padding_mask=product_memory_padding_mask,
+        )
 
         token_emb = self.token_embedding(tokens)
         if origin_mask is not None and self.origin_embedding is not None:
@@ -204,8 +431,18 @@ class EditFlowsTransformer(nn.Module):
         x = token_emb + time_emb + pos_emb
         x = x.transpose(0, 1)
 
-        for layer in self.layers:
+        product_memory_t = (
+            product_memory.transpose(0, 1)
+            if product_memory is not None else None
+        )
+        for layer_index, layer in enumerate(self.layers, start=1):
             x = layer(x, src_key_padding_mask=padding_mask)
+            if layer_index in self.product_memory_fusion_after_layers:
+                x = self.product_memory_fusion_layers[str(layer_index)](
+                    x,
+                    product_memory_t,
+                    memory_key_padding_mask=product_memory_padding_mask,
+                )
 
         x = x.transpose(0, 1)
         x = self.final_layer_norm(x)

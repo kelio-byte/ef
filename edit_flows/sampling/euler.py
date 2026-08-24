@@ -659,6 +659,63 @@ def _compute_model_time(
     return train_scheduler.inverse(kappa)
 
 
+def _prepare_product_memory_for_sampling(
+    model,
+    x_0: Tensor,
+    *,
+    pad_token: int,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
+) -> tuple[Optional[Tensor], Optional[Tensor]]:
+    """Build immutable product memory once, or validate a supplied cache.
+
+    A normal Euler trajectory changes ``x_t`` in-place.  This helper must be
+    called before that loop so a product-memory model never re-encodes the
+    changing state as if it were the original product.
+    """
+    uses_product_memory = bool(getattr(model, "use_product_memory", False))
+    if not uses_product_memory:
+        if product_memory is not None or product_memory_padding_mask is not None:
+            raise ValueError(
+                "product memory was supplied to a model with "
+                "use_product_memory=False"
+            )
+        return None, None
+
+    device = x_0.device
+    if product_memory is None:
+        product_padding_mask = x_0 == pad_token
+        return model.encode_product(x_0, product_padding_mask), product_padding_mask
+    if product_memory_padding_mask is None:
+        raise ValueError(
+            "product_memory_padding_mask is required with cached product_memory"
+        )
+    return (
+        product_memory.to(device=device),
+        product_memory_padding_mask.to(device=device, dtype=torch.bool),
+    )
+
+
+def _forward_edit_model(
+    model,
+    x_t: Tensor,
+    time_step: Tensor,
+    padding_mask: Tensor,
+    *,
+    origin_mask: Optional[Tensor] = None,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Call an Edit Flows model without changing legacy-model signatures."""
+    kwargs = {"origin_mask": origin_mask}
+    if product_memory is not None:
+        kwargs.update({
+            "product_memory": product_memory,
+            "product_memory_padding_mask": product_memory_padding_mask,
+        })
+    return model(x_t, time_step, padding_mask, **kwargs)
+
+
 @torch.no_grad()
 def sample_event_conditioned_euler_transition(
     model,
@@ -675,6 +732,8 @@ def sample_event_conditioned_euler_transition(
     time_input: str = "t",
     train_scheduler: Optional[KappaScheduler] = None,
     start_time: Tensor | float | None = None,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
 ) -> tuple[Tensor, Tensor, dict[str, Tensor]]:
     """Force one base-rate-conditioned atomic edit, then advance Euler time.
 
@@ -695,6 +754,23 @@ def sample_event_conditioned_euler_transition(
     if batch_size < 1:
         raise ValueError("x_t must contain at least one row")
     x_current = x_t.to(device=device).clone()
+    if (
+        bool(getattr(model, "use_product_memory", False))
+        and product_memory is None
+    ):
+        raise ValueError(
+            "event-conditioned transition from an intermediate x_t requires "
+            "cached product_memory from the original x_0"
+        )
+    product_memory, product_memory_padding_mask = (
+        _prepare_product_memory_for_sampling(
+            model,
+            x_current,
+            pad_token=pad_token,
+            product_memory=product_memory,
+            product_memory_padding_mask=product_memory_padding_mask,
+        )
+    )
     if start_time is None:
         t = torch.zeros(batch_size, 1, device=device)
     elif isinstance(start_time, Tensor):
@@ -720,8 +796,13 @@ def sample_event_conditioned_euler_transition(
 
     x_pad_mask = x_current == pad_token
     t_model = _compute_model_time(t, scheduler, time_input, train_scheduler)
-    log_rates, log_ins_probs, log_sub_probs = model(
-        x_current, t_model, x_pad_mask,
+    log_rates, log_ins_probs, log_sub_probs = _forward_edit_model(
+        model,
+        x_current,
+        t_model,
+        x_pad_mask,
+        product_memory=product_memory,
+        product_memory_padding_mask=product_memory_padding_mask,
     )
     if (
         not use_rate_reparam
@@ -794,6 +875,8 @@ def sample_euler(
     x_1: Optional[Tensor] = None,
     vocab_size: Optional[int] = None,
     use_origin_mask: bool = False,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
     guidance_model=None,
     guidance_product: Optional[Tensor] = None,
     guidance_beta: float = 1.0,
@@ -865,6 +948,13 @@ def sample_euler(
     # callers may safely retain an intermediate state for diagnostics or a
     # second continuation without it being silently mutated by this rollout.
     x_t = x_0.to(device).clone()
+    product_memory, product_memory_padding_mask = _prepare_product_memory_for_sampling(
+        model,
+        x_t,
+        pad_token=pad_token,
+        product_memory=product_memory,
+        product_memory_padding_mask=product_memory_padding_mask,
+    )
     if first_event_position_scores is not None:
         if (
             first_event_position_scores.ndim != 3
@@ -997,8 +1087,14 @@ def sample_euler(
 
         t_model = _compute_model_time(t, scheduler, time_input, train_scheduler)
 
-        log_rates, log_ins_probs, log_sub_probs = model(
-            x_t, t_model, x_pad_mask, origin_mask=origin_mask,
+        log_rates, log_ins_probs, log_sub_probs = _forward_edit_model(
+            model,
+            x_t,
+            t_model,
+            x_pad_mask,
+            origin_mask=origin_mask,
+            product_memory=product_memory,
+            product_memory_padding_mask=product_memory_padding_mask,
         )
 
         # When use_rate_reparam=False, the model predicts raw rates v that
@@ -1465,6 +1561,8 @@ def sample_euler_with_first_step_intervention(
     train_scheduler: Optional[KappaScheduler] = None,
     event_prob_mode: str = "poisson",
     record_first_events: bool = False,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
 ) -> tuple:
     from edit_flows.analysis.first_step import extract_oracle_event_set
     from edit_flows.sampling.oracle import compute_oracle_model_output
@@ -1475,6 +1573,13 @@ def sample_euler_with_first_step_intervention(
     device = next(model.parameters()).device
     batch_size = x_0.shape[0]
     x_t = x_0.to(device)
+    product_memory, product_memory_padding_mask = _prepare_product_memory_for_sampling(
+        model,
+        x_t,
+        pad_token=pad_token,
+        product_memory=product_memory,
+        product_memory_padding_mask=product_memory_padding_mask,
+    )
     x_1 = x_1.to(device)
     t = torch.zeros(batch_size, 1, device=device)
     default_h = 1.0 / n_steps
@@ -1485,7 +1590,14 @@ def sample_euler_with_first_step_intervention(
     while (t < 1.0).any():
         x_pad_mask = x_t == pad_token
         t_model = _compute_model_time(t, scheduler, time_input, train_scheduler)
-        log_rates, log_ins_probs, log_sub_probs = model(x_t, t_model, x_pad_mask)
+        log_rates, log_ins_probs, log_sub_probs = _forward_edit_model(
+            model,
+            x_t,
+            t_model,
+            x_pad_mask,
+            product_memory=product_memory,
+            product_memory_padding_mask=product_memory_padding_mask,
+        )
 
         if not use_rate_reparam and train_scheduler is not None and \
            scheduler.name != train_scheduler.name:
