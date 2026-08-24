@@ -6,7 +6,7 @@
 
 GPU 的 B0/B1/B2 正式推理已完成；最终判定为不继续训练中心 predictor。完整端到端结果与原因见 [stage1_report.md](stage1_report.md)。
 
-当前实现没有训练新模型，也没有修改 M500 checkpoint；它只在每条轨迹第一次真正发生编辑前，把同一种编辑操作的位置概率更多地分配到反应中心附近。首个非空编辑步结束后，该轨迹立即恢复普通 Euler。
+当前实现没有训练新模型，也没有修改 M500 checkpoint；它只在每条轨迹第一次真正发生编辑前，把同一种编辑操作的位置机会更多地分配到反应中心附近。首个非空编辑步结束后，该轨迹立即恢复普通 Euler。它不是强制中心发生编辑，也不会改变模型为 INS/SUB 选择具体 token 的分布。
 
 ## 已完成内容
 
@@ -15,7 +15,7 @@ GPU 的 B0/B1/B2 正式推理已完成；最终判定为不继续训练中心 pr
 - 为 dev-1000 的 1,000 个 reaction、全部 20 个 augmentation 生成 true-center 与 same-product pseudo-center sidecar，共 20,000 行；
 - 九条轨迹按 `trajectory_index % min(3, component_count)` 分配中心；
 - 中心分数固定为：中心 `1.0`、一跳邻域 `0.5`、其余 `0.0`；
-- 中心最大位置倍率固定为 `3.0`，INS/SUB/DEL 各自的全序列总 hazard 保持不变；
+- 中心最大位置倍率固定为 `3.0`；对 INS/SUB/DEL 分别保持全序列编辑强度（技术上为 total hazard）之和不变；
 - 记录首次编辑的时间、模式、位置、completion token、中心分数和中心 component；
 - `max_multiplier=1.0` 是逐 bit 中性的诊断对照，可记录 B0 的首事件而不改变采样分布。
 
@@ -26,8 +26,8 @@ GPU 的 B0/B1/B2 正式推理已完成；最终判定为不继续训练中心 pr
 | reaction / augmentation 行 | 1,000 / 20,000 |
 | 成功生成 | 20,000 / 20,000 |
 | true/pseudo center components | 各 1,038 个 |
-| pseudo center 在真实 radius-2 外 | 1,023 / 1,038 |
-| pseudo center 在真实 radius-1 外 | 15 / 1,038 |
+| B2 直接选到真实中心两跳以外 | 1,023 / 1,038 |
+| 其余因产物太小而退到真实中心一跳以外 | 15 / 1,038 |
 | 不得不落入真实中心 | 0 |
 | scores 文件 SHA256 | `0f319ad2e9e0cc7851053ea5a428692fb188dbad8a80825ffdcfcf3bb6b41472` |
 
