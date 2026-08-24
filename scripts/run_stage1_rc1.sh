@@ -5,15 +5,22 @@ MODE="${1:-smoke}"
 case "$MODE" in
   smoke)
     MAX_PRODUCTS=200
+    DEFAULT_EVALUATION_SPLIT="dev_unique1000_aug20"
     ;;
   pilot100)
     MAX_PRODUCTS=2000
+    DEFAULT_EVALUATION_SPLIT="dev_unique1000_aug20"
     ;;
   dev1000)
     MAX_PRODUCTS=20000
+    DEFAULT_EVALUATION_SPLIT="dev_unique1000_aug20"
+    ;;
+  confirm1000)
+    MAX_PRODUCTS=20000
+    DEFAULT_EVALUATION_SPLIT="confirm_unique1000_aug20"
     ;;
   *)
-    echo "Usage: $0 {smoke|pilot100|dev1000}" >&2
+    echo "Usage: $0 {smoke|pilot100|dev1000|confirm1000}" >&2
     exit 2
     ;;
 esac
@@ -38,10 +45,11 @@ RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/after_spe_stage1/rc1_runs/${RUN_ID}_${MODE}}"
 CHECKPOINT="new_checkpoints/spe_m500_checkpoints/checkpoint_step490000.pt"
 DATA_DIR="datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500"
-PRODUCTS="${DATA_DIR}/evaluation_v2/dev_unique1000_aug20/src.txt"
-TARGETS="${DATA_DIR}/evaluation_v2/dev_unique1000_aug20/tgt.txt"
+EVALUATION_SPLIT="${EVALUATION_SPLIT:-$DEFAULT_EVALUATION_SPLIT}"
+PRODUCTS="${DATA_DIR}/evaluation_v2/${EVALUATION_SPLIT}/src.txt"
+TARGETS="${DATA_DIR}/evaluation_v2/${EVALUATION_SPLIT}/tgt.txt"
 VOCAB="${DATA_DIR}/example.vocab.src"
-SIDECAR="results/after_spe_stage1/center_sidecars/dev_unique1000_aug20"
+SIDECAR="results/after_spe_stage1/center_sidecars/${EVALUATION_SPLIT}"
 
 for required in \
   "$CHECKPOINT" "$PRODUCTS" "$TARGETS" "$VOCAB" \
@@ -51,6 +59,25 @@ for required in \
     exit 1
   fi
 done
+
+"$PYTHON_BIN" - "$SIDECAR/metadata.json" "$EVALUATION_SPLIT" <<'PY'
+import json
+import sys
+
+metadata_path, expected_split = sys.argv[1:]
+metadata = json.load(open(metadata_path))
+actual_split = metadata.get("evaluation_split")
+if actual_split != expected_split:
+    raise SystemExit(
+        f"sidecar split mismatch: {actual_split!r} != {expected_split!r}"
+    )
+if metadata.get("input_row_count") < 1:
+    raise SystemExit("sidecar has no input rows")
+print(
+    "Evaluation split:", expected_split,
+    "| sidecar rows:", metadata["input_row_count"],
+)
+PY
 
 "$PYTHON_BIN" - <<'PY'
 import torch
