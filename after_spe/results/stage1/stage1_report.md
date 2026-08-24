@@ -1,15 +1,15 @@
 # Stage1 结论：知道反应中心后，首次编辑会更好吗？
 
 日期：2026-08-24
-状态：全 B1 的 dev-1000 与独立 confirm-1000 已完成；RC1.5 的 dev-1000 也已完成。**下一步不是立刻训练 RC2 predictor，而是在独立 confirm-1000 固定复核 RC1.5。**
+状态：全 B1 与 RC1.5 的 dev-1000、独立 confirm-1000 均已完成。RC1.5 未在独立 confirm 上保住候选覆盖；**停止 product-only 中心预测器与同类 bias 调参。**
 
 ## 先给结论
 
 真实反应中心直接告诉采样器后，第一次编辑确实更常落在化学变化附近，也更常让序列向真实反应物靠近。全 B1 在两个互不重叠的 1,000-reaction split 上，Top-1 都高于普通 Euler：dev 为 `+1.1 pp`，独立 confirm 为 `+1.5 pp`。
 
-全 B1 的问题是九条轨迹容易过于集中。为此，RC1.5 固定使用 3 条中心引导轨迹 + 6 条普通 Euler 轨迹。在 dev-1000 上，它保留了 B1 的 Top-1 `61.2%`（B0 为 `60.1%`），且 Top-3/5/10/Oracle 的点估计均高于 B0；真正 unique 的下降也从全 B1 的 `-0.262` 缓解为 `-0.164`。完整数据见 [rc15_dev1000_report.md](rc15_dev1000_report.md)。
+全 B1 的问题是九条轨迹容易过于集中。为此，RC1.5 固定使用 3 条中心引导轨迹 + 6 条普通 Euler 轨迹。它在 dev-1000 上看起来兼顾了 Top-1 与覆盖；但在未参与设计选择的 confirm-1000 上，RC1.5 相对普通 Euler 只有 Top-1 `+0.7 pp`，而 Top-3/5/10/Oracle 分别为 `-0.7/-1.0/-0.5/-0.7 pp`。所有 paired-bootstrap 区间都覆盖 0。
 
-但这仍不是可部署结果，也不是已经显著的端到端提升：RC1.5 使用真实答案中的中心，且它相对 B0 的单-split Top-k/Oracle/unique 95% 区间都仍覆盖 0。准确结论是：**反应中心是有前景的首步位置先验；全 B1 过于集中，而 RC1.5 是目前更合理的 oracle 设计。下一步应先在未用于该设计选择的 confirm-1000 固定复核 RC1.5，而不是立刻训练信息更弱的 predictor。**
+因此应把“中心帮助首步”与“这套混合采样可提升最终候选集”分开：前者有重复的机制证据，后者没有通过独立确认。真实中心本身又不可用于实际推理，所以准确结论是：**保留 reaction-center 的诊断结果，但停止 product-only predictor、停止在当前 split 扫倍率或轨迹比例，也不再用 final/test 挑选这个分支。** 当前生成 baseline 保持普通 Euler。
 
 ## 先说清：反应中心、邻域和字符串编辑不是一回事
 
@@ -135,15 +135,28 @@ B1 比 B2 的 Top-1 高 `+2.2 pp`，95% 区间 `[+0.5, +3.9]`：这说明**正�
 | dev-1000 | `+1.1 pp` `[-0.5, +2.7]` | `+2.2 pp` `[+0.5, +3.9]` | B1 更常落在真实中心附近、更常使序列接近目标 |
 | confirm-1000 | `+1.5 pp` `[-0.1, +3.1]` | `+1.3 pp` `[-0.2, +2.8]` | 同方向复现：近中心 `+3.53 pp`、更接近目标 `+1.83 pp`、更远离目标 `-2.45 pp` |
 
-confirm 的独立方向复现使这条路线不应被当作“机制负结果”关闭；但其单独区间仍碰到 0，而且 B1 确实减少真正不同候选。因此当前决策是：
+confirm 的独立方向复现说明全 B1 不应被当作“机制负结果”关闭；但它单独的区间仍碰到 0，而且 B1 确实减少真正不同候选。于是只进行了一次固定、不调参的 RC1.5 confirm，而没有提前训练 predictor。
 
-- **不训练**只看产物的中心预测器：RC1.5 只完成 dev，仍需要独立 confirm；
-- **不扫**更多 multiplier，也不把 B1/RC1.5 当作可部署方法；
-- RC1.5 已按固定配置完成：`3` 条 B1 中心偏向轨迹 + `6` 条普通 Euler，总预算仍为 `9` 条。它保留了 B1 的 Top-1，并使 Top-5/10/Oracle 的 dev 点估计回到 B0 之上；
-- 下一步只在 `confirm_unique1000_aug20` 以完全相同配置复核；`final_unique2000_aug20` 与正式 test 均不用于这一轮设计选择；
-- 当前生成 baseline 仍为：`SPE-M500@490K + ordinary Euler N=9, 100 steps`；RC1.5 是待 confirm 的 oracle 上界设计。
+## RC1.5 的独立 confirm：最终决策
 
-confirm 的完整表格、hash、bootstrap 和首次编辑统计见 [rc1_confirm1000_report.md](rc1_confirm1000_report.md)。
+RC1.5 的 confirm 完全冻结为 `3` 条 B1 中心偏向 + `6` 条普通 Euler，总预算仍为 `9` 条。结果如下：
+
+| split | RC1.5 − B0 Top-1 | Top-3 | Top-5 | Top-10 | Oracle-any | true unique |
+|---|---:|---:|---:|---:|---:|---:|
+| dev-1000 | +1.1 pp | +0.6 pp | +0.6 pp | +0.5 pp | +0.2 pp | -0.164 |
+| 独立 confirm-1000 | +0.7 pp | -0.7 pp | -1.0 pp | -0.5 pp | -0.7 pp | -0.053 |
+
+confirm 中 RC1.5 的 Top-1 仍是正向，但 Top-3/5/10/Oracle 全部变为负向点估计；相对 B0 的 95% paired-bootstrap 区间分别为 Top-1 `[-0.7,+2.2]`、Top-3 `[-2.1,+0.7]`、Top-5 `[-2.6,+0.5]`、Top-10 `[-1.8,+0.9]`、Oracle `[-1.9,+0.5]`。它确实比全 B1 多 `+0.296` 个真正不同候选（95% CI `[+0.018,+0.582]`），但这种恢复不足以把深层 Top-k/Oracle 一并带回 B0 之上。
+
+因此预先设定的继续条件——Top-1 不下降且不出现明确的 Top-k/Oracle/unique 损失——没有满足。最终决策是：
+
+- **不训练**只看产物的中心预测器，也不把 oracle B1/RC1.5 当作可部署方法；
+- **不扫**更多 multiplier、trajectory 配比或 seed 来挽救当前设计；
+- **不使用**`final_unique2000_aug20` 或正式 test 继续选择该方法；
+- 当前生成 baseline 仍为：`SPE-M500@490K + ordinary Euler N=9, 100 steps`；
+- 后续训练改进转向有独立依据的 product memory / model-state roll-in，而非这条 first-event center-bias 分支。
+
+全 B1 的 confirm 完整表格、hash、bootstrap 和首次编辑统计见 [rc1_confirm1000_report.md](rc1_confirm1000_report.md)；RC1.5 的独立复核见 [rc15_confirm1000_report.md](rc15_confirm1000_report.md)。
 
 ## 复现材料
 
@@ -153,5 +166,7 @@ confirm 的完整表格、hash、bootstrap 和首次编辑统计见 [rc1_confirm
 - 完整数值、hash、bootstrap 和首次编辑统计：[rc1_dev1000_summary.json](rc1_dev1000_summary.json)
 - 独立 confirm 数值：[rc1_confirm1000_summary.json](rc1_confirm1000_summary.json)
 - 独立 confirm 白话报告：[rc1_confirm1000_report.md](rc1_confirm1000_report.md)
+- RC1.5 独立 confirm 白话报告：[rc15_confirm1000_report.md](rc15_confirm1000_report.md)
+- RC1.5 独立 confirm 数值：[rc15_confirm1000_summary.json](rc15_confirm1000_summary.json)
 - 可复现运行入口：[rc1_commands.md](rc1_commands.md)
 - 运行输出（未提交的大文件）：`results/after_spe_stage1/rc1_runs/20260823T225828Z_dev1000/`

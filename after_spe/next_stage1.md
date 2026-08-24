@@ -1,7 +1,7 @@
 # After-SPE 第一阶段详细计划：反应中心引导首次编辑
 
 更新日期：2026-08-24
-状态：S0–S4/RC1 的 dev 与独立 confirm 已完成；RC1.5 的 dev 也已完成。真实中心的机制信号已复现，且 3+6 混合设计缓解了全中心偏向的覆盖损失；下一步是独立 confirm 固定复核 RC1.5，暂不启动 S5/RC2 中心预测器或 RC3。
+状态：S0–S4/RC1 与 RC1.5 的 dev、独立 confirm 均已完成。真实中心的首步机制信号已复现；但 `3+6` 混合设计没有在独立 confirm 上保住 Top-k/Oracle 覆盖。**停止 S5/RC2 中心预测器、RC3 以及当前 center-bias 的继续调参。**
 
 ## 0. 当前执行进度（2026-08-24）
 
@@ -13,12 +13,12 @@
 | S3/RC0 局部性审计 | 已完成 | radius-1 仅占 28.737% token，却覆盖 91.088% 已有-token 编辑和 96.343% INS 入口，RC0 通过 |
 | S4/RC1 CPU 准备 | 已完成 | true/pseudo sidecar、首事件位置 bias、hazard 守恒和诊断均通过测试 |
 | S4/RC1 GPU 实验 | 已完成 | smoke、pilot100、dev-1000 和独立 confirm-1000 均完成；B1 对 B0 的 Top-1 在两 split 均为正（+1.1/+1.5 pp），但单 split CI 均触及 0，且 B1 减少 unique candidates |
-| RC1.5 oracle 混合设计 | dev 已完成，confirm 待执行 | dev：Top-1 `61.2%`（B0 `60.1%`），Top-3/5/10/Oracle 点估计均高于 B0；unique 降幅从全 B1 的 `-0.262` 缓解为 `-0.164`，但区间均仍覆盖 0 |
-| S5/RC2 中心预测器 | 暂缓 | 只有固定 RC1.5 在 confirm 也保留 Top-1 信号且不出现明确覆盖损失，才值得训练信息更弱的 product-only predictor |
+| RC1.5 oracle 混合设计 | 已完成，不通过继续门槛 | dev 正向；独立 confirm 仅 Top-1 `+0.7 pp`，Top-3/5/10/Oracle 为 `-0.7/-1.0/-0.5/-0.7 pp`，故不把它解释为稳定覆盖收益 |
+| S5/RC2 中心预测器 | 停止 | oracle `3+6` 已未能在独立 confirm 同时保住 Top-1 与覆盖；信息更弱的 product-only predictor 没有足够启动依据 |
 
-当前结论见 `after_spe/results/stage1/stage1_report.md`；RC1.5 dev 的完整过程与数据见
-`after_spe/results/stage1/rc15_dev1000_report.md` 和
-`after_spe/results/stage1/rc15_dev1000_summary.json`；全 B1 的独立 confirm 见
+当前结论见 `after_spe/results/stage1/stage1_report.md`；RC1.5 的 dev 与独立 confirm 分别见
+`after_spe/results/stage1/rc15_dev1000_report.md`、
+`after_spe/results/stage1/rc15_confirm1000_report.md` 及其 JSON；全 B1 的独立 confirm 见
 `after_spe/results/stage1/rc1_confirm1000_report.md`。
 
 ## 1. 第一阶段究竟要回答什么
@@ -509,11 +509,13 @@ B1 比 B2 的 Top-1 高 `2.2 pp`（paired bootstrap 95% CI `[+0.5, +3.9]`），�
 
 随后以完全冻结的同一 B0/B1/B2 协议，在独立 `confirm_unique1000_aug20` 上验证：B1−B0 的 Top-1 为 `+1.5 pp`（CI `[-0.1, +3.1]`），B1−B2 为 `+1.3 pp`（CI `[-0.2, +2.8]`）。B1 的首步近中心比例较 B0 提高 `+3.53 pp`，首步后更接近目标提高 `+1.83 pp`，更远离目标降低 `-2.45 pp`；局部机制与 dev 同方向复现。
 
-因此 RC1 当前判定为**机制有效、端到端方向正向，RC1.5 的 dev 设计已通过但尚未独立冻结**：不扫描额外倍率，也不直接训练 RC2/RC3。RC1.5 的 `3` 条 B1 中心偏向 + `6` 条普通 Euler 在 dev 上保留了 B1 的 Top-1，并缓解候选集中；下一步只在 confirm 以相同配置复核。`final_unique2000_aug20` 和 test 不用于这一轮选择。完整解释见 `after_spe/results/stage1/rc15_dev1000_report.md`。
+随后按冻结的相同配置完成 RC1.5 的独立 confirm：相对 B0，Top-1 为 `+0.7 pp`，但 Top-3/5/10/Oracle 为 `-0.7/-1.0/-0.5/-0.7 pp`，全部 paired-bootstrap 区间覆盖 0。RC1.5 确实比全 B1 多 `+0.296` 个真正不同候选（95% CI `[+0.018,+0.582]`），但未把深层覆盖稳定带回 B0 之上。
+
+因此 RC1 的最终判定是：**真实中心对首次编辑的局部机制有效，但当前 center-bias sampler 没有通过独立的端到端覆盖门槛。** 不扫描额外倍率/轨迹配比，不训练 RC2/RC3，不使用 `final_unique2000_aug20` 或 test 挽救该设计；后续优先转向 product memory / roll-in。完整解释见 `after_spe/results/stage1/rc15_confirm1000_report.md`。
 
 ## 10. S5 / RC2：训练仅看产物的反应中心预测器
 
-RC2 只在 RC1.5 的独立 confirm 也通过后开始。当前 RC1 在两个 split 上复现了正向机制，RC1.5 dev 已给出更兼顾覆盖的 oracle 上界，但仍不能把同一 dev 的点估计当作稳定结论，因此本节保留为后续设计，暂不执行。
+RC2 原本只在 RC1.5 的独立 confirm 也通过后开始。该 confirm 已完成但没有通过“Top-1 不降且不损失覆盖”的门槛；而 predictor 在真实推理时只能得到比 oracle 更弱的信息。因此本节保留为历史设计说明，**当前不执行**。
 
 这里的“仅看产物（product-only）”是指：模型输入只有待逆合成的 product 分子图，输出其中哪些原子或键最可能属于反应中心。它不读取真实 reactants、target、真实中心、reaction class 或 atom-map id，因此推理时可真正部署。它与 M500 生成模型彼此独立：前者只提供前三个中心位置假设，后者仍负责生成反应物。
 

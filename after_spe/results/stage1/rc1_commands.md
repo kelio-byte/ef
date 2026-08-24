@@ -2,9 +2,9 @@
 
 日期：2026-08-24
 
-正式 smoke、pilot100、dev-1000 和独立 confirm-1000 已完成；当前结论见 [stage1_report.md](stage1_report.md) 与 [rc1_confirm1000_report.md](rc1_confirm1000_report.md)。以下命令保留用于复现，不应再以 dev 扫描新的 bias 倍率。
+正式 smoke、pilot100、dev-1000 和独立 confirm-1000 已完成；当前结论见 [stage1_report.md](stage1_report.md) 与 [rc1_confirm1000_report.md](rc1_confirm1000_report.md)。以下命令只保留用于复现，不应再以 dev 扫描新的 bias 倍率。
 
-RC1.5 的 dev-1000 也已完成，报告见 [rc15_dev1000_report.md](rc15_dev1000_report.md)。它固定为 3 条真实中心引导轨迹 + 6 条普通 Euler 轨迹；下一次允许的中心实验是同配方的 confirm-1000，不是继续扫倍率或轨迹比例。
+RC1.5 的 dev-1000 与独立 confirm-1000 也已完成，报告见 [rc15_dev1000_report.md](rc15_dev1000_report.md) 和 [rc15_confirm1000_report.md](rc15_confirm1000_report.md)。confirm 未满足端到端覆盖门槛，因此不再运行新的中心采样实验，也不训练 product-only predictor。
 
 ## 推荐入口
 
@@ -67,10 +67,10 @@ bash scripts/run_stage1_rc15.sh dev1000
 
 该命令只重新生成 RC1.5；它会验证并复用已完成的同协议 B0、B0-trace、B1 输出，避免无意义地重复三遍完整推理。本次提交前的 smoke 已确认新代码的 B0、B0-trace、B1 与旧 RC1 smoke 逐字节一致。
 
-如要执行下一次独立复核，命令固定为：
+如需逐字复现已完成的独立复核，命令为：
 
 ```bash
 bash scripts/run_stage1_rc15.sh confirm1000
 ```
 
-`confirm1000` 使用 `confirm_unique1000_aug20`、其独立 center sidecar 和既有的 confirm B0/B1 输出；脚本会核验输入哈希、采样协议和 B0/B0-trace 的逐字节一致性。不要在该命令中改 checkpoint、倍率、trajectory 数、seed 或步数。
+`confirm1000` 使用 `confirm_unique1000_aug20`、其独立 center sidecar 和既有的 confirm B0/B1 输出；脚本会核验输入哈希、采样协议和 B0/B0-trace 的逐字节一致性。不要把该命令用于继续调 checkpoint、倍率、trajectory 数、seed 或步数。

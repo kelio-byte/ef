@@ -1,7 +1,7 @@
 # RC1.5：三条中心引导 + 六条普通轨迹（dev-1000）
 
 日期：2026-08-24
-状态：已完成。结果支持保留这条路线，但仍是 oracle 结果；下一步应做一次固定配方的独立 confirm-1000 复核，暂不训练 product-only 中心预测器。
+状态：dev 结果已完成；其后固定配方的独立 confirm-1000 已完成，但未通过继续门槛。最终结论见 [rc15_confirm1000_report.md](rc15_confirm1000_report.md)。
 
 ## 这次为什么要做
 
@@ -99,6 +99,6 @@ RC1.5 与全 B1 的 Top-1 相同；在点估计上，RC1.5 的 Top-5/10/Oracle �
 
 但这还**不是**“反应中心方法已被证明有效”或“可以训练部署模型”的结论：一是 B1/RC1.5 读取了真实中心；二是 RC1.5 相对 B0 的所有 bootstrap 区间仍覆盖 0；三是本次设计评估仍在此前用于研究该方向的 dev split 上。
 
-下一步应保持 `3 + 6`、倍率 3、checkpoint、seed、步数和评分规则全部不变，在未参与本次设计选择的 `confirm_unique1000_aug20` 上复核一次。只有 confirm 也同时保留非负的 Top-1 信号且没有明确的 Top-k/Oracle/unique 损失，才进入下一阶段：训练只看 product 的中心预测器，并把预测中心接入同一 RC1.5 采样框架。若 confirm 不支持该权衡，则停止 product-only predictor 分支，不继续调倍率或轨迹配比。
+后续按原计划保持 `3 + 6`、倍率 3、checkpoint、seed、步数和评分规则不变，在 `confirm_unique1000_aug20` 上完成了独立复核。confirm 虽有 Top-1 `+0.7 pp`，但 Top-3/5/10/Oracle 为负向点估计，故不满足继续条件；停止 product-only predictor 分支，不继续调倍率或轨迹配比。完整结果见 [rc15_confirm1000_report.md](rc15_confirm1000_report.md)。
 
 机器可读结果：[rc15_dev1000_summary.json](rc15_dev1000_summary.json)。完整大文件预测与诊断在未提交的 `results/after_spe_stage1/rc15_runs/20260824T_rc15_dev1000_dev1000/`。
