@@ -23,6 +23,7 @@
         "0.5": 12237,
         "1.0": 134981
       },
+      "event_region_description": "assigned true reaction-center component",
       "expected_trajectories": 180000,
       "first_event_count": 174155,
       "first_event_distance": {
@@ -69,6 +70,7 @@
         "0.5": 11116,
         "1.0": 142206
       },
+      "event_region_description": "assigned true reaction-center component",
       "expected_trajectories": 180000,
       "first_event_count": 174104,
       "first_event_distance": {
@@ -115,6 +117,7 @@
         "0.5": 12000,
         "1.0": 16156
       },
+      "event_region_description": "assigned pseudo-center component",
       "expected_trajectories": 180000,
       "first_event_count": 174009,
       "first_event_distance": {

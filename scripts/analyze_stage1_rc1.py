@@ -222,6 +222,14 @@ def _event_summary(
     return {
         "path": str(group_dir),
         "center_source": diagnostics["center_source"],
+        # Scores are always relative to the region assigned to this group.
+        # In particular, B2's score is proximity to its pseudo-center, not
+        # proximity to the true reaction center.
+        "event_region_description": (
+            "assigned true reaction-center component"
+            if diagnostics["center_source"] == "oracle"
+            else "assigned pseudo-center component"
+        ),
         "max_multiplier": float(diagnostics["max_multiplier"]),
         "expected_trajectories": expected_trajectories,
         "first_event_count": first_event_count,
