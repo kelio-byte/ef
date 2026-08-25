@@ -94,3 +94,40 @@ def test_sample_retro_loads_and_runs_a_product_memory_checkpoint(tmp_path):
             "encode_x0_once_per_input_row_then_repeat_per_trajectory"
         ),
     }
+
+    # Euler-Beam/R9K1M2 relies on the same immutable x_0 cache, but branches
+    # have to gather it by their original sample row.  Exercise the public
+    # CLI so the checkpoint compatibility guard and cache expansion in
+    # sample_retro.py are covered together.
+    beam_output_dir = tmp_path / "out_beam"
+    beam_completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/sample_retro.py",
+            "--checkpoint", str(checkpoint),
+            "--products_file", str(products),
+            "--vocab_file", str(vocab),
+            "--output_dir", str(beam_output_dir),
+            "--sampler", "euler_beam",
+            "--n_runs", "2",
+            "--n_branches", "1",
+            "--n_children", "2",
+            "--euler_beam_child_policy", "stochastic_noop",
+            "--n_steps", "2",
+            "--batch_size", "1",
+            "--device", "cpu",
+            "--seed", "42",
+        ],
+        cwd=repo_root,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Done. Total predictions: 2" in beam_completed.stdout
+    assert len((beam_output_dir / "predictions.txt").read_text().splitlines()) == 2
+    beam_metadata = json.loads(
+        (beam_output_dir / "sampling_metadata.json").read_text(),
+    )
+    assert beam_metadata["sampling"]["n_runs"] == 2
+    assert beam_metadata["model"]["effective_use_product_memory"] is True

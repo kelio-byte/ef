@@ -27,6 +27,8 @@ from edit_flows.sampling.center_bias import (
 from edit_flows.sampling.euler import (
     _compute_model_time,
     _event_probability,
+    _forward_edit_model,
+    _prepare_product_memory_for_sampling,
     get_adaptive_h,
 )
 from edit_flows.sampling.ops import (
@@ -981,6 +983,8 @@ def sample_euler_beam(
     first_event_row_metadata: Optional[List[dict]] = None,
     first_event_bias_record_events: bool = False,
     first_event_record_sink: Optional[Callable[[dict], None]] = None,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
 ) -> Tensor:
     """Euler 采样 + 分支维护。
 
@@ -1016,6 +1020,12 @@ def sample_euler_beam(
             lineage 的首事件会立即交给该函数而不累积到
             ``first_event_bias_stats['records']``。这使全量诊断可以流式
             汇总，而不在内存中保留近百万个 Python 字典。
+        product_memory: 可选的、按初始输入行排列的 immutable product
+            memory。每个分支会按其所属初始输入行读取同一份 memory；
+            不提供时，product-memory 模型会在本函数入口对 ``x_0``
+            每行编码一次。
+        product_memory_padding_mask: 与 ``product_memory`` 对应的 padding
+            mask。仅在提供 ``product_memory`` 时必填。
 
     Returns:
         x_final: (B * n_branches, L_out) 每条样本的全部排名分支，按样本优先
@@ -1115,7 +1125,35 @@ def sample_euler_beam(
         sort_key = _branch_sort_key
 
     device = next(model.parameters()).device
+    x_0 = x_0.to(device)
     B = x_0.shape[0]
+    # x_t changes as branches evolve, whereas the extra product context must
+    # remain tied to the original x_0.  Prepare it before creating branches,
+    # then use each branch's stable sample index to gather the right cache row
+    # at every forward.  This is also compatible with shared state forwards:
+    # the cache gathers use the same unique-row map as x_t and t.
+    product_memory, product_memory_padding_mask = (
+        _prepare_product_memory_for_sampling(
+            model,
+            x_0,
+            pad_token=pad_token,
+            product_memory=product_memory,
+            product_memory_padding_mask=product_memory_padding_mask,
+        )
+    )
+    if product_memory is not None:
+        if product_memory.shape[0] != B:
+            raise ValueError(
+                "product_memory batch size must equal x_0 batch size, got "
+                f"{product_memory.shape[0]} and {B}"
+            )
+        if product_memory_padding_mask is None:
+            raise RuntimeError("validated product memory is missing its mask")
+        if product_memory_padding_mask.shape != product_memory.shape[:2]:
+            raise ValueError(
+                "product_memory_padding_mask must match product_memory "
+                "batch and length"
+            )
     default_h = 1.0 / n_steps
     origin_keys = _token_keys_batch(x_0, pad_token, bos_token)
     noop_step = min(n_steps - 1, int(0.9 * n_steps))
@@ -1286,6 +1324,21 @@ def sample_euler_beam(
         # 3. 单次模型前向。可选地只计算product内完全相同的parent状态一次，
         # 然后映射回逻辑lineage；随机动作仍按各自seed独立生成。
         section_started = _profile_start(profile, device)
+        parent_sample_indices = torch.tensor(
+            [b for b, _, _ in flat], dtype=torch.long, device=device,
+        )
+        parent_product_memory = None
+        parent_product_memory_padding_mask = None
+        if product_memory is not None:
+            parent_product_memory = product_memory.index_select(
+                0, parent_sample_indices,
+            )
+            parent_product_memory_padding_mask = (
+                product_memory_padding_mask.index_select(
+                    0, parent_sample_indices,
+                )
+            )
+
         inverse_forward_indices = None
         if share_identical_forwards:
             unique_rows, inverse_rows = _shared_forward_row_map(
@@ -1299,9 +1352,25 @@ def sample_euler_beam(
             )
             x_model = x_batch.index_select(0, unique_indices)
             t_model_input = t_vals.index_select(0, unique_indices)
+            if parent_product_memory is not None:
+                product_memory_model = parent_product_memory.index_select(
+                    0, unique_indices,
+                )
+                product_memory_padding_mask_model = (
+                    parent_product_memory_padding_mask.index_select(
+                        0, unique_indices,
+                    )
+                )
+            else:
+                product_memory_model = None
+                product_memory_padding_mask_model = None
         else:
             x_model = x_batch
             t_model_input = t_vals
+            product_memory_model = parent_product_memory
+            product_memory_padding_mask_model = (
+                parent_product_memory_padding_mask
+            )
         physical_forward_rows = x_model.shape[0]
         for stats in (profile, sampling_stats):
             if stats is not None:
@@ -1318,8 +1387,13 @@ def sample_euler_beam(
         t_model = _compute_model_time(
             t_model_input, scheduler, time_input, train_scheduler,
         )
-        log_rates, log_ins_probs, log_sub_probs = model(
-            x_model, t_model, x_pad_mask,
+        log_rates, log_ins_probs, log_sub_probs = _forward_edit_model(
+            model,
+            x_model,
+            t_model,
+            x_pad_mask,
+            product_memory=product_memory_model,
+            product_memory_padding_mask=product_memory_padding_mask_model,
         )
 
         # 4. 速率修正 (与 sample_euler 完全一致)
@@ -1408,11 +1482,6 @@ def sample_euler_beam(
         parent_first_event_pending = None
         parent_center_bias_enabled = None
         if first_event_position_scores is not None:
-            parent_sample_indices = torch.tensor(
-                [b for b, _, _ in flat],
-                dtype=torch.long,
-                device=device,
-            )
             parent_position_scores = first_event_position_scores.index_select(
                 0, parent_sample_indices,
             )

@@ -13,6 +13,8 @@ bash other_machines/train_and_eval_retro_spe_m500.sh
 - `train_and_eval_retro_spe_full.sh`：原始 R-SMILES Full-SPE 训练与评估；
 - `train_and_eval_retro_spe_m500.sh`：原始 R-SMILES SPE-M500 训练与评估；
 - `train_and_eval_retro_spe_m500_product_memory.sh`：global R-SMILES SPE-M500 Product-Memory 训练与评估；
+- `eval_product_memory_next.sh`：已完成 Product-Memory 训练后的分阶段评估。依次运行 `smoke`、`dev_euler`、`dev_r9`；只有 dev 确认后才用 `ALLOW_PRODUCT_MEMORY_FULL_REFERENCE=YES` 解锁 `full_euler` 或 `full_r9`。它固定 M500@500K、100 steps、cubic，并在 R9 模式冻结 `R9K1M2`（9 runs、K=1、M=2、full-probability、`stochastic_noop`）协议；
+- `eval_product_memory_r9k1m2_full_checkpoints.sh`：Product-Memory 的直接完整 test checkpoint sweep。默认依次评估 `450K/490K/500K/550K/600K`，固定 R9K1M2，适用于当前跳过 dev、直接比较多个 checkpoint 的决定；
 - `eval_full_test_r9k1m2_spe_m500.sh`：global R-SMILES Atom/M500 的 R9K1M2 全量 test；
 - `run_r9k1m2_b1_oracle_checkpoints.sh`：真实反应中心引导 B1 的多个 checkpoint 全量 test；
 - `run_r9k1m2_first_event_distance_full.sh`：以 B0-trace（倍率 1）和 oracle B1（倍率 3）在完整 test 上比较首个非空编辑前后的 token 距离；输出流式汇总，不写百万条事件 JSON。先运行 smoke：

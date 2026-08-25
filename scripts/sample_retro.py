@@ -1009,11 +1009,11 @@ def main():
             "checkpoint state dict contains product-memory weights but its "
             "config has use_product_memory=False"
         )
-    if use_product_memory and args.sampler != "euler":
+    if use_product_memory and args.sampler not in {"euler", "euler_beam"}:
         raise ValueError(
-            "product-memory checkpoints currently support only --sampler "
-            "euler; beam/structured samplers need cache-aware branch "
-            "bookkeeping before they can be compared fairly"
+            "product-memory checkpoints support only --sampler euler or "
+            "euler_beam; structured/greedy samplers do not yet carry the "
+            "immutable product-memory cache"
         )
 
     model = EditFlowsTransformer(
@@ -1348,6 +1348,8 @@ def main():
                             None,
                         ) == "full"
                     ),
+                    product_memory=product_memory,
+                    product_memory_padding_mask=product_memory_padding_mask,
                 )
             elif args.sampler == "structured_diversification":
                 B_prod = end - start

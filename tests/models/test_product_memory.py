@@ -7,6 +7,7 @@ from edit_flows.core.alignment import identity_align_xs_to_zs
 from edit_flows.core.scheduler import CubicScheduler
 from edit_flows.models.transformer import EditFlowsTransformer
 from edit_flows.sampling.euler import sample_euler
+from edit_flows.sampling.euler_beam import sample_euler_beam
 from edit_flows.training.trainer import prepare_batch, train_step
 from edit_flows.utils.tokens import BOS_TOKEN, GAP_TOKEN, PAD_TOKEN
 
@@ -196,3 +197,87 @@ class TestProductMemorySampling:
             )
 
         assert encode_product.call_count == 0
+
+    def test_euler_beam_reuses_original_product_memory_per_branch(self):
+        """Branching must not re-encode or replace the immutable x_0 cache."""
+        torch.manual_seed(29)
+        model = _product_memory_model().eval()
+        x_0 = torch.tensor([
+            [BOS_TOKEN, 4, 5, PAD_TOKEN],
+            [BOS_TOKEN, 6, 7, PAD_TOKEN],
+        ])
+        kwargs = dict(
+            n_branches=2,
+            n_children=2,
+            n_steps=3,
+            max_seq_len=12,
+            sample_seeds=[101, 202],
+            score_mode="full_probability",
+            changed_state_bonus=0.5,
+            child_policy="stochastic_noop",
+        )
+
+        with patch.object(
+            model, "encode_product", wraps=model.encode_product,
+        ) as encode_product:
+            implicit = sample_euler_beam(
+                model, x_0, CubicScheduler(), **kwargs,
+            )
+        # One batched encode at sampler entry, never once per branch or step.
+        assert encode_product.call_count == 1
+
+        padding_mask = x_0 == PAD_TOKEN
+        cache = model.encode_product(x_0, padding_mask)
+        with patch.object(
+            model, "encode_product", wraps=model.encode_product,
+        ) as encode_product:
+            explicit = sample_euler_beam(
+                model,
+                x_0,
+                CubicScheduler(),
+                product_memory=cache,
+                product_memory_padding_mask=padding_mask,
+                **kwargs,
+            )
+        assert encode_product.call_count == 0
+        assert torch.equal(implicit, explicit)
+
+    def test_euler_beam_product_memory_is_compatible_with_shared_forwards(self):
+        """Deduplicated forwards must gather the matching immutable cache."""
+        torch.manual_seed(31)
+        model = _product_memory_model().eval()
+        x_0 = torch.tensor([
+            [BOS_TOKEN, 4, 5, PAD_TOKEN],
+            [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        ])
+        common = dict(
+            n_branches=1,
+            n_children=2,
+            n_steps=3,
+            max_seq_len=12,
+            sample_seeds=[303, 404],
+            score_mode="full_probability",
+            changed_state_bonus=0.5,
+            child_policy="stochastic_noop",
+            profile_sample_group_size=2,
+        )
+        padding_mask = x_0 == PAD_TOKEN
+        cache = model.encode_product(x_0, padding_mask)
+        ordinary = sample_euler_beam(
+            model,
+            x_0,
+            CubicScheduler(),
+            product_memory=cache,
+            product_memory_padding_mask=padding_mask,
+            **common,
+        )
+        shared = sample_euler_beam(
+            model,
+            x_0,
+            CubicScheduler(),
+            product_memory=cache,
+            product_memory_padding_mask=padding_mask,
+            share_identical_forwards=True,
+            **common,
+        )
+        assert torch.equal(ordinary, shared)
