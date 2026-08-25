@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -980,6 +980,7 @@ def sample_euler_beam(
     first_event_bias_stats: Optional[dict] = None,
     first_event_row_metadata: Optional[List[dict]] = None,
     first_event_bias_record_events: bool = False,
+    first_event_record_sink: Optional[Callable[[dict], None]] = None,
 ) -> Tensor:
     """Euler 采样 + 分支维护。
 
@@ -1010,6 +1011,11 @@ def sample_euler_beam(
         first_event_bias_record_events: 仅诊断用。True 时保留每条最终
             lineage 的首事件详情；False 时只保留轻量计数，避免全量 test
             写出大体积 JSON。
+        first_event_record_sink: 可选的逐条首事件消费函数。仅在
+            ``first_event_bias_record_events=True`` 时有效；提供后，选中
+            lineage 的首事件会立即交给该函数而不累积到
+            ``first_event_bias_stats['records']``。这使全量诊断可以流式
+            汇总，而不在内存中保留近百万个 Python 字典。
 
     Returns:
         x_final: (B * n_branches, L_out) 每条样本的全部排名分支，按样本优先
@@ -1027,6 +1033,15 @@ def sample_euler_beam(
         )
     if x_0.shape[0] < 1:
         raise ValueError("x_0 batch must contain at least one sample")
+    if first_event_record_sink is not None and not first_event_bias_record_events:
+        raise ValueError(
+            "first_event_record_sink requires "
+            "first_event_bias_record_events=True"
+        )
+    if first_event_record_sink is not None and first_event_bias_stats is None:
+        raise ValueError(
+            "first_event_record_sink requires first_event_bias_stats"
+        )
     if profile_sample_group_size < 1:
         raise ValueError(
             "profile_sample_group_size must be >= 1, got "
@@ -1851,7 +1866,10 @@ def sample_euler_beam(
                         )
                     record = dict(branch.first_event_record)
                     record["beam_branch_rank"] = int(branch_rank)
-                    first_event_bias_stats["records"].append(record)
+                    if first_event_record_sink is None:
+                        first_event_bias_stats["records"].append(record)
+                    else:
+                        first_event_record_sink(record)
                     continue
                 first_event_counts = first_event_bias_stats[
                     "first_event_trajectory_role_counts"

@@ -393,6 +393,44 @@ def test_r9_style_center_bias_tracks_selected_lineage_first_event():
                for record in stats["records"])
 
 
+def test_r9_first_event_record_sink_streams_without_retaining_records():
+    model = _ForcedFirstSubstitution()
+    x_0 = torch.tensor([
+        [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        [BOS_TOKEN, 6, 7, PAD_TOKEN],
+    ])
+    scores = torch.zeros(2, 4, 3)
+    scores[:, 1, 1] = 1.0
+    stats = {}
+    streamed = []
+    result = sample_euler_beam(
+        model,
+        x_0,
+        LinearScheduler(),
+        n_branches=1,
+        n_children=2,
+        n_steps=2,
+        max_seq_len=16,
+        sample_seeds=[101, 202],
+        score_mode="full_probability",
+        changed_state_bonus=0.5,
+        child_policy="stochastic_noop",
+        profile_sample_group_size=2,
+        first_event_position_scores=scores,
+        first_event_bias_max_multiplier=3.0,
+        first_event_bias_stats=stats,
+        first_event_row_metadata=[{"row": 0}, {"row": 1}],
+        first_event_bias_record_events=True,
+        first_event_record_sink=streamed.append,
+    )
+
+    assert torch.equal(result[:, 1], torch.tensor([9, 9]))
+    assert stats["first_event_count"] == 2
+    assert len(streamed) == 2
+    assert stats["records"] == []
+    assert [record["row_metadata"]["row"] for record in streamed] == [0, 1]
+
+
 def test_r9_style_center_bias_multiplier_one_is_bitwise_neutral():
     model = _StochasticModel()
     x_0 = torch.tensor([
