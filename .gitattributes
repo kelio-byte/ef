@@ -17,4 +17,5 @@ datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m1000/test/*.txt filter=lfs diff=lfs 
 datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m2000/train/*.txt filter=lfs diff=lfs merge=lfs -text
 datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m2000/val/*.txt filter=lfs diff=lfs merge=lfs -text
 datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m2000/test/*.txt filter=lfs diff=lfs merge=lfs -text
+after_spe/center_sidecars/test_all_aug20/scores.jsonl filter=lfs diff=lfs merge=lfs -text
 checkpoints/retro_spe_600k/USPTO_50K_PtoR_aug20_#global#_SPE/2026-08-14_15-24-14/checkpoint_step600000.pt filter=lfs diff=lfs merge=lfs -text
