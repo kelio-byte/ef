@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Original-R-SMILES Full-SPE unclipped control.
+# Original-R-SMILES atom-level, unclipped 600k control.
 # Requires: conda activate /root/autodl-tmp/ef
 set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
 export PYTHONPATH=.
 export PYTHONUNBUFFERED=1
@@ -9,19 +12,21 @@ export PATH=/root/autodl-tmp/ef/bin:$PATH
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 
-CONFIG="${CONFIG:-configs/retro_spe_full_rsmiles_600k_bs256.yaml}"
-SAVE_ROOT="${SAVE_ROOT:-checkpoints/retro_ori_rsmiles_spe_full_600k_unclipped}"
-DATA="${DATA:-datasets/USPTO_50K_PtoR_aug20_SPE_full}"
+CONFIG="${CONFIG:-configs/retro_atom_rsmiles_600k_bs256.yaml}"
+SAVE_ROOT="${SAVE_ROOT:-checkpoints/retro_ori_rsmiles_atom_600k_bs256_unclipped}"
+DATA="${DATA:-datasets/USPTO_50K_PtoR_aug20}"
 DATA_NAME="${DATA_NAME:-$(basename "$DATA")}"
 MANIFEST="${MANIFEST:-datasets/USPTO_50K_PtoR_aug20_#global#/evaluation_v2/manifest.json}"
 EVAL_STEPS="${EVAL_STEPS:-450000 490000 500000 550000 600000}"
 EVAL_SEED="${EVAL_SEED:-42}"
 MAX_PRODUCTS="${MAX_PRODUCTS:-20000}"
 PROCESS_NUMBER="${PROCESS_NUMBER:-12}"
+MIN_FREE_GB="${MIN_FREE_GB:-15}"
+SMOKE_STEPS="${SMOKE_STEPS:-0}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
 RUN_TAG="$(date +%Y%m%d_%H%M%S)"
-TRAIN_LOG="logs/train_ori_rsmiles_spe_full_unclipped_${RUN_TAG}.log"
+TRAIN_LOG="logs/train_ori_rsmiles_atom_unclipped_${RUN_TAG}.log"
 EVAL_DIR="$DATA/evaluation_v2/dev_unique1000_aug20"
 
 mkdir -p logs results
@@ -59,6 +64,24 @@ if [ "$MAX_PRODUCTS" -le 0 ] || [ $((MAX_PRODUCTS % 20)) -ne 0 ]; then
   echo "MAX_PRODUCTS must be positive and divisible by augmentation=20, got: $MAX_PRODUCTS" >&2
   exit 1
 fi
+case "$MIN_FREE_GB" in
+  ''|*[!0-9]*)
+    echo "MIN_FREE_GB must be a non-negative integer, got: $MIN_FREE_GB" >&2
+    exit 1
+    ;;
+esac
+case "$SMOKE_STEPS" in
+  ''|*[!0-9]*)
+    echo "SMOKE_STEPS must be a non-negative integer, got: $SMOKE_STEPS" >&2
+    exit 1
+    ;;
+esac
+FREE_MB="$(df -Pm . | awk 'NR == 2 {print $4}')"
+if [ -z "$FREE_MB" ] || [ "$FREE_MB" -lt $((MIN_FREE_GB * 1024)) ]; then
+  echo "Insufficient free disk space: ${FREE_MB:-unknown} MiB available; need at least ${MIN_FREE_GB} GiB" >&2
+  exit 1
+fi
+echo "Free disk space: ${FREE_MB} MiB (minimum: ${MIN_FREE_GB} GiB)"
 
 "$PYTHON_BIN" - "$CONFIG" "$DATA" "$EVAL_STEPS" <<'PY'
 from pathlib import Path
@@ -87,6 +110,12 @@ if float(config.get("max_grad_norm", -1.0)) != 0.0:
         "This unclipped control requires max_grad_norm: 0.0; "
         f"got {config.get('max_grad_norm')!r}"
     )
+if int(config.get("max_seq_len", 0)) < 189:
+    raise SystemExit(
+        "The original pre-aligned atom-level training pairs need "
+        "max_seq_len >= 189; "
+        f"got {config.get('max_seq_len')!r}"
+    )
 
 try:
     eval_steps = [int(step) for step in sys.argv[3].split()]
@@ -103,12 +132,26 @@ if checkpoint_interval <= 0 or any(step % checkpoint_interval for step in eval_s
         "Each EVAL_STEPS value must be a multiple of checkpoint_interval="
         f"{checkpoint_interval}, got {eval_steps}"
     )
+keep_checkpoints = int(config.get("keep_checkpoints", 10))
+checkpoint_steps = list(range(checkpoint_interval, total_steps + 1, checkpoint_interval))
+retained_steps = checkpoint_steps[-keep_checkpoints:] if keep_checkpoints > 0 else []
+missing_after_pruning = sorted(set(eval_steps).difference(retained_steps))
+if missing_after_pruning:
+    raise SystemExit(
+        "keep_checkpoints would prune requested evaluation steps before "
+        f"post-training evaluation: {missing_after_pruning}; "
+        f"keep={keep_checkpoints}, retained range="
+        f"{retained_steps[0] if retained_steps else None}.."
+        f"{retained_steps[-1] if retained_steps else None}"
+    )
 
 print(f"Python: {sys.executable} ({sys.version.split()[0]})")
 print(f"Torch: {torch.__version__}; GPU: {torch.cuda.get_device_name(0)}")
 print(f"Config/data consistency: {configured_data}")
 print(f"Unclipped control: max_grad_norm={config['max_grad_norm']}")
+print(f"Atom maximum sequence length: {config['max_seq_len']}")
 print(f"Evaluation steps: {eval_steps}")
+print(f"Checkpoint retention covers: {retained_steps[0]}..{retained_steps[-1]}")
 PY
 
 "$PYTHON_BIN" - "$DATA" "$MANIFEST" "$EVAL_DIR" <<'PY'
@@ -170,6 +213,55 @@ if [ "$SOURCE_ROWS" -ne "$TARGET_ROWS" ] || [ "$MAX_PRODUCTS" -gt "$SOURCE_ROWS"
   exit 1
 fi
 
+if [ "$SMOKE_STEPS" -gt 0 ]; then
+  SMOKE_CONFIG="$(mktemp "${TMPDIR:-/tmp}/retro_atom_rsmiles_smoke.XXXXXX")"
+  SMOKE_SAVE_ROOT="${SAVE_ROOT}_smoke"
+  SMOKE_LOG="logs/train_ori_rsmiles_atom_smoke_${RUN_TAG}.log"
+  trap 'rm -f "$SMOKE_CONFIG"' EXIT
+
+  "$PYTHON_BIN" - "$CONFIG" "$SMOKE_CONFIG" "$SMOKE_STEPS" <<'PY'
+from pathlib import Path
+import sys
+
+import yaml
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+steps = int(sys.argv[3])
+if steps <= 0:
+    raise SystemExit(f"SMOKE_STEPS must be positive in smoke mode, got {steps}")
+
+config = yaml.safe_load(source.read_text())
+retro = config.get("retro")
+if not isinstance(retro, dict):
+    raise SystemExit(f"Missing retro block in {source}")
+retro["total_steps"] = steps
+retro["checkpoint_interval"] = steps
+retro["keep_checkpoints"] = 1
+retro["save_best_checkpoint"] = False
+
+tensorboard = retro.setdefault("tensorboard", {})
+tensorboard["enabled"] = False
+tensorboard["log_interval"] = 1
+tensorboard["validation_interval"] = 0
+monitoring = retro.setdefault("monitoring", {})
+monitoring["enabled"] = False
+
+destination.write_text(yaml.safe_dump(config, sort_keys=False))
+print(f"Created {destination} for a {steps}-step atom-level smoke test")
+PY
+
+  echo "Starting ${SMOKE_STEPS}-step smoke test with ${SMOKE_CONFIG}"
+  "$PYTHON_BIN" scripts/train_retro.py \
+    --config "$SMOKE_CONFIG" \
+    --device cuda \
+    --save_dir "$SMOKE_SAVE_ROOT" \
+    2>&1 | tee "$SMOKE_LOG"
+  echo "Smoke test passed; the formal 600K run was not started."
+  echo "Smoke log: $SMOKE_LOG"
+  exit 0
+fi
+
 echo "Starting training with ${CONFIG}"
 "$PYTHON_BIN" scripts/train_retro.py \
   --config "$CONFIG" \
@@ -177,12 +269,9 @@ echo "Starting training with ${CONFIG}"
   --save_dir "$SAVE_ROOT" \
   2>&1 | tee "$TRAIN_LOG"
 
-RUN_DIR="$(find "$SAVE_ROOT/$DATA_NAME" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null \
-  | sort -nr \
-  | head -n1 \
-  | cut -d' ' -f2-)"
-if [ -z "$RUN_DIR" ]; then
-  echo "No run directory found under $SAVE_ROOT/$DATA_NAME" >&2
+RUN_DIR="$(sed -n 's/.*Checkpoint dir: //p' "$TRAIN_LOG" | tail -n1)"
+if [ -z "$RUN_DIR" ] || [ ! -d "$RUN_DIR" ]; then
+  echo "Could not recover this run's checkpoint directory from $TRAIN_LOG: ${RUN_DIR:-<empty>}" >&2
   exit 1
 fi
 
@@ -199,8 +288,8 @@ for eval_ckpt in "${CHECKPOINTS[@]}"; do
   fi
 
   STEP_NAME="$(basename "$eval_ckpt" .pt)"
-  OUT="results/ori_rsmiles_spe_full_unclipped_${STEP_NAME}_dev_unique1000_euler_n9_seed${EVAL_SEED}_${EVAL_TAG}"
-  EVAL_LOG="logs/ori_rsmiles_spe_full_unclipped_${STEP_NAME}_dev1000_euler_n9_seed${EVAL_SEED}_${EVAL_TAG}.log"
+  OUT="results/ori_rsmiles_atom_unclipped_${STEP_NAME}_dev_unique1000_euler_n9_seed${EVAL_SEED}_${EVAL_TAG}"
+  EVAL_LOG="logs/ori_rsmiles_atom_unclipped_${STEP_NAME}_dev1000_euler_n9_seed${EVAL_SEED}_${EVAL_TAG}.log"
 
   echo "Evaluating ${eval_ckpt}"
   "$PYTHON_BIN" scripts/eval.py \

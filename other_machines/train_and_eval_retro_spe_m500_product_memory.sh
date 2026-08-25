@@ -9,6 +9,9 @@
 #   SMOKE_STEPS=5 bash train_and_eval_retro_spe_m500_product_memory.sh
 set -euo pipefail
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
+
 export PYTHONPATH=.
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"

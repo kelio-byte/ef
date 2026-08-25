@@ -1,6 +1,9 @@
 #!/bin/bash
 # 文件名: run10tra.sh
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
+
 # 生成带时间戳的日志文件名（每轮10次共用一个文件）
 LOGFILE="run_$(date +'%Y-%m-%d_%H-%M-%S').log"
 

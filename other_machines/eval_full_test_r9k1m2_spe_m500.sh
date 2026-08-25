@@ -4,6 +4,9 @@
 #   2) Global atom-level checkpoint on datasets/USPTO_50K_PtoR_aug20_#global#/test
 set -euo pipefail
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
+
 export PYTHONPATH=.
 export PYTHONUNBUFFERED=1
 export PATH=/root/autodl-tmp/ef/bin:$PATH

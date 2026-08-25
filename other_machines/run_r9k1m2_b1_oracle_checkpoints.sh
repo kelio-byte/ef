@@ -6,7 +6,7 @@
 # The actual sampling protocol lives in scripts/run_r9k1m2_b1_oracle.sh.
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 if [[ "${ALLOW_FULL_ORACLE_TEST:-}" != "YES" ]]; then
