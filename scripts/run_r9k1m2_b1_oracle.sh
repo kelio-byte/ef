@@ -22,7 +22,7 @@ case "$MODE" in
     MAX_PRODUCTS=""
     PRODUCTS="datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/test/src-test.txt"
     TARGETS="datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/test/tgt-test.txt"
-    SIDECAR="results/after_spe_stage1/center_sidecars/test_all_aug20"
+    SIDECAR="${SIDECAR:-after_spe/center_sidecars/test_all_aug20}"
     # 100,140 product views × 9 runs would otherwise generate a very large
     # first-event JSON.  Compact counts retain the safety checks cheaply.
     DIAGNOSTIC_DETAIL=summary
@@ -72,7 +72,7 @@ for required in \
         '    --raw_csv datasets/USPTO_50K/raw_test.csv \' \
         '    --labels results/after_spe_stage1/cache/reaction_centers_test.jsonl \' \
         '    --crosswalk results/after_spe_stage1/cache/raw_to_processed_test.jsonl \' \
-        '    --output_dir results/after_spe_stage1/center_sidecars/test_all_aug20 \' \
+        '    --output_dir after_spe/center_sidecars/test_all_aug20 \' \
         '    --workers 8' >&2
     fi
     exit 1

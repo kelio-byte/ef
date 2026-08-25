@@ -18,7 +18,7 @@ fi
 
 CHECKPOINT_DIR="${CHECKPOINT_DIR:-new_checkpoints/spe_m500_checkpoints}"
 DATA_DIR="${DATA_DIR:-datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500}"
-SIDECAR="${SIDECAR:-results/after_spe_stage1/center_sidecars/test_all_aug20}"
+SIDECAR="${SIDECAR:-after_spe/center_sidecars/test_all_aug20}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/after_spe_stage1/r9k1m2_b1_checkpoints}"
 
 # Override with a space-separated list if needed, e.g. CHECKPOINT_STEPS="490000 550000".
