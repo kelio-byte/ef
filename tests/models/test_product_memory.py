@@ -281,3 +281,48 @@ class TestProductMemorySampling:
             **common,
         )
         assert torch.equal(ordinary, shared)
+
+    def test_euler_beam_product_memory_accepts_first_event_center_bias(self):
+        """The immutable product cache and first-event position bias coexist."""
+        torch.manual_seed(37)
+        model = _product_memory_model().eval()
+        x_0 = torch.tensor([
+            [BOS_TOKEN, 4, 5, PAD_TOKEN],
+            [BOS_TOKEN, 6, 7, PAD_TOKEN],
+        ])
+        padding_mask = x_0 == PAD_TOKEN
+        cache = model.encode_product(x_0, padding_mask)
+        scores = torch.zeros(2, 4, 3)
+        scores[:, 1, :] = 1.0
+        stats = {}
+
+        with patch.object(
+            model,
+            "encode_product",
+            wraps=model.encode_product,
+        ) as encode_product:
+            result = sample_euler_beam(
+                model,
+                x_0,
+                CubicScheduler(),
+                n_branches=1,
+                n_children=2,
+                n_steps=3,
+                max_seq_len=12,
+                product_memory=cache,
+                product_memory_padding_mask=padding_mask,
+                sample_seeds=[505, 606],
+                score_mode="full_probability",
+                changed_state_bonus=0.5,
+                child_policy="stochastic_noop",
+                profile_sample_group_size=2,
+                first_event_position_scores=scores,
+                first_event_position_bias_enabled=torch.tensor([True, True]),
+                first_event_bias_max_multiplier=3.0,
+                first_event_bias_stats=stats,
+            )
+
+        assert encode_product.call_count == 0
+        assert result.shape[0] == x_0.shape[0]
+        assert stats["summary_from_final_lineages"] is True
+        assert stats["max_hazard_relative_error"] < 1e-6
