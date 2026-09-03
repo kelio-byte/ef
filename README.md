@@ -74,7 +74,7 @@ canonicalize and aggregate 20 test augmentations -> Top-k accuracy
 | 采样器 | 入口 | 核心行为 | 每个产物的输出数 |
 |---|---|---|---:|
 | Euler | `sample_euler()` | 多位置随机编辑，轨迹互相独立 | `n_samples` |
-| Euler-Beam | `sample_euler_beam()` | 每个状态产生 M 个后继，合并、排序并保留 K 个状态 | `n_runs` |
+| Euler-Beam | `sample_euler_beam()` | 每个状态产生 M 个后继，合并、排序并保留 K 个状态 | `n_runs * n_branches` |
 | Greedy edit | `sample_greedy_single_edit()` | 每步选择一个最高分编辑 | 1 |
 | Beam edit | `sample_beam_single_edit()` | 单编辑候选展开与 beam 剪枝 | 1 |
 
@@ -92,7 +92,8 @@ Euler-Beam 的三个关键规模参数是：
 
 - `n_branches=K`：每个 run 最多保留的内部状态数；
 - `n_children=M`：每个父状态在每一步产生的随机后继数；
-- `n_runs=R`：对每个产物独立执行 R 次搜索，最终输出 R 条预测。
+- `n_runs=R`：对每个产物执行 R 个彼此隔离的搜索池；每个池输出 K 个最终槽位，因此
+  每条 augmentation 共输出 `R*K` 条预测。
 
 单步搜索结构为：
 
@@ -124,11 +125,11 @@ Euler-Beam 支持两种 child policy：
 - 不包含 `origin_embedding` 权重；
 - 当前采样优化不依赖 origin mask。
 
-截至 2026-08-01，在 50 个原始反应、20 倍测试增强的 tiny benchmark 上，当前推荐
-研究配置为：
+截至 2026-08-04，在 1001 个原始反应、20 倍测试增强的 mini-1001 工程 benchmark 上，
+当前最高准确率配置为：
 
 ```text
-K=3, M=2, R=3, n_steps=100
+K=1, M=2, R=9, n_steps=100
 score_mode=full_probability
 changed_state_bonus=0.5
 child_policy=stochastic_noop
@@ -139,16 +140,20 @@ float32_matmul_precision=high (RTX 3090 TF32)
 
 | 指标 | 当前推荐配置 |
 |---|---:|
-| 采样时间 | 约 122.6 秒 |
-| Top-1 | 60% |
-| Top-2 | 64% |
-| Top-3 | 70% |
-| Invalid SMILES（rank 1/2/3） | 12.5% / 14.5% / 13.4% |
+| 采样时间 | 3059.83 秒 |
+| Top-1 | 57.043% |
+| Top-2 | 71.528% |
+| Top-3 | 78.122% |
+| Top-10 | 86.114% |
+| Oracle | 91.808% |
 
-这些结果仅用于固定 tiny benchmark 上的版本比较，不等同于完整 USPTO-50K 测试集
-结论。历史恢复版本曾得到 58%/68%/76%，但它采用旧 seed 和旧路径评分语义，不能与
-当前结果作严格的单变量比较。详细实验历史见
-[`new_docs/euler_beam_optimization_plan.md`](new_docs/euler_beam_optimization_plan.md)。
+mini-1001来自test且已用于工程选型，因此这些结果不等同于未见完整USPTO-50K测试集
+结论。相同mini上R3K3的Top-1/3/10为55.145/74.026/84.515%，采样2071.54秒；它是
+平衡准确率和速度的备选。R1K9更快但准确率更低。当前机制结论、与纯 Euler 的严格口径
+及下一步优先级见
+[`new_docs/euler_beam_current_situation.md`](new_docs/euler_beam_current_situation.md)，
+详细实验历史见
+[`new_docs/euler_beam_next_stage_plan.md`](new_docs/euler_beam_next_stage_plan.md)。
 
 ## 4. 环境与安装
 
@@ -205,16 +210,36 @@ scheduler。
 
 ## 6. 快速开始
 
-### 6.1 当前推荐 Euler-Beam 基准
+### 6.1 单命令采样与评分（推荐）
+
+`eval.py` 复用现有采样器和评分器，自动从 `sampling_metadata.json` 推导
+`beam_size`、反应数和 target offset。默认输出 Top-1～10、invalid/coverage diagnostics
+及 `diagnostics.json`，并拒绝覆盖已有预测：
+
+```bash
+python scripts/eval.py \
+    --checkpoint checkpoint_step600000.pt \
+    --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt" \
+    --targets "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test-tiny.txt" \
+    --output_dir results/bench_beam/ \
+    --sampler euler_beam \
+    --n_branches 1 --n_children 2 --n_runs 9 \
+    --n_steps 100 --batch_size 64 --device cuda --seed 42
+```
+
+用 `--dry_run` 可先审查两条底层命令；用 `--score_only` 可复用目录中已有的 prediction
+和 metadata。只有明确要替换已有结果时才添加 `--overwrite`。
+
+### 6.2 当前推荐 Euler-Beam 基准（底层两步命令）
 
 ```bash
 python scripts/sample_retro.py \
     --checkpoint checkpoint_step600000.pt \
     --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt" \
     --sampler euler_beam \
-    --n_branches 3 \
+    --n_branches 1 \
     --n_children 2 \
-    --n_runs 3 \
+    --n_runs 9 \
     --n_steps 100 \
     --batch_size 64 \
     --device cuda \
@@ -229,12 +254,25 @@ python 'scripts/score_#global#.py' \
     --predictions results/bench_beam/predictions.txt \
     --targets "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test-tiny.txt" \
     --augmentation 20 \
-    --beam_size 3 \
-    --n_best 5
+    --beam_size 9 \
+    --n_best 10 \
+    --diagnostics
 ```
 
-这里评分器的 `beam_size` 必须等于采样时的 `n_runs`，而不是内部的
-`n_branches` 或 `n_children`。
+这里评分器的 `beam_size` 必须等于每条 augmentation 的实际输出数；Euler-Beam 当前为
+`n_runs * n_branches`，不是 `n_runs` 或 `n_children`。多 run 的输出顺序为
+branch-rank-major、run-minor：先列出每个 run 的第一名，再列出每个 run 的第二名，以此
+类推。推荐优先使用 `eval.py`，由 metadata 自动推导该值，避免手工配置不一致。
+
+R9K1M2还可显式添加`--euler_beam_share_identical_forwards`，让同一product的受保护run
+在状态尚未发散时共享确定性模型前向，但仍保持各自seed和child选择。RTX 3090/TF32的
+tiny测试中该模式缩短sampling wall约25.95%，Top-1～10及coverage指标不变；由于改变
+矩阵形状会带来极少量TF32数值漂移（2/9000输出行），目前保持opt-in。使用
+`--euler_beam_matmul_precision highest`时，已测区间与非共享路径逐字节一致。
+
+Q sharpening可通过`--euler_beam_q_temperature`显式设置，默认`1.0`保持checkpoint原始
+insert/substitute token分布；`T<1`会使token proposal更集中，但不会改变编辑事件rate。
+当前validation-only消融未形成稳定收益，默认配置仍保持`T=1.0`。
 
 只要指定 `--output_dir`，采样器还会在同目录写入
 `sampling_metadata.json`，记录 checkpoint、输入文件及哈希、采样器配置、有效步数、
@@ -246,7 +284,7 @@ seed 语义、输出行数与哈希、运行时间、CUDA 峰值显存和 Git �
 全局 product index。评分对应区间时用 `--target_offset` 指定原始反应偏移，评分器会与
 sampling metadata 自动交叉校验。
 
-### 6.2 Euler 对照实验
+### 6.3 Euler 对照实验
 
 ```bash
 python scripts/sample_retro.py \
@@ -270,7 +308,7 @@ python 'scripts/score_#global#.py' \
 
 不要把 Euler 的评分路径误写为 `results/bench_beam/predictions.txt`。
 
-### 6.3 预计算训练对齐
+### 6.4 预计算训练对齐
 
 ```bash
 PYTHONPATH=. python scripts/precompute_alignments.py \
@@ -279,7 +317,7 @@ PYTHONPATH=. python scripts/precompute_alignments.py \
     --num_workers 16
 ```
 
-### 6.4 训练或恢复训练
+### 6.5 训练或恢复训练
 
 ```bash
 python scripts/train_retro.py \
@@ -293,6 +331,25 @@ python scripts/train_retro.py \
 ```
 
 本轮 Euler-Beam 研究固定使用已有 checkpoint，不修改训练代码、数据集或模型权重。
+
+### 6.6 完整 Euler 轨迹可视化
+
+```bash
+python scripts/visualize_trajectory.py \
+    --checkpoint checkpoint_step600000.pt \
+    --products_file "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt" \
+    --targets_file "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test-tiny.txt" \
+    --example_ids 0,20 --n_samples 3 --n_steps 100 --device cuda \
+    --output_dir visualizations/trajectory/
+```
+
+每个 example 会保留全部 `n_samples` 独立路径，而不是只显示命中 target 的一条。每条
+路径依次列出 Product、每次编辑后的完整 token 序列和具体操作、Target。HTML 先集中
+列出所有 example 的全部路径，再进入逐路径 oracle/model 详情；同时按相同 Euler step
+检测同一 example 内的“先发散、后恢复为相同 token 序列”，并把不同 example 的同一步
+状态碰撞单独报告。该判断比较精确 token 序列，不使用 Target 或 canonical SMILES。当前
+Euler-Beam 搜索器尚未记录剪枝前后的 branch ancestry，因此该脚本不会伪造
+`--n_branches` 的分支树；完整分支树需要独立的、带父节点 ID 的诊断接口。
 
 ## 7. 评分协议与已知限制
 
@@ -358,6 +415,7 @@ edit_flows/
 scripts/
 ├── train_retro.py              # 逆合成训练
 ├── sample_retro.py             # 统一采样入口
+├── eval.py                     # 采样 + metadata 推导 + Top-k 评分
 ├── mix_retro_runs.py           # 离线组合已对齐的独立 run
 ├── score_#global#.py           # #global# 数据评分
 ├── score.py                    # standard 数据评分

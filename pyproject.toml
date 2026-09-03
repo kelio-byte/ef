@@ -12,6 +12,8 @@ dependencies = [
     "numpy",
     "pyyaml",
     "tqdm",
+    "einops>=0.6",
+    "tensorboard>=2.12",
 ]
 
 [project.optional-dependencies]

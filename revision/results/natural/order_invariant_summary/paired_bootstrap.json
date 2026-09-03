@@ -1,0 +1,80 @@
+{
+  "atom_overall": {
+    "final_hit_rate": 0.35322222222222216,
+    "full_progress_rate": 0.6424267584284393,
+    "harmful_rate": 0.2599318961566818,
+    "harmful_recovery_rate": 0.004416363211951447,
+    "mean_distance_delta": 0.3848801082093948,
+    "neutral_rate": 0.09662509185362529,
+    "partial_progress_rate": 0.0010162535612535612
+  },
+  "m500_overall": {
+    "final_hit_rate": 0.36377777777777776,
+    "full_progress_rate": 0.6445303294547243,
+    "harmful_rate": 0.1900631367195494,
+    "harmful_recovery_rate": 0.00115,
+    "mean_distance_delta": 0.4601545201077645,
+    "neutral_rate": 0.16343946537887513,
+    "partial_progress_rate": 0.0019670684468510555
+  },
+  "paired_bootstrap": {
+    "final_hit_rate": {
+      "ci95_high": 0.025593518518518415,
+      "ci95_low": -0.004373148148148245,
+      "mean_difference": 0.010555555555555596,
+      "n_bootstrap": 5000,
+      "n_reactions": 1000
+    },
+    "full_progress_rate": {
+      "ci95_high": 0.019360016871420773,
+      "ci95_low": -0.01549403743709465,
+      "mean_difference": 0.0021035710262850005,
+      "n_bootstrap": 5000,
+      "n_reactions": 1000
+    },
+    "harmful_rate": {
+      "ci95_high": -0.053302143539296826,
+      "ci95_low": -0.08631355124168785,
+      "mean_difference": -0.06986875943713236,
+      "n_bootstrap": 5000,
+      "n_reactions": 1000
+    },
+    "harmful_recovery_rate": {
+      "ci95_high": -0.0004754779411764705,
+      "ci95_low": -0.006527833800186742,
+      "mean_difference": -0.0032663632119514473,
+      "n_bootstrap": 5000,
+      "n_reactions": 1000
+    },
+    "mean_distance_delta": {
+      "ci95_high": 0.10701558399009951,
+      "ci95_low": 0.04347593042513275,
+      "mean_difference": 0.0752744118983697,
+      "n_bootstrap": 5000,
+      "n_reactions": 1000
+    },
+    "neutral_rate": {
+      "ci95_high": 0.07928115875706644,
+      "ci95_low": 0.05360235268736714,
+      "mean_difference": 0.06681437352524984,
+      "n_bootstrap": 5000,
+      "n_reactions": 1000
+    },
+    "partial_progress_rate": {
+      "ci95_high": 0.001643816911751694,
+      "ci95_low": 0.0002623163123108774,
+      "mean_difference": 0.0009508148855974943,
+      "n_bootstrap": 5000,
+      "n_reactions": 1000
+    }
+  },
+  "protocol": {
+    "atom_dir": "revision/results/natural/atom",
+    "bootstrap_seed": 20260822,
+    "classification": "order_invariant_distance_progress",
+    "cluster_unit": "reaction_index",
+    "m500_dir": "revision/results/natural/m500",
+    "n_bootstrap": 5000,
+    "n_reactions": 1000
+  }
+}

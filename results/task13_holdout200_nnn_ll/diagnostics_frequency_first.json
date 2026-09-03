@@ -1,0 +1,2129 @@
+{
+  "per_reaction": [
+    {
+      "oracle_any": true,
+      "reaction_index": 0,
+      "target_augmentation_count": 2,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 200000001.5,
+      "target_final_rank": 6,
+      "true_unique_candidates": 15,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 1,
+      "target_augmentation_count": 5,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 500000004.0,
+      "target_final_rank": 4,
+      "true_unique_candidates": 23,
+      "valid_candidate_count": 89
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 2,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 7,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 3,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 4,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000016.25,
+      "target_final_rank": 1,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 5,
+      "target_augmentation_count": 1,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 100000000.5,
+      "target_final_rank": 8,
+      "true_unique_candidates": 15,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 6,
+      "target_augmentation_count": 2,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 200000001.0,
+      "target_final_rank": 2,
+      "true_unique_candidates": 2,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 7,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 13,
+      "valid_candidate_count": 89
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 8,
+      "target_augmentation_count": 1,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 100000000.5,
+      "target_final_rank": 13,
+      "true_unique_candidates": 26,
+      "valid_candidate_count": 87
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 9,
+      "target_augmentation_count": 2,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 200000001.5,
+      "target_final_rank": 9,
+      "true_unique_candidates": 45,
+      "valid_candidate_count": 84
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 10,
+      "target_augmentation_count": 15,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1500000011.5,
+      "target_final_rank": 2,
+      "true_unique_candidates": 10,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 11,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000015.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 31,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 12,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000018.25,
+      "target_final_rank": 1,
+      "true_unique_candidates": 7,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 13,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 19,
+      "valid_candidate_count": 52
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 14,
+      "target_augmentation_count": 11,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1100000009.3333333,
+      "target_final_rank": 2,
+      "true_unique_candidates": 22,
+      "valid_candidate_count": 83
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 15,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000013.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 10,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 16,
+      "target_augmentation_count": 4,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 400000002.25,
+      "target_final_rank": 2,
+      "true_unique_candidates": 36,
+      "valid_candidate_count": 82
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 17,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000016.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 18,
+      "valid_candidate_count": 90
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 18,
+      "target_augmentation_count": 10,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1000000007.1666666,
+      "target_final_rank": 1,
+      "true_unique_candidates": 36,
+      "valid_candidate_count": 88
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 19,
+      "target_augmentation_count": 15,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1500000009.8333333,
+      "target_final_rank": 2,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 20,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 6,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 21,
+      "target_augmentation_count": 18,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1800000014.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 91
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 22,
+      "target_augmentation_count": 1,
+      "target_best_local_rank": 3,
+      "target_consensus_score": 100000000.33333333,
+      "target_final_rank": 19,
+      "true_unique_candidates": 26,
+      "valid_candidate_count": 96
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 23,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 31,
+      "valid_candidate_count": 88
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 24,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 25,
+      "target_augmentation_count": 12,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 1200000003.95,
+      "target_final_rank": 2,
+      "true_unique_candidates": 19,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 26,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000011.25,
+      "target_final_rank": 2,
+      "true_unique_candidates": 18,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 27,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000014.2,
+      "target_final_rank": 1,
+      "true_unique_candidates": 22,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 28,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 24,
+      "valid_candidate_count": 91
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 29,
+      "target_augmentation_count": 8,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 800000006.0,
+      "target_final_rank": 2,
+      "true_unique_candidates": 13,
+      "valid_candidate_count": 90
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 30,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 94
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 31,
+      "target_augmentation_count": 5,
+      "target_best_local_rank": 3,
+      "target_consensus_score": 500000001.31666666,
+      "target_final_rank": 7,
+      "true_unique_candidates": 25,
+      "valid_candidate_count": 92
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 32,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 7,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 33,
+      "target_augmentation_count": 4,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 400000002.3333333,
+      "target_final_rank": 2,
+      "true_unique_candidates": 48,
+      "valid_candidate_count": 86
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 34,
+      "target_augmentation_count": 18,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1800000012.75,
+      "target_final_rank": 1,
+      "true_unique_candidates": 18,
+      "valid_candidate_count": 84
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 35,
+      "target_augmentation_count": 5,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 500000003.8333333,
+      "target_final_rank": 4,
+      "true_unique_candidates": 32,
+      "valid_candidate_count": 81
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 36,
+      "target_augmentation_count": 12,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1200000009.1666667,
+      "target_final_rank": 2,
+      "true_unique_candidates": 23,
+      "valid_candidate_count": 87
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 37,
+      "target_augmentation_count": 2,
+      "target_best_local_rank": 3,
+      "target_consensus_score": 200000000.66666666,
+      "target_final_rank": 7,
+      "true_unique_candidates": 29,
+      "valid_candidate_count": 50
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 38,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 13,
+      "valid_candidate_count": 89
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 39,
+      "target_augmentation_count": 6,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 600000005.5,
+      "target_final_rank": 3,
+      "true_unique_candidates": 20,
+      "valid_candidate_count": 87
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 40,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000016.2,
+      "target_final_rank": 1,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 41,
+      "target_augmentation_count": 12,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1200000004.9166667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 36,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 42,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000008.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 43,
+      "target_augmentation_count": 6,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 600000003.5833334,
+      "target_final_rank": 4,
+      "true_unique_candidates": 28,
+      "valid_candidate_count": 89
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 44,
+      "target_augmentation_count": 14,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1400000008.8333333,
+      "target_final_rank": 2,
+      "true_unique_candidates": 28,
+      "valid_candidate_count": 88
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 45,
+      "target_augmentation_count": 6,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 600000004.5,
+      "target_final_rank": 3,
+      "true_unique_candidates": 27,
+      "valid_candidate_count": 66
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 46,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000017.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 47,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000016.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 16,
+      "valid_candidate_count": 93
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 48,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 49,
+      "target_augmentation_count": 15,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1500000009.3333333,
+      "target_final_rank": 2,
+      "true_unique_candidates": 10,
+      "valid_candidate_count": 94
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 50,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 10,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 51,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 3,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 52,
+      "target_augmentation_count": 10,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1000000005.0333333,
+      "target_final_rank": 3,
+      "true_unique_candidates": 15,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 53,
+      "target_augmentation_count": 1,
+      "target_best_local_rank": 4,
+      "target_consensus_score": 100000000.25,
+      "target_final_rank": 54,
+      "true_unique_candidates": 64,
+      "valid_candidate_count": 86
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 54,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 2,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 55,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000010.1666667,
+      "target_final_rank": 2,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 56,
+      "target_augmentation_count": 8,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 800000002.6666666,
+      "target_final_rank": 2,
+      "true_unique_candidates": 33,
+      "valid_candidate_count": 81
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 57,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000013.5833333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 25,
+      "valid_candidate_count": 93
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 58,
+      "target_augmentation_count": 9,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 900000005.8333334,
+      "target_final_rank": 3,
+      "true_unique_candidates": 19,
+      "valid_candidate_count": 76
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 59,
+      "target_augmentation_count": 15,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1500000012.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 25,
+      "valid_candidate_count": 90
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 60,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 4,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 61,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 2,
+      "valid_candidate_count": 96
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 62,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 89
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 63,
+      "target_augmentation_count": 1,
+      "target_best_local_rank": 4,
+      "target_consensus_score": 100000000.25,
+      "target_final_rank": 22,
+      "true_unique_candidates": 25,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 64,
+      "target_augmentation_count": 11,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 1100000004.3333333,
+      "target_final_rank": 3,
+      "true_unique_candidates": 17,
+      "valid_candidate_count": 93
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 65,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 27,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 66,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 67,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 16,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 68,
+      "target_augmentation_count": 9,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 900000005.7,
+      "target_final_rank": 2,
+      "true_unique_candidates": 36,
+      "valid_candidate_count": 78
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 69,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000016.1666667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 20,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 70,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000017.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 8,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 71,
+      "target_augmentation_count": 15,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1500000010.3333333,
+      "target_final_rank": 2,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 72,
+      "target_augmentation_count": 2,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 200000001.5,
+      "target_final_rank": 3,
+      "true_unique_candidates": 35,
+      "valid_candidate_count": 55
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 73,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 74,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 7,
+      "valid_candidate_count": 11
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 75,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000011.95,
+      "target_final_rank": 1,
+      "true_unique_candidates": 22,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 76,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000012.2833333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 23,
+      "valid_candidate_count": 87
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 77,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000015.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 20,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 78,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 26,
+      "valid_candidate_count": 89
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 79,
+      "target_augmentation_count": 16,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1600000011.6666667,
+      "target_final_rank": 2,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 80,
+      "target_augmentation_count": 13,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1300000007.3333333,
+      "target_final_rank": 2,
+      "true_unique_candidates": 8,
+      "valid_candidate_count": 96
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 81,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 82,
+      "target_augmentation_count": 13,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1300000008.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 31,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 83,
+      "target_augmentation_count": 15,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1500000013.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 21,
+      "valid_candidate_count": 76
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 84,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 40,
+      "valid_candidate_count": 86
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 85,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 9,
+      "valid_candidate_count": 96
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 86,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 6,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 87,
+      "target_augmentation_count": 10,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1000000007.1666666,
+      "target_final_rank": 2,
+      "true_unique_candidates": 26,
+      "valid_candidate_count": 89
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 88,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 89,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 90,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 91,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 33,
+      "valid_candidate_count": 81
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 92,
+      "target_augmentation_count": 12,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1200000008.0,
+      "target_final_rank": 2,
+      "true_unique_candidates": 29,
+      "valid_candidate_count": 90
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 93,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000014.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 94,
+      "target_augmentation_count": 16,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1600000012.1666667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 27,
+      "valid_candidate_count": 93
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 95,
+      "target_augmentation_count": 11,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1100000008.5,
+      "target_final_rank": 3,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 84
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 96,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000010.9166667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 13,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 97,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000015.6666667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 18,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 98,
+      "target_augmentation_count": 12,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1200000007.9166667,
+      "target_final_rank": 3,
+      "true_unique_candidates": 27,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 99,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000013.5833333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 22,
+      "valid_candidate_count": 93
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 100,
+      "target_augmentation_count": 8,
+      "target_best_local_rank": 3,
+      "target_consensus_score": 800000002.2,
+      "target_final_rank": 2,
+      "true_unique_candidates": 32,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 101,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 4,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 102,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000016.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 19,
+      "valid_candidate_count": 91
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 103,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000017.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 104,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 10,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 105,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 8,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 106,
+      "target_augmentation_count": 1,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 100000001.0,
+      "target_final_rank": 5,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 107,
+      "target_augmentation_count": 4,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 400000001.3333333,
+      "target_final_rank": 5,
+      "true_unique_candidates": 20,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 108,
+      "target_augmentation_count": 7,
+      "target_best_local_rank": 3,
+      "target_consensus_score": 700000002.1666666,
+      "target_final_rank": 3,
+      "true_unique_candidates": 19,
+      "valid_candidate_count": 85
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 109,
+      "target_augmentation_count": 14,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1400000011.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 13,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 110,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 4,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 111,
+      "target_augmentation_count": 16,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1600000012.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 18,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 112,
+      "target_augmentation_count": 13,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1300000008.1666667,
+      "target_final_rank": 2,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 113,
+      "target_augmentation_count": 14,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1400000008.75,
+      "target_final_rank": 2,
+      "true_unique_candidates": 30,
+      "valid_candidate_count": 93
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 114,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 31,
+      "valid_candidate_count": 83
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 115,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 116,
+      "target_augmentation_count": 4,
+      "target_best_local_rank": 3,
+      "target_consensus_score": 400000001.25,
+      "target_final_rank": 3,
+      "true_unique_candidates": 43,
+      "valid_candidate_count": 82
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 117,
+      "target_augmentation_count": 7,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 700000004.6666666,
+      "target_final_rank": 4,
+      "true_unique_candidates": 17,
+      "valid_candidate_count": 91
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 118,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 119,
+      "target_augmentation_count": 10,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1000000006.8333334,
+      "target_final_rank": 1,
+      "true_unique_candidates": 35,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 120,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 29,
+      "valid_candidate_count": 69
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 121,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000010.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 13,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 122,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 8,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 123,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000016.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 92
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 124,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 81
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 125,
+      "target_augmentation_count": 14,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1400000009.0,
+      "target_final_rank": 2,
+      "true_unique_candidates": 24,
+      "valid_candidate_count": 94
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 126,
+      "target_augmentation_count": 9,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 900000006.1666666,
+      "target_final_rank": 1,
+      "true_unique_candidates": 24,
+      "valid_candidate_count": 90
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 127,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 42,
+      "valid_candidate_count": 77
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 128,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 16,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 129,
+      "target_augmentation_count": 13,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1300000008.5,
+      "target_final_rank": 2,
+      "true_unique_candidates": 13,
+      "valid_candidate_count": 96
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 130,
+      "target_augmentation_count": 14,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1400000011.1666667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 33,
+      "valid_candidate_count": 72
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 131,
+      "target_augmentation_count": 5,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 500000004.0,
+      "target_final_rank": 3,
+      "true_unique_candidates": 39,
+      "valid_candidate_count": 92
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 132,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000012.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 27,
+      "valid_candidate_count": 92
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 133,
+      "target_augmentation_count": 18,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1800000017.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 20,
+      "valid_candidate_count": 90
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 134,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 18,
+      "valid_candidate_count": 94
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 135,
+      "target_augmentation_count": 18,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1800000016.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 136,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 137,
+      "target_augmentation_count": 16,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1600000008.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 20,
+      "valid_candidate_count": 79
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 138,
+      "target_augmentation_count": 8,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 800000004.1666666,
+      "target_final_rank": 2,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 139,
+      "target_augmentation_count": 12,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1200000006.4166667,
+      "target_final_rank": 2,
+      "true_unique_candidates": 21,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 140,
+      "target_augmentation_count": 1,
+      "target_best_local_rank": 3,
+      "target_consensus_score": 100000000.33333333,
+      "target_final_rank": 34,
+      "true_unique_candidates": 45,
+      "valid_candidate_count": 86
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 141,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000012.5333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 142,
+      "target_augmentation_count": 1,
+      "target_best_local_rank": 4,
+      "target_consensus_score": 100000000.25,
+      "target_final_rank": 19,
+      "true_unique_candidates": 25,
+      "valid_candidate_count": 86
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 143,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 8,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 144,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000016.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 21,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 145,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000016.6666667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 13,
+      "valid_candidate_count": 96
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 146,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 147,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000017.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 96
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 148,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 3,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 149,
+      "target_augmentation_count": 8,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 800000003.1666666,
+      "target_final_rank": 3,
+      "true_unique_candidates": 19,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 150,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000017.1666667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 15,
+      "valid_candidate_count": 94
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 151,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 92
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 152,
+      "target_augmentation_count": 3,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 300000002.3333333,
+      "target_final_rank": 4,
+      "true_unique_candidates": 18,
+      "valid_candidate_count": 64
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 153,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000016.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 154,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000014.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 155,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 7,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 156,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 16,
+      "valid_candidate_count": 94
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 157,
+      "target_augmentation_count": 2,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 200000002.0,
+      "target_final_rank": 8,
+      "true_unique_candidates": 47,
+      "valid_candidate_count": 78
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 158,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000017.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 19,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 159,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 18,
+      "valid_candidate_count": 93
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 160,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 28,
+      "valid_candidate_count": 41
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 161,
+      "target_augmentation_count": 5,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 500000002.5,
+      "target_final_rank": 3,
+      "true_unique_candidates": 22,
+      "valid_candidate_count": 96
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 162,
+      "target_augmentation_count": 14,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1400000011.0,
+      "target_final_rank": 2,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 163,
+      "target_augmentation_count": 18,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1800000010.8333333,
+      "target_final_rank": 2,
+      "true_unique_candidates": 23,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 164,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000017.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 15,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 165,
+      "target_augmentation_count": 18,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1800000016.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 10,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 166,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 167,
+      "target_augmentation_count": 7,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 700000003.25,
+      "target_final_rank": 3,
+      "true_unique_candidates": 20,
+      "valid_candidate_count": 92
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 168,
+      "target_augmentation_count": 16,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1600000010.6666667,
+      "target_final_rank": 2,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 169,
+      "target_augmentation_count": 15,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1500000010.5,
+      "target_final_rank": 2,
+      "true_unique_candidates": 17,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 170,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000016.1666667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 10,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 171,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000014.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 21,
+      "valid_candidate_count": 96
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 172,
+      "target_augmentation_count": 1,
+      "target_best_local_rank": 3,
+      "target_consensus_score": 100000000.33333333,
+      "target_final_rank": 9,
+      "true_unique_candidates": 10,
+      "valid_candidate_count": 91
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 173,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000019.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 174,
+      "target_augmentation_count": 8,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 800000003.5,
+      "target_final_rank": 3,
+      "true_unique_candidates": 11,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 175,
+      "target_augmentation_count": 4,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 400000002.0,
+      "target_final_rank": 4,
+      "true_unique_candidates": 24,
+      "valid_candidate_count": 92
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 176,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000012.5,
+      "target_final_rank": 2,
+      "true_unique_candidates": 19,
+      "valid_candidate_count": 98
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 177,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 16,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 178,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 29,
+      "valid_candidate_count": 38
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 179,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 16,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 180,
+      "target_augmentation_count": 18,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1800000014.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 181,
+      "target_augmentation_count": 5,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 500000001.9166667,
+      "target_final_rank": 5,
+      "true_unique_candidates": 17,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 182,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000020.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 6,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 183,
+      "target_augmentation_count": 8,
+      "target_best_local_rank": 2,
+      "target_consensus_score": 800000003.8333334,
+      "target_final_rank": 3,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 184,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000017.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 4,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 185,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000013.4166667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 94
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 186,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000017.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 12,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 187,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000018.3333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 14,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 188,
+      "target_augmentation_count": 15,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1500000011.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 23,
+      "valid_candidate_count": 88
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 189,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 32,
+      "valid_candidate_count": 95
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 190,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 17,
+      "valid_candidate_count": 79
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 191,
+      "target_augmentation_count": 12,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1200000008.0,
+      "target_final_rank": 2,
+      "true_unique_candidates": 22,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 192,
+      "target_augmentation_count": 7,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 700000003.9166666,
+      "target_final_rank": 4,
+      "true_unique_candidates": 15,
+      "valid_candidate_count": 99
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 193,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000010.8333333,
+      "target_final_rank": 1,
+      "true_unique_candidates": 38,
+      "valid_candidate_count": 94
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 194,
+      "target_augmentation_count": 17,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1700000011.0,
+      "target_final_rank": 1,
+      "true_unique_candidates": 17,
+      "valid_candidate_count": 90
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 195,
+      "target_augmentation_count": 20,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 2000000016.5,
+      "target_final_rank": 1,
+      "true_unique_candidates": 19,
+      "valid_candidate_count": 97
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 196,
+      "target_augmentation_count": 19,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1900000014.9166667,
+      "target_final_rank": 1,
+      "true_unique_candidates": 20,
+      "valid_candidate_count": 82
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 197,
+      "target_augmentation_count": 18,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1800000013.0,
+      "target_final_rank": 2,
+      "true_unique_candidates": 13,
+      "valid_candidate_count": 100
+    },
+    {
+      "oracle_any": true,
+      "reaction_index": 198,
+      "target_augmentation_count": 10,
+      "target_best_local_rank": 1,
+      "target_consensus_score": 1000000007.5833334,
+      "target_final_rank": 2,
+      "true_unique_candidates": 23,
+      "valid_candidate_count": 93
+    },
+    {
+      "oracle_any": false,
+      "reaction_index": 199,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 41,
+      "valid_candidate_count": 82
+    }
+  ],
+  "summary": {
+    "aggregated_rank_availability_percent": {
+      "1": 100.0,
+      "2": 100.0,
+      "3": 98.5,
+      "4": 97.5,
+      "5": 95.5
+    },
+    "best_local_rank_counts": {
+      "1": 160,
+      "2": 11,
+      "3": 8,
+      "4": 3,
+      "5": 0
+    },
+    "covered_outside_top_k": 23,
+    "covered_outside_top_k_percent": 11.5,
+    "mean_target_augmentation_count": 13.185,
+    "mean_target_final_rank_when_covered": 2.659340659340659,
+    "mean_true_unique_candidates_per_reaction": 18.34,
+    "mean_valid_candidates_per_reaction": 91.92,
+    "oracle_any_count": 182,
+    "oracle_any_percent": 91.0,
+    "pairwise_overlap": [
+      {
+        "mean_reaction_jaccard_percent": 46.850436868150666,
+        "micro_jaccard_percent": 38.96683673469388,
+        "pair": "run_1_vs_2"
+      },
+      {
+        "mean_reaction_jaccard_percent": 43.103049472457386,
+        "micro_jaccard_percent": 36.959287531806616,
+        "pair": "run_1_vs_3"
+      },
+      {
+        "mean_reaction_jaccard_percent": 26.675267210429755,
+        "micro_jaccard_percent": 20.186480186480185,
+        "pair": "run_1_vs_4"
+      },
+      {
+        "mean_reaction_jaccard_percent": 27.44051780898738,
+        "micro_jaccard_percent": 20.353982300884955,
+        "pair": "run_1_vs_5"
+      },
+      {
+        "mean_reaction_jaccard_percent": 45.41938424557974,
+        "micro_jaccard_percent": 37.42177722152691,
+        "pair": "run_2_vs_3"
+      },
+      {
+        "mean_reaction_jaccard_percent": 26.36513567122667,
+        "micro_jaccard_percent": 20.174232003668042,
+        "pair": "run_2_vs_4"
+      },
+      {
+        "mean_reaction_jaccard_percent": 26.78454206871713,
+        "micro_jaccard_percent": 20.06398537477148,
+        "pair": "run_2_vs_5"
+      },
+      {
+        "mean_reaction_jaccard_percent": 24.330920548544068,
+        "micro_jaccard_percent": 19.4201564657156,
+        "pair": "run_3_vs_4"
+      },
+      {
+        "mean_reaction_jaccard_percent": 25.674648292136506,
+        "micro_jaccard_percent": 20.138568129330253,
+        "pair": "run_3_vs_5"
+      },
+      {
+        "mean_reaction_jaccard_percent": 34.30353395514538,
+        "micro_jaccard_percent": 27.78716216216216,
+        "pair": "run_4_vs_5"
+      }
+    ],
+    "reaction_count": 200,
+    "run_metrics": [
+      {
+        "duplicate_count": 2726,
+        "duplicate_rate_among_valid_percent": 71.85028993147074,
+        "invalid_count": 206,
+        "invalid_rate_percent": 5.15,
+        "run": 1,
+        "target_hit_count": 159,
+        "target_hit_rate_percent": 79.5
+      },
+      {
+        "duplicate_count": 2684,
+        "duplicate_rate_among_valid_percent": 70.72463768115942,
+        "invalid_count": 205,
+        "invalid_rate_percent": 5.125,
+        "run": 2,
+        "target_hit_count": 161,
+        "target_hit_rate_percent": 80.5
+      },
+      {
+        "duplicate_count": 2724,
+        "duplicate_rate_among_valid_percent": 71.51483328957731,
+        "invalid_count": 191,
+        "invalid_rate_percent": 4.775,
+        "run": 3,
+        "target_hit_count": 156,
+        "target_hit_rate_percent": 78.0
+      },
+      {
+        "duplicate_count": 1983,
+        "duplicate_rate_among_valid_percent": 56.770684225594046,
+        "invalid_count": 507,
+        "invalid_rate_percent": 12.675,
+        "run": 4,
+        "target_hit_count": 162,
+        "target_hit_rate_percent": 81.0
+      },
+      {
+        "duplicate_count": 1977,
+        "duplicate_rate_among_valid_percent": 56.598912109934155,
+        "invalid_count": 507,
+        "invalid_rate_percent": 12.675,
+        "run": 5,
+        "target_hit_count": 161,
+        "target_hit_rate_percent": 80.5
+      }
+    ],
+    "top_k_for_coverage_loss": 3
+  }
+}

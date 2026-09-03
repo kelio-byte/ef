@@ -1,0 +1,67 @@
+{
+  "augmentation": 20,
+  "augmentation_inferred_from": "datasets/USPTO_50K_PtoR_aug20_#global#/val/src-val.txt",
+  "checkpoint": {
+    "mtime_ns": 1785470613084893869,
+    "path": "/root/autodl-tmp/edit_flows/checkpoint_step600000.pt",
+    "size_bytes": 162620771
+  },
+  "created_at_utc": "2026-08-03T07:22:20.137068+00:00",
+  "git": {
+    "commit": "024a5281ed2216031c5415a589f4ceb72f62bf94",
+    "dirty": true
+  },
+  "input": {
+    "kind": "products_file",
+    "mtime_ns": 1758090690000000000,
+    "path": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/val/src-val.txt",
+    "product_count": 4000,
+    "selection_end_product_exclusive": 4000,
+    "selection_start_product": 0,
+    "sha256": "9341e28d721fc36a082979d550eeb85b81bd573c7140e0db3ca3006bc6fb8e69",
+    "size_bytes": 9350401,
+    "source_product_count": 100020
+  },
+  "layout": "input-product-major, output-minor",
+  "model": {
+    "configured_use_origin_mask": false,
+    "effective_use_origin_mask": false
+  },
+  "output_beam_size": 3,
+  "output_line_count": 12000,
+  "output_sha256": "1f77df7a5d7b5c7990aae94c17ff1789db5aaf379b2eff8719eaf3e5d6cfb47c",
+  "product_count": 4000,
+  "runtime": {
+    "batch_size": 64,
+    "device": "cuda",
+    "elapsed_seconds": 324.00734914513305,
+    "euler_beam_stats": {
+      "child_candidate_evaluations": 3131036,
+      "parent_branch_evaluations": 1565518,
+      "return_shortfall_outputs": 276,
+      "return_shortfall_samples": 230,
+      "steps": 6300
+    },
+    "peak_cuda_allocated_bytes": 1508652032,
+    "peak_cuda_reserved_bytes": 24633147392
+  },
+  "sampler": "euler_beam",
+  "sampling": {
+    "changed_state_bonus": 0.5,
+    "child_policy": "stochastic_noop",
+    "initial_seed_groups": 3,
+    "matmul_precision": "high",
+    "n_branches": 9,
+    "n_children": 2,
+    "n_return": 3,
+    "n_runs": 1,
+    "n_steps": 100,
+    "sample_scheduler": "cubic",
+    "score_mode": "full_probability",
+    "seed": 43,
+    "seed_applied_to_sampler": true,
+    "seed_scope": "grouped virtual-run/branch streams",
+    "train_scheduler": "cubic"
+  },
+  "schema_version": 1
+}

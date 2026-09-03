@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import torch
 from torch import Tensor
@@ -6,8 +6,22 @@ from tqdm import tqdm
 
 from edit_flows.core.rate_scale import apply_rate_parameterization, get_rate_scale
 from edit_flows.core.scheduler import KappaScheduler
-from edit_flows.sampling.ops import apply_ins_del_operations
-from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
+from edit_flows.guidance.sampling import apply_action_guidance
+from edit_flows.sampling.center_bias import (
+    align_position_scores,
+    renormalize_position_biased_log_rates,
+)
+from edit_flows.sampling.ops import (
+    apply_ins_del_operations,
+    edit_position_masks,
+    legal_token_log_probs,
+)
+from edit_flows.utils.tokens import (
+    BOS_TOKEN,
+    GAP_TOKEN,
+    PAD_TOKEN,
+    UNK_TOKEN,
+)
 
 
 def _event_probability(mu: Tensor, mode: str) -> Tensor:
@@ -26,17 +40,54 @@ def _sample_edit_actions(
     adapt_h: Tensor,
     pad_token: int,
     event_prob_mode: str = "poisson",
+    position_scores: Optional[Tensor] = None,
+    position_bias_active: Optional[Tensor] = None,
+    position_bias_max_multiplier: float = 3.0,
 ) -> dict:
     device = x_t.device
-    x_pad_mask = x_t == pad_token
 
+    legal_log_ins_probs, ins_log_normalizer = legal_token_log_probs(
+        log_ins_probs,
+    )
+    legal_log_sub_probs, sub_log_normalizer = legal_token_log_probs(
+        log_sub_probs,
+        current_tokens=x_t,
+    )
+    ins_probs = torch.exp(legal_log_ins_probs)
+    sub_probs = torch.exp(legal_log_sub_probs)
+
+    insert_positions, sub_del_positions = edit_position_masks(
+        x_t, pad_token=pad_token,
+    )
+    # Mask unsupported modes *before* drawing their Bernoulli events.  Merely
+    # clearing an already-drawn action would leave a silent no-op process at
+    # BOS/PAD (or when Q has no legal token), which is not the trained action
+    # space and wastes sampling work.
+    ins_sample_positions = insert_positions & torch.isfinite(ins_log_normalizer)
+    sub_sample_positions = sub_del_positions & torch.isfinite(sub_log_normalizer)
+    position_bias_diagnostics = None
+    if position_scores is not None:
+        if position_bias_active is None:
+            raise ValueError(
+                "position_bias_active is required with position_scores"
+            )
+        legal_position_masks = torch.stack(
+            (ins_sample_positions, sub_sample_positions, sub_del_positions),
+            dim=-1,
+        )
+        log_rates, position_bias_diagnostics = (
+            renormalize_position_biased_log_rates(
+                log_rates,
+                position_scores,
+                legal_position_masks,
+                position_bias_active,
+                max_multiplier=position_bias_max_multiplier,
+            )
+        )
     rates = torch.exp(log_rates)
-    ins_probs = torch.exp(log_ins_probs)
-    sub_probs = torch.exp(log_sub_probs)
-
-    lambda_ins = rates[:, :, 0]
-    lambda_sub = rates[:, :, 1]
-    lambda_del = rates[:, :, 2]
+    lambda_ins = rates[:, :, 0] * ins_sample_positions.to(rates.dtype)
+    lambda_sub = rates[:, :, 1] * sub_sample_positions.to(rates.dtype)
+    lambda_del = rates[:, :, 2] * sub_del_positions.to(rates.dtype)
 
     ins_prob = _event_probability(adapt_h * lambda_ins, event_prob_mode)
     del_sub_prob = _event_probability(
@@ -54,7 +105,6 @@ def _sample_edit_actions(
     del_mask = torch.bernoulli(prob_del).bool()
     sub_mask = del_sub_mask & ~del_mask
 
-    non_pad_mask = ~x_pad_mask
     ins_tokens = torch.full(
         ins_probs.shape[:2], pad_token, dtype=torch.long, device=device,
     )
@@ -62,19 +112,24 @@ def _sample_edit_actions(
         sub_probs.shape[:2], pad_token, dtype=torch.long, device=device,
     )
 
-    if non_pad_mask.any():
+    if ins_sample_positions.any():
         ins_sampled = torch.multinomial(
-            ins_probs[non_pad_mask], num_samples=1, replacement=True,
+            ins_probs[ins_sample_positions], num_samples=1, replacement=True,
         ).squeeze(-1)
+        ins_tokens[ins_sample_positions] = ins_sampled
+    if sub_sample_positions.any():
         sub_sampled = torch.multinomial(
-            sub_probs[non_pad_mask], num_samples=1, replacement=True,
+            sub_probs[sub_sample_positions], num_samples=1, replacement=True,
         ).squeeze(-1)
-        ins_tokens[non_pad_mask] = ins_sampled
-        sub_tokens[non_pad_mask] = sub_sampled
+        sub_tokens[sub_sample_positions] = sub_sampled
 
-    ins_mask = ins_mask & non_pad_mask
-    del_mask = del_mask & non_pad_mask
-    sub_mask = sub_mask & non_pad_mask
+    # ``INS(pos=0)`` inserts after BOS and is therefore legal.  BOS itself is
+    # still protected because SUB/DEL use ``sub_del_positions``.
+    ins_mask = ins_mask & ins_sample_positions
+    del_mask = del_mask & sub_del_positions
+    sub_mask = sub_mask & sub_sample_positions
+    ins_tokens = ins_tokens.masked_fill(~ins_mask, pad_token)
+    sub_tokens = sub_tokens.masked_fill(~sub_mask, pad_token)
     return {
         "rates": rates,
         "ins_mask": ins_mask,
@@ -84,6 +139,173 @@ def _sample_edit_actions(
         "sub_tokens": sub_tokens,
         "ins_probs": ins_probs,
         "sub_probs": sub_probs,
+        "ins_token_log_normalizer": ins_log_normalizer,
+        "sub_token_log_normalizer": sub_log_normalizer,
+        "insert_position_mask": insert_positions,
+        "sub_del_position_mask": sub_del_positions,
+        "position_bias_diagnostics": position_bias_diagnostics,
+    }
+
+
+def sample_event_conditioned_atomic_actions(
+    x_t: Tensor,
+    log_rates: Tensor,
+    log_ins_probs: Tensor,
+    log_sub_probs: Tensor,
+    *,
+    max_seq_len: int = 512,
+    pad_token: int = PAD_TOKEN,
+    bos_token: int = BOS_TOKEN,
+    forbidden_token_ids: tuple[int, ...] = (
+        PAD_TOKEN, BOS_TOKEN, GAP_TOKEN, UNK_TOKEN,
+    ),
+) -> dict[str, Tensor]:
+    """Draw one valid, state-changing atomic edit per row from base rates.
+
+    Ordinary Euler may apply zero or multiple edits in one numerical step.
+    This helper instead samples the *identity* of one edit conditional on an
+    edit occurring, using its instantaneous base-rate mass.  It is intended
+    for offline event-conditioned proposal data, not as a replacement for
+    :func:`sample_euler`.
+
+    The action support excludes structural tokens, BOS substitution/deletion,
+    no-op substitutions, and insertions that would exceed ``max_seq_len``.
+    ``INS(pos=0)`` remains legal because it inserts immediately after BOS.
+    The
+    returned masks contain exactly one action per batch row; an all-invalid
+    row raises rather than silently emitting a no-op.
+    """
+    if x_t.ndim != 2:
+        raise ValueError("x_t must have shape [batch, length]")
+    if log_rates.ndim != 3 or log_rates.shape[:2] != x_t.shape or log_rates.shape[-1] != 3:
+        raise ValueError("log_rates must have shape [batch, length, 3]")
+    if (
+        log_ins_probs.ndim != 3
+        or log_ins_probs.shape[:2] != x_t.shape
+        or log_sub_probs.shape != log_ins_probs.shape
+    ):
+        raise ValueError(
+            "insert/substitute log probabilities must have shape "
+            "[batch, length, vocab]"
+        )
+    if max_seq_len < 1:
+        raise ValueError("max_seq_len must be positive")
+    if x_t.shape[1] < 1:
+        raise ValueError("event-conditioned proposals require a BOS-containing state")
+    if not all(torch.isfinite(value).all() for value in (
+        log_rates, log_ins_probs, log_sub_probs,
+    )):
+        raise ValueError("event-conditioned action inputs must be finite")
+
+    batch_size, sequence_length = x_t.shape
+    vocab_size = log_ins_probs.shape[-1]
+    device = x_t.device
+    if vocab_size < 1:
+        raise ValueError("event-conditioned proposals require a positive vocabulary")
+
+    insert_positions, editable_positions = edit_position_masks(
+        x_t, pad_token=pad_token,
+    )
+    sequence_lengths = (x_t != pad_token).sum(dim=1)
+    insert_positions = insert_positions & (
+        sequence_lengths.unsqueeze(1) < max_seq_len
+    )
+
+    allowed_tokens = torch.ones(vocab_size, dtype=torch.bool, device=device)
+    for token in (*forbidden_token_ids, pad_token, bos_token):
+        if 0 <= int(token) < vocab_size:
+            allowed_tokens[int(token)] = False
+
+    negative_infinity = float("-inf")
+    log_insert = log_rates[:, :, 0:1] + log_ins_probs
+    log_insert = log_insert.masked_fill(
+        ~insert_positions.unsqueeze(-1), negative_infinity,
+    )
+    log_insert = log_insert.masked_fill(
+        ~allowed_tokens.view(1, 1, -1), negative_infinity,
+    )
+
+    log_substitute = log_rates[:, :, 1:2] + log_sub_probs
+    log_substitute = log_substitute.masked_fill(
+        ~editable_positions.unsqueeze(-1), negative_infinity,
+    )
+    log_substitute = log_substitute.masked_fill(
+        ~allowed_tokens.view(1, 1, -1), negative_infinity,
+    )
+    token_indices = torch.arange(vocab_size, device=device).view(1, 1, -1)
+    log_substitute = log_substitute.masked_fill(
+        token_indices == x_t.unsqueeze(-1), negative_infinity,
+    )
+
+    log_delete = log_rates[:, :, 2:3].masked_fill(
+        ~editable_positions.unsqueeze(-1), negative_infinity,
+    )
+    log_actions = torch.cat((log_insert, log_substitute, log_delete), dim=-1)
+    flat_actions = log_actions.reshape(batch_size, -1)
+    log_normalizer = torch.logsumexp(flat_actions, dim=-1)
+    invalid_rows = ~torch.isfinite(log_normalizer)
+    if invalid_rows.any():
+        rows = torch.nonzero(invalid_rows, as_tuple=False).squeeze(-1).tolist()
+        raise ValueError(
+            "event-conditioned proposal has no valid state-changing action "
+            f"for rows {rows[:10]}"
+        )
+    selected_flat = torch.multinomial(
+        torch.softmax(flat_actions, dim=-1), num_samples=1, replacement=True,
+    ).squeeze(-1)
+    selected_log_rate = flat_actions.gather(
+        1, selected_flat.unsqueeze(1),
+    ).squeeze(1)
+    selected_log_probability = selected_log_rate - log_normalizer
+
+    action_width = 2 * vocab_size + 1
+    positions = torch.div(selected_flat, action_width, rounding_mode="floor")
+    action_kind = selected_flat.remainder(action_width)
+    insert_selected = action_kind < vocab_size
+    substitute_selected = (action_kind >= vocab_size) & (
+        action_kind < 2 * vocab_size
+    )
+    delete_selected = action_kind == 2 * vocab_size
+    tokens = torch.full(
+        (batch_size,), -1, dtype=torch.long, device=device,
+    )
+    tokens[insert_selected] = action_kind[insert_selected]
+    tokens[substitute_selected] = (
+        action_kind[substitute_selected] - vocab_size
+    )
+
+    batch_indices = torch.arange(batch_size, device=device)
+    insert_mask = torch.zeros_like(x_t, dtype=torch.bool)
+    substitute_mask = torch.zeros_like(x_t, dtype=torch.bool)
+    delete_mask = torch.zeros_like(x_t, dtype=torch.bool)
+    insert_mask[batch_indices[insert_selected], positions[insert_selected]] = True
+    substitute_mask[
+        batch_indices[substitute_selected], positions[substitute_selected]
+    ] = True
+    delete_mask[batch_indices[delete_selected], positions[delete_selected]] = True
+    insert_tokens = torch.full_like(x_t, pad_token)
+    substitute_tokens = torch.full_like(x_t, pad_token)
+    insert_tokens[insert_mask] = tokens[insert_selected]
+    substitute_tokens[substitute_mask] = tokens[substitute_selected]
+    return {
+        "ins_mask": insert_mask,
+        "del_mask": delete_mask,
+        "sub_mask": substitute_mask,
+        "ins_tokens": insert_tokens,
+        "sub_tokens": substitute_tokens,
+        "position": positions,
+        "operation": torch.where(
+            insert_selected,
+            torch.zeros_like(action_kind),
+            torch.where(
+                substitute_selected,
+                torch.ones_like(action_kind),
+                torch.full_like(action_kind, 2),
+            ),
+        ),
+        "token": tokens,
+        "log_rate": selected_log_rate,
+        "log_probability": selected_log_probability,
     }
 
 
@@ -173,6 +395,111 @@ def _extract_first_event_summary(
     oracle_positions = torch.nonzero(oracle_pos_mask, as_tuple=False).squeeze(-1).tolist()
     summary["event_set_correct"] = event_positions == oracle_positions
     return summary
+
+
+def _oracle_token_support(
+    log_probs: Optional[Tensor],
+    *,
+    tolerance: float = 1e-6,
+) -> List[int]:
+    """Return tied maximum-probability oracle tokens without storing logits.
+
+    ``compute_oracle_model_output`` represents unsupported actions with a
+    very small positive rate, so checking merely for finite log-probability
+    would incorrectly mark the whole vocabulary as supported.  The oracle
+    support is therefore the set of tokens tied at the maximum log
+    probability (within a small numerical tolerance).
+    """
+    if log_probs is None or log_probs.numel() == 0:
+        return []
+    finite = log_probs > -1e8
+    if not bool(finite.any().item()):
+        return []
+    maximum = log_probs[finite].max()
+    support = finite & (log_probs >= maximum - tolerance)
+    return torch.nonzero(support, as_tuple=False).squeeze(-1).tolist()
+
+
+def _extract_compact_event(
+    sample_idx: int,
+    x_t: Tensor,
+    actions: dict,
+    t: Tensor,
+    oracle: Optional[dict],
+    oracle_out: Optional[tuple[Tensor, Tensor, Tensor, List[int]]],
+    *,
+    step_idx: int,
+    oracle_sample_idx: Optional[int] = None,
+) -> dict:
+    """Extract an event trace without retaining model distributions.
+
+    This is intentionally separate from ``record_all_events``: the latter is
+    a visualization-oriented diagnostic and stores several full tensors per
+    event.  Compact traces are intended for thousands of trajectories.
+    """
+    ins_mask = actions["ins_mask"][sample_idx]
+    del_mask = actions["del_mask"][sample_idx]
+    sub_mask = actions["sub_mask"][sample_idx]
+    event_mask = ins_mask | del_mask | sub_mask
+    positions = torch.nonzero(event_mask, as_tuple=False).squeeze(-1).tolist()
+
+    action_rows = []
+    for position in positions:
+        if bool(sub_mask[position].item()):
+            action_type = "sub"
+            token = int(actions["sub_tokens"][sample_idx, position].item())
+        elif bool(ins_mask[position].item()) and bool(del_mask[position].item()):
+            action_type = "replace"
+            token = int(actions["ins_tokens"][sample_idx, position].item())
+        elif bool(del_mask[position].item()):
+            action_type = "del"
+            token = None
+        else:
+            action_type = "ins"
+            token = int(actions["ins_tokens"][sample_idx, position].item())
+        action_rows.append({
+            "position": int(position),
+            "type": action_type,
+            "token": token,
+        })
+
+    oracle_rows = []
+    if oracle is not None:
+        oracle_idx = sample_idx if oracle_sample_idx is None else oracle_sample_idx
+        oracle_ins_probs = oracle_out[1][oracle_idx] if oracle_out is not None else None
+        oracle_sub_probs = oracle_out[2][oracle_idx] if oracle_out is not None else None
+        oracle_positions = torch.nonzero(
+            oracle["pos_mask"][oracle_idx], as_tuple=False,
+        ).squeeze(-1).tolist()
+        for position in oracle_positions:
+            types = []
+            ins_support = []
+            sub_support = []
+            if bool(oracle["ins_mask"][oracle_idx, position].item()):
+                types.append("ins")
+                if oracle_ins_probs is not None:
+                    ins_support = _oracle_token_support(oracle_ins_probs[position])
+            if bool(oracle["sub_mask"][oracle_idx, position].item()):
+                types.append("sub")
+                if oracle_sub_probs is not None:
+                    sub_support = _oracle_token_support(oracle_sub_probs[position])
+            if bool(oracle["del_mask"][oracle_idx, position].item()):
+                types.append("del")
+            oracle_rows.append({
+                "position": int(position),
+                "types": types,
+                "ins_token_support": ins_support,
+                "sub_token_support": sub_support,
+            })
+
+    return {
+        "step_idx": int(step_idx),
+        "t": float(t[sample_idx, 0].item()),
+        "x_t": x_t[sample_idx].detach().cpu().tolist(),
+        "actions": action_rows,
+        "oracle_available": oracle is not None,
+        "oracle": oracle_rows,
+    }
 
 
 def _override_with_anchor_event(
@@ -275,6 +602,36 @@ def get_adaptive_h(
     return h_adapt
 
 
+def get_euler_step_times(
+    n_steps: int,
+    scheduler: KappaScheduler,
+    *,
+    device: Optional[torch.device] = None,
+) -> list[float]:
+    """Return the exact scalar time at each Euler trajectory state.
+
+    ``sample_euler`` uses an adaptive final step, so a trajectory can contain
+    one more increment than ``n_steps`` due to floating-point endpoint
+    handling.  Callers that resume from a recorded trajectory must use these
+    times rather than ``index / len(trajectory)``.
+    """
+    if n_steps < 1:
+        raise ValueError("n_steps must be positive")
+    time_device = device or torch.device("cpu")
+    t = torch.zeros(1, 1, device=time_device, dtype=torch.float32)
+    times = [0.0]
+    max_iterations = max(10 * n_steps, 100)
+    for _ in range(max_iterations):
+        if bool((t >= 1.0).all().item()):
+            return times
+        adapt_h = get_adaptive_h(1.0 / n_steps, t, scheduler)
+        t = t + adapt_h
+        times.append(float(t.item()))
+    raise RuntimeError(
+        "Euler adaptive schedule did not reach t=1 within the iteration guard"
+    )
+
+
 def _compute_model_time(
     t: Tensor,
     sample_scheduler: KappaScheduler,
@@ -302,6 +659,197 @@ def _compute_model_time(
     return train_scheduler.inverse(kappa)
 
 
+def _prepare_product_memory_for_sampling(
+    model,
+    x_0: Tensor,
+    *,
+    pad_token: int,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
+) -> tuple[Optional[Tensor], Optional[Tensor]]:
+    """Build immutable product memory once, or validate a supplied cache.
+
+    A normal Euler trajectory changes ``x_t`` in-place.  This helper must be
+    called before that loop so a product-memory model never re-encodes the
+    changing state as if it were the original product.
+    """
+    uses_product_memory = bool(getattr(model, "use_product_memory", False))
+    if not uses_product_memory:
+        if product_memory is not None or product_memory_padding_mask is not None:
+            raise ValueError(
+                "product memory was supplied to a model with "
+                "use_product_memory=False"
+            )
+        return None, None
+
+    device = x_0.device
+    if product_memory is None:
+        product_padding_mask = x_0 == pad_token
+        return model.encode_product(x_0, product_padding_mask), product_padding_mask
+    if product_memory_padding_mask is None:
+        raise ValueError(
+            "product_memory_padding_mask is required with cached product_memory"
+        )
+    return (
+        product_memory.to(device=device),
+        product_memory_padding_mask.to(device=device, dtype=torch.bool),
+    )
+
+
+def _forward_edit_model(
+    model,
+    x_t: Tensor,
+    time_step: Tensor,
+    padding_mask: Tensor,
+    *,
+    origin_mask: Optional[Tensor] = None,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Call an Edit Flows model without changing legacy-model signatures."""
+    kwargs = {"origin_mask": origin_mask}
+    if product_memory is not None:
+        kwargs.update({
+            "product_memory": product_memory,
+            "product_memory_padding_mask": product_memory_padding_mask,
+        })
+    return model(x_t, time_step, padding_mask, **kwargs)
+
+
+@torch.no_grad()
+def sample_event_conditioned_euler_transition(
+    model,
+    x_t: Tensor,
+    scheduler: KappaScheduler,
+    *,
+    n_steps: int = 100,
+    max_seq_len: int = 512,
+    pad_token: int = PAD_TOKEN,
+    bos_token: int = BOS_TOKEN,
+    use_rate_reparam: bool = False,
+    clamp_kappa: bool = False,
+    clamp_max: float = 50.0,
+    time_input: str = "t",
+    train_scheduler: Optional[KappaScheduler] = None,
+    start_time: Tensor | float | None = None,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
+) -> tuple[Tensor, Tensor, dict[str, Tensor]]:
+    """Force one base-rate-conditioned atomic edit, then advance Euler time.
+
+    This is an offline-data primitive for event-conditioned guidance
+    proposals.  It uses the same frozen-model time mapping and rate
+    parameterization as :func:`sample_euler`, but replaces that numerical
+    step's natural zero-or-many edit draw with exactly one valid atomic edit
+    from :func:`sample_event_conditioned_atomic_actions`.  The returned
+    ``next_time`` is the normal adaptive Euler endpoint, suitable for a
+    subsequent ordinary-Euler rollout.
+    """
+    if n_steps < 1:
+        raise ValueError("n_steps must be positive")
+    device = next(model.parameters()).device
+    if x_t.ndim != 2:
+        raise ValueError("x_t must have shape [batch, length]")
+    batch_size = x_t.shape[0]
+    if batch_size < 1:
+        raise ValueError("x_t must contain at least one row")
+    x_current = x_t.to(device=device).clone()
+    if (
+        bool(getattr(model, "use_product_memory", False))
+        and product_memory is None
+    ):
+        raise ValueError(
+            "event-conditioned transition from an intermediate x_t requires "
+            "cached product_memory from the original x_0"
+        )
+    product_memory, product_memory_padding_mask = (
+        _prepare_product_memory_for_sampling(
+            model,
+            x_current,
+            pad_token=pad_token,
+            product_memory=product_memory,
+            product_memory_padding_mask=product_memory_padding_mask,
+        )
+    )
+    if start_time is None:
+        t = torch.zeros(batch_size, 1, device=device)
+    elif isinstance(start_time, Tensor):
+        t = start_time.to(device=device, dtype=torch.float32)
+        if t.ndim == 0:
+            t = t.expand(batch_size).reshape(batch_size, 1)
+        elif t.ndim == 1 and t.shape[0] == batch_size:
+            t = t.unsqueeze(1)
+        elif t.ndim == 2 and t.shape == (batch_size, 1):
+            pass
+        else:
+            raise ValueError(
+                "start_time must be scalar, [batch], or [batch, 1], got "
+                f"{tuple(t.shape)}"
+            )
+    else:
+        t = torch.full(
+            (batch_size, 1), float(start_time),
+            dtype=torch.float32, device=device,
+        )
+    if not torch.isfinite(t).all() or (t < 0).any() or (t >= 1).any():
+        raise ValueError("start_time must be finite values in [0, 1)")
+
+    x_pad_mask = x_current == pad_token
+    t_model = _compute_model_time(t, scheduler, time_input, train_scheduler)
+    log_rates, log_ins_probs, log_sub_probs = _forward_edit_model(
+        model,
+        x_current,
+        t_model,
+        x_pad_mask,
+        product_memory=product_memory,
+        product_memory_padding_mask=product_memory_padding_mask,
+    )
+    if (
+        not use_rate_reparam
+        and train_scheduler is not None
+        and scheduler.name != train_scheduler.name
+    ):
+        k_sample = get_rate_scale(
+            t, scheduler, clamp_kappa=clamp_kappa, clamp_max=clamp_max,
+        )
+        k_train = get_rate_scale(
+            t_model, train_scheduler,
+            clamp_kappa=clamp_kappa, clamp_max=clamp_max,
+        )
+        log_rates = log_rates + torch.log(
+            k_sample / k_train.clamp_min(1e-2),
+        ).unsqueeze(1)
+    log_rates = apply_rate_parameterization(
+        log_rates,
+        t,
+        scheduler,
+        use_rate_reparam=use_rate_reparam,
+        clamp_kappa=clamp_kappa,
+        clamp_max=clamp_max,
+    )
+    actions = sample_event_conditioned_atomic_actions(
+        x_current,
+        log_rates,
+        log_ins_probs,
+        log_sub_probs,
+        max_seq_len=max_seq_len,
+        pad_token=pad_token,
+        bos_token=bos_token,
+    )
+    x_next = x_current.clone()
+    x_next[actions["sub_mask"]] = actions["sub_tokens"][actions["sub_mask"]]
+    x_next = apply_ins_del_operations(
+        x_next,
+        actions["ins_mask"],
+        actions["del_mask"],
+        actions["ins_tokens"],
+        max_seq_len=max_seq_len,
+        pad_token=pad_token,
+    )
+    next_time = t + get_adaptive_h(1.0 / n_steps, t, scheduler)
+    return x_next, next_time, actions
+
+
 @torch.no_grad()
 def sample_euler(
     model,
@@ -312,6 +860,7 @@ def sample_euler(
     pad_token: int = PAD_TOKEN,
     bos_token: int = BOS_TOKEN,
     record_trajectory: bool = False,
+    max_recorded_trajectory_steps: Optional[int] = None,
     verbose: bool = False,
     use_rate_reparam: bool = False,
     clamp_kappa: bool = False,
@@ -321,39 +870,231 @@ def sample_euler(
     event_prob_mode: str = "poisson",
     record_first_events: bool = False,
     record_all_events: bool = False,
+    record_compact_events: bool = False,
+    first_event_intervention: Optional[Callable] = None,
     x_1: Optional[Tensor] = None,
     vocab_size: Optional[int] = None,
     use_origin_mask: bool = False,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
+    guidance_model=None,
+    guidance_product: Optional[Tensor] = None,
+    guidance_beta: float = 1.0,
+    guidance_rate_normalization: str = "per_position",
+    start_time: Optional[Tensor | float] = None,
+    initial_origin_mask: Optional[Tensor] = None,
+    first_event_position_scores: Optional[Tensor] = None,
+    first_event_position_bias_enabled: Optional[Tensor] = None,
+    first_event_bias_max_multiplier: float = 3.0,
+    first_event_bias_stats: Optional[dict] = None,
+    first_event_row_metadata: Optional[List[dict]] = None,
 ) -> tuple:
     from edit_flows.analysis.first_step import extract_oracle_event_set
     from edit_flows.sampling.oracle import compute_oracle_model_output
 
+    if record_all_events and record_compact_events:
+        raise ValueError(
+            "record_all_events and record_compact_events are mutually exclusive"
+        )
+    # The recording block below also owns the optional intervention hook.  A
+    # no-op hook keeps that block active for the historical recording modes
+    # without changing ordinary sampling when all diagnostics are disabled.
+    if (
+        first_event_intervention is None
+        and (record_first_events or record_all_events or record_compact_events)
+    ):
+        first_event_intervention = lambda *_args: None
+
     device = next(model.parameters()).device
     batch_size = x_0.shape[0]
 
-    x_t = x_0.to(device)
-    if use_origin_mask:
-        origin_mask = torch.ones_like(x_t, dtype=torch.bool, device=device)
+    # ``record_trajectory`` is diagnostic-only.  Some callers need the exact
+    # first post-edit state of a long continuation but must not retain every
+    # later state on CPU.  The cap counts post-start states, so ``1`` stores
+    # ``[x_t, x_(t+Δ)]``.  It deliberately changes only storage, never model
+    # calls or RNG consumption.
+    if max_recorded_trajectory_steps is not None:
+        if not record_trajectory:
+            raise ValueError(
+                "max_recorded_trajectory_steps requires record_trajectory=True"
+            )
+        if (
+            not isinstance(max_recorded_trajectory_steps, int)
+            or isinstance(max_recorded_trajectory_steps, bool)
+            or max_recorded_trajectory_steps < 0
+        ):
+            raise ValueError(
+                "max_recorded_trajectory_steps must be a non-negative integer"
+            )
+
+    if guidance_beta < 0 or not torch.isfinite(torch.tensor(guidance_beta)):
+        raise ValueError("guidance_beta must be finite and non-negative")
+    if guidance_rate_normalization not in {"per_position", "per_sample"}:
+        raise ValueError(
+            "guidance_rate_normalization must be per_position or per_sample"
+        )
+    if guidance_model is not None:
+        if guidance_product is None:
+            raise ValueError("guidance_product is required with guidance_model")
+        if guidance_product.ndim != 2 or guidance_product.shape[0] != batch_size:
+            raise ValueError(
+                "guidance_product must have shape [batch, product_length] "
+                "with the same batch size as x_0"
+            )
+        guidance_product = guidance_product.to(device=device, dtype=torch.long)
+        guidance_model.eval()
+
+    # Later substitution updates are in-place.  Clone after device transfer so
+    # callers may safely retain an intermediate state for diagnostics or a
+    # second continuation without it being silently mutated by this rollout.
+    x_t = x_0.to(device).clone()
+    product_memory, product_memory_padding_mask = _prepare_product_memory_for_sampling(
+        model,
+        x_t,
+        pad_token=pad_token,
+        product_memory=product_memory,
+        product_memory_padding_mask=product_memory_padding_mask,
+    )
+    if first_event_position_scores is not None:
+        if (
+            first_event_position_scores.ndim != 3
+            or first_event_position_scores.shape[0] != batch_size
+            or first_event_position_scores.shape[1] != x_0.shape[1]
+            or first_event_position_scores.shape[2] != 3
+        ):
+            raise ValueError(
+                "first_event_position_scores must have shape "
+                "[batch, initial_length, 3]"
+            )
+        first_event_position_scores = first_event_position_scores.to(
+            device=device, dtype=torch.float32
+        )
+        if not torch.isfinite(first_event_position_scores).all():
+            raise ValueError("first_event_position_scores must be finite")
+        if (first_event_position_scores < 0).any() or (
+            first_event_position_scores > 1
+        ).any():
+            raise ValueError("first_event_position_scores must lie in [0, 1]")
+        # ``first_event_bias_active`` tracks rows until their first actual
+        # edit.  ``first_event_position_bias_enabled`` is separate on
+        # purpose: RC1.5 records the first event for all nine trajectories,
+        # but only reweights positions for its guided subset.  The remaining
+        # rows therefore follow ordinary Euler exactly while still producing
+        # comparable first-event diagnostics.
+        first_event_bias_active = torch.ones(
+            batch_size, dtype=torch.bool, device=device
+        )
+        if first_event_position_bias_enabled is None:
+            first_event_position_bias_enabled = torch.ones(
+                batch_size, dtype=torch.bool, device=device
+            )
+        else:
+            if first_event_position_bias_enabled.shape != (batch_size,):
+                raise ValueError(
+                    "first_event_position_bias_enabled must have shape "
+                    "[batch]"
+                )
+            first_event_position_bias_enabled = (
+                first_event_position_bias_enabled.to(
+                    device=device, dtype=torch.bool
+                )
+            )
+        if first_event_row_metadata is not None and len(
+            first_event_row_metadata
+        ) != batch_size:
+            raise ValueError(
+                "first_event_row_metadata must have one item per batch row"
+            )
+        if first_event_bias_stats is not None:
+            first_event_bias_stats.setdefault("biased_row_steps", 0)
+            first_event_bias_stats.setdefault("guided_row_steps", 0)
+            first_event_bias_stats.setdefault("first_event_count", 0)
+            first_event_bias_stats.setdefault("no_event_count", 0)
+            first_event_bias_stats.setdefault(
+                "max_hazard_relative_error", 0.0
+            )
+            first_event_bias_stats.setdefault("records", [])
     else:
+        if first_event_position_bias_enabled is not None:
+            raise ValueError(
+                "first_event_position_bias_enabled requires "
+                "first_event_position_scores"
+            )
+        if first_event_row_metadata is not None:
+            raise ValueError(
+                "first_event_row_metadata requires first_event_position_scores"
+            )
+        first_event_bias_active = None
+    if use_origin_mask:
+        if initial_origin_mask is None:
+            origin_mask = torch.ones_like(x_t, dtype=torch.bool, device=device)
+        else:
+            if initial_origin_mask.shape != x_t.shape:
+                raise ValueError(
+                    "initial_origin_mask must have the same shape as x_0"
+                )
+            origin_mask = initial_origin_mask.to(device=device, dtype=torch.bool)
+    else:
+        if initial_origin_mask is not None:
+            raise ValueError(
+                "initial_origin_mask requires use_origin_mask=True"
+            )
         origin_mask = None
-    t = torch.zeros(batch_size, 1, device=device)
+    if start_time is None:
+        t = torch.zeros(batch_size, 1, device=device)
+    elif isinstance(start_time, Tensor):
+        t = start_time.to(device=device, dtype=torch.float32)
+        if t.ndim == 0:
+            t = t.expand(batch_size).reshape(batch_size, 1)
+        elif t.ndim == 1 and t.shape[0] == batch_size:
+            t = t.unsqueeze(1)
+        elif t.ndim == 2 and t.shape == (batch_size, 1):
+            pass
+        else:
+            raise ValueError(
+                "start_time must be scalar, [batch], or [batch, 1], got "
+                f"{tuple(t.shape)}"
+            )
+    else:
+        t = torch.full(
+            (batch_size, 1), float(start_time),
+            dtype=torch.float32, device=device,
+        )
+    if not torch.isfinite(t).all() or (t < 0).any() or (t > 1).any():
+        raise ValueError("start_time must be finite values in [0, 1]")
     default_h = 1.0 / n_steps
 
     trajectory: List[Tensor] = []
     first_events: List[Optional[dict]] = [None for _ in range(batch_size)]
     all_events: List[List[dict]] = [[] for _ in range(batch_size)] if record_all_events else []
+    compact_events: List[List[dict]] = [[] for _ in range(batch_size)] if record_compact_events else []
+    intervention_done = (
+        torch.zeros(batch_size, dtype=torch.bool, device=device)
+        if first_event_intervention is not None else None
+    )
+    intervention_infos: List[Optional[dict]] = [
+        None for _ in range(batch_size)
+    ]
     if record_trajectory:
         trajectory.append(x_t.cpu().clone())
 
     if verbose:
         pbar = tqdm(total=n_steps, desc="Euler Sampling")
     while (t < 1.0).any():
+        recorded_event_samples: List[int] = []
+        recorded_compact_event_samples: List[int] = []
         x_pad_mask = x_t == pad_token
 
         t_model = _compute_model_time(t, scheduler, time_input, train_scheduler)
 
-        log_rates, log_ins_probs, log_sub_probs = model(
-            x_t, t_model, x_pad_mask, origin_mask=origin_mask,
+        log_rates, log_ins_probs, log_sub_probs = _forward_edit_model(
+            model,
+            x_t,
+            t_model,
+            x_pad_mask,
+            origin_mask=origin_mask,
+            product_memory=product_memory,
+            product_memory_padding_mask=product_memory_padding_mask,
         )
 
         # When use_rate_reparam=False, the model predicts raw rates v that
@@ -382,10 +1123,59 @@ def sample_euler(
             clamp_kappa=clamp_kappa, clamp_max=clamp_max,
         )
 
+        # Keep the base model action distribution separate from the guided
+        # distribution.  These fields are diagnostic-only and are populated
+        # for recorded events, so ordinary sampling cost and RNG consumption
+        # are unchanged when trajectory recording is disabled.
+        log_rates_pre_guidance = log_rates.detach().clone()
+        log_ins_probs_pre_guidance = log_ins_probs.detach().clone()
+        log_sub_probs_pre_guidance = log_sub_probs.detach().clone()
+        guidance_insert = None
+        guidance_substitute = None
+        guidance_delete = None
+
+        if guidance_model is not None and guidance_beta > 0:
+            guidance_product_pad_mask = guidance_product == pad_token
+            guidance_insert, guidance_substitute, guidance_delete = guidance_model(
+                guidance_product,
+                x_t,
+                t,
+                guidance_product_pad_mask,
+                x_pad_mask,
+            )
+            log_rates, log_ins_probs, log_sub_probs = apply_action_guidance(
+                log_rates,
+                log_ins_probs,
+                log_sub_probs,
+                guidance_insert,
+                guidance_substitute,
+                guidance_delete,
+                beta=guidance_beta,
+                rate_normalization=guidance_rate_normalization,
+                position_mask=(~x_pad_mask) & (
+                    torch.arange(x_t.shape[1], device=device).unsqueeze(0) > 0
+                ),
+            )
+
         adapt_h = get_adaptive_h(default_h, t, scheduler)
+        current_position_scores = (
+            align_position_scores(
+                first_event_position_scores, x_t.shape[1]
+            )
+            if first_event_position_scores is not None
+            else None
+        )
         actions = _sample_edit_actions(
             x_t, log_rates, log_ins_probs, log_sub_probs, adapt_h,
             pad_token=pad_token, event_prob_mode=event_prob_mode,
+            position_scores=current_position_scores,
+            position_bias_active=(
+                first_event_bias_active
+                & first_event_position_bias_enabled
+                if first_event_bias_active is not None
+                else None
+            ),
+            position_bias_max_multiplier=first_event_bias_max_multiplier,
         )
 
         done = (t >= 1.0).squeeze(-1)
@@ -394,18 +1184,194 @@ def sample_euler(
             actions["del_mask"][done] = False
             actions["sub_mask"][done] = False
 
-        if record_first_events or record_all_events:
+        if first_event_bias_active is not None:
+            bias_diagnostics = actions["position_bias_diagnostics"]
+            if first_event_bias_stats is not None:
+                active_not_done = first_event_bias_active & ~done
+                first_event_bias_stats["biased_row_steps"] += int(
+                    active_not_done.sum().item()
+                )
+                guided_not_done = (
+                    active_not_done & first_event_position_bias_enabled
+                )
+                first_event_bias_stats["guided_row_steps"] += int(
+                    guided_not_done.sum().item()
+                )
+                changed_errors = bias_diagnostics["relative_error"][
+                    bias_diagnostics["changed"]
+                ]
+                if changed_errors.numel():
+                    first_event_bias_stats["max_hazard_relative_error"] = max(
+                        first_event_bias_stats[
+                            "max_hazard_relative_error"
+                        ],
+                        float(changed_errors.max().item()),
+                    )
+            first_bias_event_mask = (
+                actions["ins_mask"]
+                | actions["del_mask"]
+                | actions["sub_mask"]
+            )
+            newly_finished = (
+                first_event_bias_active
+                & ~done
+                & first_bias_event_mask.any(dim=1)
+            )
+            if first_event_bias_stats is not None:
+                for sample_idx in torch.nonzero(
+                    newly_finished, as_tuple=False
+                ).squeeze(-1).tolist():
+                    action_rows = []
+                    for mode_name, mode_index, mask_name in (
+                        ("INS", 0, "ins_mask"),
+                        ("SUB", 1, "sub_mask"),
+                        ("DEL", 2, "del_mask"),
+                    ):
+                        for position in torch.nonzero(
+                            actions[mask_name][sample_idx],
+                            as_tuple=False,
+                        ).squeeze(-1).tolist():
+                            action_rows.append(
+                                {
+                                    "mode": mode_name,
+                                    "position": int(position),
+                                    "token_id": (
+                                        int(
+                                            actions[
+                                                "ins_tokens"
+                                                if mode_name == "INS"
+                                                else "sub_tokens"
+                                            ][sample_idx, position].item()
+                                        )
+                                        if mode_name in {"INS", "SUB"}
+                                        else None
+                                    ),
+                                    "center_score": float(
+                                        current_position_scores[
+                                            sample_idx,
+                                            position,
+                                            mode_index,
+                                        ].item()
+                                    ),
+                                }
+                            )
+                    record = {
+                        "batch_row": int(sample_idx),
+                        "first_event_step_idx": int(
+                            (t[sample_idx, 0] * n_steps).item()
+                        ),
+                        "first_event_t": float(t[sample_idx, 0].item()),
+                        "action_count": len(action_rows),
+                        "actions": action_rows,
+                        "position_bias_enabled": bool(
+                            first_event_position_bias_enabled[
+                                sample_idx
+                            ].item()
+                        ),
+                        "position_bias_reweighted": bool(
+                            bias_diagnostics["changed"][sample_idx].any().item()
+                        ),
+                    }
+                    if first_event_row_metadata is not None:
+                        record["row_metadata"] = (
+                            first_event_row_metadata[sample_idx]
+                        )
+                    first_event_bias_stats["records"].append(record)
+                first_event_bias_stats["first_event_count"] += int(
+                    newly_finished.sum().item()
+                )
+            first_event_bias_active[newly_finished] = False
+
+        # Compact correction analysis only needs an oracle at the first real
+        # event of each path.  Recomputing the dynamic Levenshtein oracle at
+        # every later Euler step is needlessly CPU-heavy and defeats the point
+        # of the compact recorder.  Full event recording keeps its historical
+        # behavior and still computes an oracle for every recorded step.
+        event_mask = actions["ins_mask"] | actions["del_mask"] | actions["sub_mask"]
+        compact_needs_oracle = record_compact_events and any(
+            not compact_events[sample_idx]
+            for sample_idx in range(batch_size)
+        )
+        compact_oracle_by_sample: Dict[int, tuple[dict, tuple]] = {}
+        if record_first_events or record_all_events or record_compact_events:
             oracle_out = None
             oracle = None
             if x_1 is not None and vocab_size is not None:
-                oracle_out = compute_oracle_model_output(
-                    x_t, x_1.to(device), t, scheduler, vocab_size,
-                    pad_token=pad_token, bos_token=bos_token,
-                )
-                oracle = extract_oracle_event_set(
-                    oracle_out[0], oracle_out[1], oracle_out[2], x_t,
-                )
+                if record_first_events or record_all_events:
+                    oracle_out = compute_oracle_model_output(
+                        x_t, x_1.to(device), t, scheduler, vocab_size,
+                        pad_token=pad_token, bos_token=bos_token,
+                    )
+                    oracle = extract_oracle_event_set(
+                        oracle_out[0], oracle_out[1], oracle_out[2], x_t,
+                    )
+                elif record_compact_events and compact_needs_oracle:
+                    compact_indices = [
+                        sample_idx
+                        for sample_idx in range(batch_size)
+                        if not compact_events[sample_idx]
+                        and not bool(done[sample_idx].item())
+                        and bool(event_mask[sample_idx].any().item())
+                    ]
+                    if compact_indices:
+                        index_tensor = torch.tensor(
+                            compact_indices, dtype=torch.long, device=device,
+                        )
+                        compact_x_t = x_t.index_select(0, index_tensor)
+                        compact_x_1 = x_1.to(device).index_select(0, index_tensor)
+                        compact_t = t.index_select(0, index_tensor)
+                        compact_oracle_out = compute_oracle_model_output(
+                            compact_x_t, compact_x_1, compact_t,
+                            scheduler, vocab_size,
+                            pad_token=pad_token, bos_token=bos_token,
+                        )
+                        compact_oracle = extract_oracle_event_set(
+                            compact_oracle_out[0], compact_oracle_out[1],
+                            compact_oracle_out[2], compact_x_t,
+                        )
+                        for compact_idx, sample_idx in enumerate(compact_indices):
+                            compact_oracle_by_sample[sample_idx] = (
+                                {
+                                    key: value[compact_idx:compact_idx + 1]
+                                    for key, value in compact_oracle.items()
+                                },
+                                (
+                                    compact_oracle_out[0][compact_idx:compact_idx + 1],
+                                    compact_oracle_out[1][compact_idx:compact_idx + 1],
+                                    compact_oracle_out[2][compact_idx:compact_idx + 1],
+                                    [compact_oracle_out[3][compact_idx]],
+                                ),
+                            )
 
+        if first_event_intervention is not None:
+            for sample_idx in range(batch_size):
+                if bool(intervention_done[sample_idx].item()):
+                    continue
+                if bool(done[sample_idx].item()):
+                    continue
+                if not bool(event_mask[sample_idx].any().item()):
+                    continue
+                compact_oracle_data = compact_oracle_by_sample.get(sample_idx)
+                if compact_oracle_data is not None:
+                    callback_oracle = compact_oracle_data[0]
+                    callback_oracle_out = compact_oracle_data[1]
+                    callback_sample_idx = 0
+                elif oracle is not None and oracle_out is not None:
+                    callback_oracle = oracle
+                    callback_oracle_out = oracle_out
+                    callback_sample_idx = sample_idx
+                else:
+                    continue
+                intervention_infos[sample_idx] = first_event_intervention(
+                    sample_idx,
+                    actions,
+                    x_t,
+                    callback_oracle,
+                    callback_oracle_out,
+                    callback_sample_idx,
+                    x_1[sample_idx] if x_1 is not None else None,
+                )
+                intervention_done[sample_idx] = True
             event_mask = actions["ins_mask"] | actions["del_mask"] | actions["sub_mask"]
 
             if record_first_events:
@@ -434,8 +1400,25 @@ def sample_euler(
                             "origin_mask": origin_mask[sample_idx].cpu().clone() if use_origin_mask else None,
                             "log_rates": log_rates[sample_idx].detach().cpu().clone(),
                             "log_rates_raw": log_rates_raw[sample_idx].detach().cpu().clone(),
+                            "log_rates_pre_guidance": log_rates_pre_guidance[sample_idx].detach().cpu().clone(),
+                            "log_ins_probs_pre_guidance": log_ins_probs_pre_guidance[sample_idx].detach().cpu().clone(),
+                            "log_sub_probs_pre_guidance": log_sub_probs_pre_guidance[sample_idx].detach().cpu().clone(),
                             "log_ins_probs": log_ins_probs[sample_idx].detach().cpu().clone(),
                             "log_sub_probs": log_sub_probs[sample_idx].detach().cpu().clone(),
+                            "guidance_insert": (
+                                guidance_insert[sample_idx].detach().cpu().clone()
+                                if guidance_insert is not None else None
+                            ),
+                            "guidance_substitute": (
+                                guidance_substitute[sample_idx].detach().cpu().clone()
+                                if guidance_substitute is not None else None
+                            ),
+                            "guidance_delete": (
+                                guidance_delete[sample_idx].detach().cpu().clone()
+                                if guidance_delete is not None else None
+                            ),
+                            "guidance_beta": float(guidance_beta),
+                            "guidance_rate_normalization": guidance_rate_normalization,
                             "oracle_log_rates": oracle_out[0][sample_idx].detach().cpu().clone() if oracle_out is not None else None,
                             "oracle_log_ins_probs": oracle_out[1][sample_idx].detach().cpu().clone() if oracle_out is not None else None,
                             "oracle_log_sub_probs": oracle_out[2][sample_idx].detach().cpu().clone() if oracle_out is not None else None,
@@ -455,6 +1438,43 @@ def sample_euler(
                                 "del_mask": oracle["del_mask"][sample_idx].cpu().clone(),
                             }
                         all_events[sample_idx].append(event)
+                        recorded_event_samples.append(sample_idx)
+
+            if record_compact_events:
+                for sample_idx in range(batch_size):
+                    if done[sample_idx]:
+                        continue
+                    if bool(event_mask[sample_idx].any().item()):
+                        is_first_compact_event = not compact_events[sample_idx]
+                        compact_oracle_data = compact_oracle_by_sample.get(sample_idx)
+                        compact_events[sample_idx].append(
+                            _extract_compact_event(
+                                sample_idx=sample_idx,
+                                x_t=x_t,
+                                actions=actions,
+                                t=t,
+                                oracle=(
+                                    compact_oracle_data[0]
+                                    if compact_oracle_data is not None
+                                    else None
+                                ),
+                                oracle_out=(
+                                    compact_oracle_data[1]
+                                    if compact_oracle_data is not None
+                                    else None
+                                ),
+                                step_idx=int((t[sample_idx, 0] * n_steps).item()),
+                                oracle_sample_idx=0 if compact_oracle_data is not None else None,
+                            )
+                        )
+                        if (
+                            intervention_infos[sample_idx] is not None
+                            and is_first_compact_event
+                        ):
+                            compact_events[sample_idx][-1]["intervention"] = (
+                                intervention_infos[sample_idx]
+                            )
+                        recorded_compact_event_samples.append(sample_idx)
 
         x_t[actions["sub_mask"]] = actions["sub_tokens"][actions["sub_mask"]]
         if use_origin_mask:
@@ -474,17 +1494,49 @@ def sample_euler(
             x_t, actions["ins_mask"], actions["del_mask"], actions["ins_tokens"],
             max_seq_len=max_seq_len, pad_token=pad_token,
         )
+        # Store the exact post-edit state for diagnostic reconstruction.  This
+        # runs only when event recording is enabled and does not alter normal
+        # sampling, RNG consumption, or model calls.
+        for sample_idx in recorded_event_samples:
+            all_events[sample_idx][-1]["x_next"] = (
+                x_t[sample_idx].cpu().clone()
+            )
+        for sample_idx in recorded_compact_event_samples:
+            compact_events[sample_idx][-1]["x_next"] = (
+                x_t[sample_idx].cpu().tolist()
+            )
 
         t = t + adapt_h
-        if record_trajectory:
+        if record_trajectory and (
+            max_recorded_trajectory_steps is None
+            or len(trajectory) - 1 < max_recorded_trajectory_steps
+        ):
             trajectory.append(x_t.cpu().clone())
         if verbose:
             pbar.update(1)
 
     if verbose:
         pbar.close()
+    if first_event_bias_stats is not None and first_event_bias_active is not None:
+        no_event_indices = torch.nonzero(
+            first_event_bias_active, as_tuple=False
+        ).squeeze(-1).tolist()
+        first_event_bias_stats["no_event_count"] += len(no_event_indices)
+        if first_event_row_metadata is not None:
+            by_role = first_event_bias_stats.setdefault(
+                "no_event_trajectory_role_counts", {}
+            )
+            for sample_idx in no_event_indices:
+                role = str(
+                    first_event_row_metadata[sample_idx].get(
+                        "trajectory_role", "unspecified"
+                    )
+                )
+                by_role[role] = int(by_role.get(role, 0)) + 1
     if record_all_events:
         return x_t, trajectory, all_events
+    if record_compact_events:
+        return x_t, trajectory, compact_events
     if record_first_events:
         return x_t, trajectory, first_events
     return x_t, trajectory
@@ -509,6 +1561,8 @@ def sample_euler_with_first_step_intervention(
     train_scheduler: Optional[KappaScheduler] = None,
     event_prob_mode: str = "poisson",
     record_first_events: bool = False,
+    product_memory: Optional[Tensor] = None,
+    product_memory_padding_mask: Optional[Tensor] = None,
 ) -> tuple:
     from edit_flows.analysis.first_step import extract_oracle_event_set
     from edit_flows.sampling.oracle import compute_oracle_model_output
@@ -519,6 +1573,13 @@ def sample_euler_with_first_step_intervention(
     device = next(model.parameters()).device
     batch_size = x_0.shape[0]
     x_t = x_0.to(device)
+    product_memory, product_memory_padding_mask = _prepare_product_memory_for_sampling(
+        model,
+        x_t,
+        pad_token=pad_token,
+        product_memory=product_memory,
+        product_memory_padding_mask=product_memory_padding_mask,
+    )
     x_1 = x_1.to(device)
     t = torch.zeros(batch_size, 1, device=device)
     default_h = 1.0 / n_steps
@@ -529,7 +1590,14 @@ def sample_euler_with_first_step_intervention(
     while (t < 1.0).any():
         x_pad_mask = x_t == pad_token
         t_model = _compute_model_time(t, scheduler, time_input, train_scheduler)
-        log_rates, log_ins_probs, log_sub_probs = model(x_t, t_model, x_pad_mask)
+        log_rates, log_ins_probs, log_sub_probs = _forward_edit_model(
+            model,
+            x_t,
+            t_model,
+            x_pad_mask,
+            product_memory=product_memory,
+            product_memory_padding_mask=product_memory_padding_mask,
+        )
 
         if not use_rate_reparam and train_scheduler is not None and \
            scheduler.name != train_scheduler.name:
@@ -665,8 +1733,6 @@ def sample_euler_oracle(
     if verbose:
         pbar = tqdm(total=n_steps, desc="Oracle Euler")
     while (t < 1.0).any():
-        x_pad_mask = x_t == pad_token
-
         log_rates, log_ins_probs, log_sub_probs, edit_dists = \
             compute_oracle_model_output(
                 x_t, x_1, t, scheduler, vocab_size,
@@ -677,58 +1743,18 @@ def sample_euler_oracle(
             ts_list.append(t.squeeze(-1).cpu().clone())
             dists_list.append(torch.tensor(edit_dists, dtype=torch.float))
 
-        rates = torch.exp(log_rates)
-        ins_probs = torch.exp(log_ins_probs)
-        sub_probs = torch.exp(log_sub_probs)
-
-        lambda_ins = rates[:, :, 0]
-        lambda_sub = rates[:, :, 1]
-        lambda_del = rates[:, :, 2]
-
         adapt_h = get_adaptive_h(default_h, t, scheduler)
-
-        ins_prob = _event_probability(adapt_h * lambda_ins, event_prob_mode)
-        del_sub_prob = _event_probability(
-            adapt_h * (lambda_sub + lambda_del), event_prob_mode,
+        # Keep the oracle diagnostic on the exact same executable action
+        # support as the production Euler sampler: INS may anchor at BOS,
+        # while BOS SUB/DEL, structural outputs, and no-op substitutions are
+        # never sampled.
+        actions = _sample_edit_actions(
+            x_t, log_rates, log_ins_probs, log_sub_probs, adapt_h,
+            pad_token=pad_token, event_prob_mode=event_prob_mode,
         )
-
-        ins_mask = torch.rand_like(lambda_ins) < ins_prob
-        del_sub_mask = torch.rand_like(lambda_sub) < del_sub_prob
-
-        done = (t >= 1.0).squeeze(-1)
-        if done.any():
-            ins_mask[done] = False
-            del_sub_mask[done] = False
-
-        prob_del = torch.where(
-            del_sub_mask,
-            lambda_del / (lambda_sub + lambda_del + 1e-8),
-            torch.zeros_like(lambda_del),
-        )
-        del_mask = torch.bernoulli(prob_del).bool()
-        sub_mask = del_sub_mask & ~del_mask
-
-        non_pad_mask = ~x_pad_mask
-        ins_tokens = torch.full(
-            ins_probs.shape[:2], pad_token, dtype=torch.long, device=device,
-        )
-        sub_tokens = torch.full(
-            sub_probs.shape[:2], pad_token, dtype=torch.long, device=device,
-        )
-
-        if non_pad_mask.any():
-            ins_sampled = torch.multinomial(
-                ins_probs[non_pad_mask], num_samples=1, replacement=True,
-            ).squeeze(-1)
-            sub_sampled = torch.multinomial(
-                sub_probs[non_pad_mask], num_samples=1, replacement=True,
-            ).squeeze(-1)
-            ins_tokens[non_pad_mask] = ins_sampled
-            sub_tokens[non_pad_mask] = sub_sampled
-
-        x_t[sub_mask] = sub_tokens[sub_mask]
+        x_t[actions["sub_mask"]] = actions["sub_tokens"][actions["sub_mask"]]
         x_t = apply_ins_del_operations(
-            x_t, ins_mask, del_mask, ins_tokens,
+            x_t, actions["ins_mask"], actions["del_mask"], actions["ins_tokens"],
             max_seq_len=max_seq_len, pad_token=pad_token,
         )
 

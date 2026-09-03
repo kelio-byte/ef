@@ -1,0 +1,57 @@
+retro:
+  # First original-R-SMILES M500-SPE run.  Train through 600k because the
+  # prior M500 result continued improving into the 500k region.
+  vocab_size: null
+  hidden_dim: 256
+  num_layers: 10
+  num_heads: 8
+  dim_feedforward: 2048
+  # The maximum aligned M500 training length is 63, so 96 is lossless.
+  max_seq_len: 96
+  dropout: 0.2
+  attention_dropout: 0.2
+  activation: relu
+  pos_encoding_scale: true
+
+  # Same batch protocol as the prior successful M500 run.
+  batch_size: 256
+  val_batch_size: 256
+  total_steps: 600000
+  learning_rate_factor: 1.0
+  warmup_steps: 8000
+  max_grad_norm: 1.0
+
+  scheduler: cubic
+  sample_scheduler: cubic
+  align_fn: opt
+  n_sampling_steps: 100
+  use_rate_reparam: false
+  time_input: t
+  clamp_kappa: false
+  clamp_max: 50.0
+  use_origin_mask: false
+
+  data_dir: datasets/USPTO_50K_PtoR_aug20_SPE_m500
+  vocab_file: example.vocab.src
+
+  seed: 42
+  num_workers: 2
+  checkpoint_interval: 10000
+  keep_checkpoints: 40
+  save_best_checkpoint: true
+
+  tensorboard:
+    enabled: true
+    log_dir: tensorboard
+    log_interval: 100
+    validation_start_step: 100000
+    # Health monitoring only; final checkpoint choice uses generation metrics.
+    validation_interval: 50000
+    validation_batches: null
+    flush_interval: 500
+    flush_secs: 30
+
+  monitoring:
+    enabled: true
+    interval: 1000
+    jsonl: training_monitor.jsonl

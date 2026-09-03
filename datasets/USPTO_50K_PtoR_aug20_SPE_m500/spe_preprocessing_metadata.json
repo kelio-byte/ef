@@ -1,0 +1,75 @@
+{
+  "cache_reset_interval": 50000,
+  "codes_path": "/root/autodl-tmp/edit_flows/scripts/preprocessing/SPE_ChEMBL.txt",
+  "codes_sha256": "ee408e30e0aae598770f233013b312b206df424f6e593b410b0107d7d2237a43",
+  "created_at_utc": "2026-08-19T15:51:43.454016+00:00",
+  "dropout": 0,
+  "max_lines": null,
+  "merges": 500,
+  "num_workers": 12,
+  "output_dir": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_SPE_m500",
+  "schema_version": 1,
+  "smilespe_version": "0.0.3",
+  "source_dir": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20",
+  "source_kind": "unaligned src/tgt only; old aligned files ignored",
+  "splits": {
+    "test": {
+      "output_sha256": {
+        "src": "3bc11c586cf25d30442f845224be356395bace506eeb77617a66483864febb22",
+        "tgt": "aef7427f967e94417f765bc43e04335753a4539419302cffb6e09c937017a769"
+      },
+      "pair_count": 100140,
+      "source_sha256": {
+        "src": "7726b09183462b9d05cb8c655a862b8a3f494ea3e42d3ebd6e4443e32f9b49b6",
+        "tgt": "6410771a0702386fc4b7e3b36d174d5fca697b85e92e0e4a29cc4a23759cf1dc"
+      },
+      "src_max_tokens": 50,
+      "src_mean_tokens": 12.2464649490713,
+      "src_token_count": 1226361,
+      "tgt_max_tokens": 51,
+      "tgt_mean_tokens": 14.614329938086678,
+      "tgt_token_count": 1463479
+    },
+    "train": {
+      "output_sha256": {
+        "src": "8e2700463a4eda579d9dee6262c0e1b60011da0a8def2fff46b3d5611509fb66",
+        "tgt": "2571c49d3d3e532903163879176328fead938baf81f677907fc43fa409346cef"
+      },
+      "pair_count": 800060,
+      "source_sha256": {
+        "src": "5fac48ff272e241b0c0d1ec5d9ffd1604884eeab1400ecf604acf93e32c74ae5",
+        "tgt": "33712f8781e94639f9c641a5cf44aee57f7366fb75e6d16b9d888542f696632e"
+      },
+      "src_max_tokens": 51,
+      "src_mean_tokens": 12.2509686773492,
+      "src_token_count": 9801510,
+      "tgt_max_tokens": 51,
+      "tgt_mean_tokens": 14.611759118066145,
+      "tgt_token_count": 11690284
+    },
+    "val": {
+      "output_sha256": {
+        "src": "7c8c1d6bc6d9bdbd53e37d909fb006b2ce3f9262d67e907b5cc5d247db933a4d",
+        "tgt": "93f8b0267257b594e6e1dc099d1e6de6c392b11dfd3cecb144ce3054a2d6baf7"
+      },
+      "pair_count": 100020,
+      "source_sha256": {
+        "src": "af8978e86f452d7f123e274959698c588a9ea7288e39961ca4e5a33ce628e652",
+        "tgt": "4438fc15573ae041a6488629ff6d01bc0e10dda64fe661ec211068722c066513"
+      },
+      "src_max_tokens": 48,
+      "src_mean_tokens": 12.26480703859228,
+      "src_token_count": 1226726,
+      "tgt_max_tokens": 49,
+      "tgt_mean_tokens": 14.627324535092981,
+      "tgt_token_count": 1463025
+    }
+  },
+  "vocab": {
+    "model_vocab_size": 565,
+    "path": "datasets/USPTO_50K_PtoR_aug20_SPE_m500/example.vocab.src",
+    "sha256": "429a657a9ffeef214d1c6f85634b2dc94d6969765a443eeb6b2a9cdee011096c",
+    "token_count": 561,
+    "total_training_token_count": 21491794
+  }
+}

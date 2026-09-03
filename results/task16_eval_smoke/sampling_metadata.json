@@ -1,0 +1,67 @@
+{
+  "augmentation": 20,
+  "augmentation_inferred_from": "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt",
+  "checkpoint": {
+    "mtime_ns": 1785470613084893869,
+    "path": "/root/autodl-tmp/edit_flows/checkpoint_step600000.pt",
+    "size_bytes": 162620771
+  },
+  "created_at_utc": "2026-08-03T08:36:57.042326+00:00",
+  "git": {
+    "commit": "04c4895921cafeeaa444e8ed75dab5de4034011a",
+    "dirty": true
+  },
+  "input": {
+    "kind": "products_file",
+    "mtime_ns": 1785315787769836476,
+    "path": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt",
+    "product_count": 20,
+    "selection_end_product_exclusive": 20,
+    "selection_start_product": 0,
+    "sha256": "128d6c4a7f61848f3c3f163034898d12e1ab13c892880fae7716b8f7ffb61361",
+    "size_bytes": 88098,
+    "source_product_count": 1000
+  },
+  "layout": "input-product-major, output-minor",
+  "model": {
+    "configured_use_origin_mask": false,
+    "effective_use_origin_mask": false
+  },
+  "output_beam_size": 3,
+  "output_line_count": 60,
+  "output_sha256": "7cfa24ce3ab9ed8bef44d30106ff0ceef870f6de7fd847abc02f85c5ff4bba57",
+  "product_count": 20,
+  "runtime": {
+    "batch_size": 20,
+    "device": "cuda",
+    "elapsed_seconds": 0.6924973330460489,
+    "euler_beam_stats": {
+      "child_candidate_evaluations": 484,
+      "parent_branch_evaluations": 242,
+      "return_shortfall_outputs": 0,
+      "return_shortfall_samples": 0,
+      "steps": 2
+    },
+    "peak_cuda_allocated_bytes": 365583872,
+    "peak_cuda_reserved_bytes": 492830720
+  },
+  "sampler": "euler_beam",
+  "sampling": {
+    "changed_state_bonus": 0.5,
+    "child_policy": "stochastic_noop",
+    "initial_seed_groups": null,
+    "matmul_precision": "high",
+    "n_branches": 3,
+    "n_children": 2,
+    "n_return": 1,
+    "n_runs": 3,
+    "n_steps": 2,
+    "sample_scheduler": "cubic",
+    "score_mode": "full_probability",
+    "seed": 42,
+    "seed_applied_to_sampler": true,
+    "seed_scope": "stable product/run streams",
+    "train_scheduler": "cubic"
+  },
+  "schema_version": 1
+}

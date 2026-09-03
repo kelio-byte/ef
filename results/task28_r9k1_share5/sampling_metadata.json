@@ -1,0 +1,71 @@
+{
+  "augmentation": 20,
+  "augmentation_inferred_from": "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-mini-1001.txt",
+  "checkpoint": {
+    "mtime_ns": 1785470613084893869,
+    "path": "/root/autodl-tmp/edit_flows/checkpoint_step600000.pt",
+    "size_bytes": 162620771
+  },
+  "created_at_utc": "2026-08-04T12:21:30.933134+00:00",
+  "git": {
+    "commit": "98cbcfbc3f4c5a9dad0185fb515d5e7ee7b75c9c",
+    "dirty": true
+  },
+  "input": {
+    "kind": "products_file",
+    "mtime_ns": 1785757005249073415,
+    "path": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-mini-1001.txt",
+    "product_count": 100,
+    "selection_end_product_exclusive": 100,
+    "selection_start_product": 0,
+    "sha256": "6650a97484fbd64e9fa0992050c4a7a6c1221f8007417318e2c3b0395397d27c",
+    "size_bytes": 1861347,
+    "source_product_count": 20020
+  },
+  "layout": "input-product-major, branch-rank-major, run-minor",
+  "model": {
+    "configured_use_origin_mask": false,
+    "effective_use_origin_mask": false
+  },
+  "output_beam_size": 9,
+  "output_line_count": 900,
+  "output_sha256": "62eaf2e0cf4fca7f2d5bb15ab02e1b08f73aa5677c0b9459303205abccef6d95",
+  "product_count": 100,
+  "runtime": {
+    "batch_size": 64,
+    "device": "cuda",
+    "elapsed_seconds": 12.10721552092582,
+    "euler_beam_stats": {
+      "child_candidate_evaluations": 180000,
+      "final_branch_shortfall_outputs": 0,
+      "final_branch_shortfall_samples": 0,
+      "model_forward_parent_rows": 61263,
+      "parent_branch_evaluations": 90000,
+      "shared_model_parent_rows": 28737,
+      "steps": 200
+    },
+    "peak_cuda_allocated_bytes": 1040983040,
+    "peak_cuda_reserved_bytes": 22171090944
+  },
+  "sampler": "euler_beam",
+  "sampling": {
+    "changed_state_bonus": 0.5,
+    "child_policy": "stochastic_noop",
+    "final_branches_per_run": 1,
+    "initial_seed_groups": null,
+    "matmul_precision": "high",
+    "n_branches": 1,
+    "n_children": 2,
+    "n_runs": 9,
+    "n_steps": 100,
+    "output_order": "branch-rank-major, run-minor",
+    "sample_scheduler": "cubic",
+    "score_mode": "full_probability",
+    "seed": 42,
+    "seed_applied_to_sampler": true,
+    "seed_scope": "stable product/run streams",
+    "share_identical_forwards": true,
+    "train_scheduler": "cubic"
+  },
+  "schema_version": 1
+}

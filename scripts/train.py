@@ -30,8 +30,13 @@ def main():
     torch.manual_seed(42)
     np.random.seed(42)
 
+    # The generic trainer predates the retro trainer and uses the historical
+    # three-special-token vocabulary convention.  Keep that convention here,
+    # but pass the complete model vocabulary to the current prepare_batch API.
+    model_vocab_size = cfg["vocab_size"] + 3
+
     model = EditFlowsTransformer(
-        vocab_size=cfg["vocab_size"] + 3,
+        vocab_size=model_vocab_size,
         hidden_dim=cfg["hidden_dim"],
         num_layers=cfg["num_layers"],
         num_heads=cfg["num_heads"],
@@ -86,7 +91,7 @@ def main():
         x_0, x_1_batch = coupling.sample(x_1.to(device))
         batch = prepare_batch(
             x_0, x_1_batch, scheduler, align_fn,
-            vocab_size=cfg["vocab_size"],
+            model_vocab_size=model_vocab_size,
         )
         metrics = train_step(model, batch, scheduler, optimizer)
 

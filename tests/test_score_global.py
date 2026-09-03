@@ -316,3 +316,19 @@ def test_sampling_diagnostics_separates_coverage_runs_and_duplicates():
     assert diagnostics["per_reaction"][0]["target_final_rank"] == 1
     assert diagnostics["per_reaction"][1]["target_final_rank"] is None
     json.dumps(diagnostics)
+
+
+def test_sampling_diagnostics_prints_generic_input_rank_labels(capsys):
+    diagnostics = score_global.compute_sampling_diagnostics(
+        [[[candidate("A"), candidate("B")]]],
+        [candidate("A")],
+        beam_size=2,
+        top_k=2,
+    )
+
+    score_global.print_sampling_diagnostics(diagnostics)
+    output = capsys.readouterr().out
+
+    assert "Input rank 1: target-hit" in output
+    assert "Overlap input rank_1_vs_2:" in output
+    assert "Run 1:" not in output

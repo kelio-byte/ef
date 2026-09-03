@@ -1,0 +1,21 @@
+{
+  "augmentation": 20,
+  "checkpoint": "/root/autodl-tmp/edit_flows/new_checkpoints/spe_m500_checkpoints/checkpoint_step490000.pt",
+  "final_hit_rate_all": 0.4955555555555556,
+  "final_valid_rate_all": 0.8807777777777778,
+  "forced_final_hit_rate": 0.5135882081989867,
+  "forced_final_valid_rate": 0.8764394288346384,
+  "intervention_coverage_among_first_events": 1.0,
+  "mode": "force_correct_completion_first",
+  "n_first_event": 8684,
+  "n_intervention_applied": 8684,
+  "n_intervention_records": 8684,
+  "n_reactions": 1000,
+  "n_samples": 9,
+  "n_steps": 100,
+  "n_trajectories": 9000,
+  "products_file": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/evaluation_v2/dev_unique1000_aug20/src.txt",
+  "scheduler": "cubic",
+  "seed": 123,
+  "targets_file": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/evaluation_v2/dev_unique1000_aug20/tgt.txt"
+}
