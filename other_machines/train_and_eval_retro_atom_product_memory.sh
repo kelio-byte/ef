@@ -27,6 +27,8 @@ CONFIG="${CONFIG:-configs/retro_atom_product_memory_600k.yaml}"
 SAVE_ROOT="${SAVE_ROOT:-checkpoints/retro_atom_product_memory_600k}"
 DATA="${DATA:-datasets/USPTO_50K_PtoR_aug20_#global#}"
 DATA_NAME="${DATA_NAME:-$(basename "$DATA")}"
+MANIFEST="${MANIFEST:-$DATA/evaluation_v2/manifest.json}"
+EVAL_DIR="$DATA/evaluation_v2/dev_unique1000_aug20"
 EVAL_STEPS="${EVAL_STEPS:-450000 490000 500000 550000 600000}"
 EVAL_SEED="${EVAL_SEED:-42}"
 MAX_PRODUCTS="${MAX_PRODUCTS:-20000}"
@@ -72,10 +74,69 @@ for required in \
   "$DATA/val/val_aligned_tgt.txt" \
   "$DATA/val/src-val.txt" \
   "$DATA/val/tgt-val.txt" \
-  "$DATA/evaluation_v2/dev_unique1000_aug20/src.txt" \
-  "$DATA/evaluation_v2/dev_unique1000_aug20/tgt.txt"; do
+  "$MANIFEST"; do
   require_hydrated_file "$required"
 done
+
+# The dev_unique1000 files are a derived evaluation view, not training data.
+# A fresh clone may contain the manifest and validation split but not this
+# generated directory, so create it deterministically from the manifest and
+# verify any existing copy byte-for-byte before continuing.
+"$PYTHON_BIN" - "$DATA" "$MANIFEST" "$EVAL_DIR" <<'PY'
+from pathlib import Path
+import hashlib
+import json
+import sys
+
+data = Path(sys.argv[1])
+manifest = json.loads(Path(sys.argv[2]).read_text())
+output_dir = Path(sys.argv[3])
+augmentation = int(manifest.get("augmentation", 0))
+split = manifest.get("splits", {}).get("dev_unique1000_aug20", {})
+indices = split.get("original_reaction_indices")
+if augmentation != 20 or not isinstance(indices, list) or len(indices) != 1000:
+    raise SystemExit(
+        "Unexpected dev_unique1000_aug20 manifest: "
+        f"augmentation={augmentation}, indices={len(indices) if isinstance(indices, list) else None}"
+    )
+if len(set(indices)) != len(indices) or min(indices) < 0:
+    raise SystemExit("Manifest reaction indices must be unique and non-negative")
+
+output_dir.mkdir(parents=True, exist_ok=True)
+for side in ("src", "tgt"):
+    source_path = data / "val" / f"{side}-val.txt"
+    rows = source_path.read_text().splitlines()
+    if len(rows) % augmentation:
+        raise SystemExit(f"{source_path} has incomplete augmentation blocks")
+    reaction_count = len(rows) // augmentation
+    if max(indices) >= reaction_count:
+        raise SystemExit(
+            f"Manifest index {max(indices)} is outside {source_path} "
+            f"({reaction_count} reactions)"
+        )
+    selected = [
+        row
+        for index in indices
+        for row in rows[index * augmentation:(index + 1) * augmentation]
+    ]
+    if len(selected) != 20000:
+        raise SystemExit(f"Expected 20000 {side} rows, got {len(selected)}")
+    payload = ("\n".join(selected) + "\n").encode()
+    destination = output_dir / f"{side}.txt"
+    if destination.exists():
+        if destination.read_bytes() != payload:
+            raise SystemExit(
+                f"Existing evaluation file does not match manifest: {destination}"
+            )
+        status = "verified"
+    else:
+        destination.write_bytes(payload)
+        status = "created"
+    print(
+        f"{status}: {destination} | rows={len(selected)} | "
+        f"sha256={hashlib.sha256(payload).hexdigest()}"
+    )
+PY
 
 case "$MAX_PRODUCTS" in
   ''|*[!0-9]*)
@@ -88,8 +149,8 @@ if [ "$MAX_PRODUCTS" -le 0 ] || [ $((MAX_PRODUCTS % 20)) -ne 0 ]; then
   exit 1
 fi
 
-SOURCE_ROWS="$(wc -l < "$DATA/evaluation_v2/dev_unique1000_aug20/src.txt")"
-TARGET_ROWS="$(wc -l < "$DATA/evaluation_v2/dev_unique1000_aug20/tgt.txt")"
+SOURCE_ROWS="$(wc -l < "$EVAL_DIR/src.txt")"
+TARGET_ROWS="$(wc -l < "$EVAL_DIR/tgt.txt")"
 if [ "$SOURCE_ROWS" -ne 20000 ] || [ "$TARGET_ROWS" -ne 20000 ] || [ "$MAX_PRODUCTS" -gt "$SOURCE_ROWS" ]; then
   echo "Invalid dev_unique1000_aug20 layout: src=$SOURCE_ROWS, tgt=$TARGET_ROWS, requested=$MAX_PRODUCTS" >&2
   exit 1
@@ -270,8 +331,8 @@ for checkpoint in "${CHECKPOINTS[@]}"; do
   echo "Evaluating $checkpoint"
   "$PYTHON_BIN" scripts/eval.py \
     --checkpoint "$checkpoint" \
-    --products_file "$DATA/evaluation_v2/dev_unique1000_aug20/src.txt" \
-    --targets "$DATA/evaluation_v2/dev_unique1000_aug20/tgt.txt" \
+    --products_file "$EVAL_DIR/src.txt" \
+    --targets "$EVAL_DIR/tgt.txt" \
     --data_dir "$DATA" \
     --vocab_file "$DATA/example.vocab.src" \
     --output_dir "$output_dir" \
