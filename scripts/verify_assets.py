@@ -1,4 +1,7 @@
-"""Verify the frozen data/checkpoint bytes without importing ML dependencies."""
+"""用途：校验仓库冻结数据和 checkpoint 的完整性。
+输入：assets.json 中列出的文件及 SHA-256 校验值。
+输出：校验结果；文件缺失或内容不符时报告错误。
+"""
 
 import hashlib
 import json

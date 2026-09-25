@@ -1,4 +1,7 @@
-"""Frozen global-SMILES ranking: 20 augmentations x 9 candidates per reaction."""
+"""用途：按正式规则聚合候选并计算逆合成 Top-k 指标。
+输入：候选预测文件、目标文件及对应采样元数据。
+输出：各反应排名和汇总评测指标 JSON。
+"""
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor

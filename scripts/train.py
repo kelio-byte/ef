@@ -1,4 +1,7 @@
-"""Training script for Edit Flows on retrosynthesis data."""
+"""用途：按配置训练编辑流模型，并支持从 checkpoint 继续训练。
+输入：训练配置、预处理数据及可选的恢复训练 checkpoint。
+输出：模型 checkpoint、训练日志、监控记录和训练摘要。
+"""
 
 import argparse
 from contextlib import nullcontext

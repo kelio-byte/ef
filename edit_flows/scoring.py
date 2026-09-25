@@ -1,3 +1,8 @@
+"""用途：规范化 SMILES、合并重复候选并计算目标排名。
+输入：候选 SMILES 和目标 SMILES。
+输出：候选排名及有效性统计。
+"""
+
 from functools import lru_cache
 from rdkit import Chem, RDLogger
 from edit_flows.data.global_smiles import inverse_global_align

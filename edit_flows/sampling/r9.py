@@ -1,4 +1,7 @@
-"""Frozen K1M2 transition; independent R runs are expanded by the caller."""
+"""用途：执行正式 R9K1M2 采样中的单步 K1M2 分支转移。
+输入：模型、当前状态、产品记忆、时间步及随机种子。
+输出：下一步候选状态及其采样信息。
+"""
 
 from dataclasses import dataclass
 import math

@@ -1,3 +1,8 @@
+"""用途：计算编辑流训练使用的 Bregman 损失。
+输入：模型速率预测、对齐状态掩码和调度系数。
+输出：可反向传播的训练损失。
+"""
+
 import torch
 from torch import Tensor
 

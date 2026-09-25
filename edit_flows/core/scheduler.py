@@ -1,3 +1,8 @@
+"""用途：定义训练与采样使用的时间桥接系数调度器。
+输入：连续时间张量 t。
+输出：桥接系数 κ(t) 及其导数。
+"""
+
 from abc import ABC, abstractmethod
 
 from torch import Tensor

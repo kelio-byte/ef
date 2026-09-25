@@ -1,25 +1,7 @@
 #!/usr/bin/env python
-"""Build a SPE-tokenized shadow copy of the USPTO retro dataset.
-
-The input files are already atom-tokenized by the historical pipeline.  This
-script first removes those display separators, reconstructs each SMILES, and
-then applies the pre-trained SmilesPE tokenizer.  It never reads an aligned
-file and refuses to write into the source dataset.
-
-The output contains only the six unaligned split files and a training-only
-``example.vocab.src``.  Levenshtein alignments are intentionally produced by
-the existing ``scripts/precompute_alignments.py`` command after this script.
-
-Examples
---------
-Sanity check the first 50 pairs of each split into a temporary directory::
-
-    python scripts/preprocess_spe.py --source-dir /path/to/atom_global \
-        --max-lines 50 --output-dir /tmp/efretro_spe_sanity
-
-Build the full shadow dataset::
-
-    python scripts/preprocess_spe.py --source-dir /path/to/atom_global
+"""用途：将原子级 SMILES 数据转换为 SPE token 数据。
+输入：源数据分割文件、SPE 词对表和合并次数。
+输出：转换后的各分割文件、训练词表及预处理元数据。
 """
 
 from __future__ import annotations

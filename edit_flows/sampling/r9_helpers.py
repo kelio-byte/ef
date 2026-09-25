@@ -1,3 +1,8 @@
+"""用途：实现 R9K1M2 批量采样的随机数、动作和子分支辅助逻辑。
+输入：模型 logits、编辑状态、分支信息和随机种子。
+输出：采样动作、子候选及对应的概率信息。
+"""
+
 from __future__ import annotations
 from typing import List, Tuple, Optional, TYPE_CHECKING
 import math

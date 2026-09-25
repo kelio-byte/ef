@@ -1,13 +1,7 @@
 #!/usr/bin/env python
-"""Pre-compute Levenshtein DP alignments for retro training data.
-
-Works directly on string tokens — no vocab dependency.
-Outputs two text files per split (*_aligned_src.txt, *_aligned_tgt.txt)
-with <GAP> as the gap marker.
-
-Usage:
-  PYTHONPATH=. python scripts/precompute_alignments.py \
-      --data_dir data/uspto50k_m500 --splits train val
+"""用途：为训练或验证数据预计算 Levenshtein token 对齐。
+输入：数据目录、分割名称及成对的源序列和目标序列文件。
+输出：每个分割对应的对齐源文件和对齐目标文件。
 """
 
 import argparse

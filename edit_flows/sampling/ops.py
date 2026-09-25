@@ -1,3 +1,8 @@
+"""用途：计算合法编辑位置与 token 分布，并执行插入、删除和替换。
+输入：状态 token、模型 logits 及编辑动作。
+输出：合法概率分布和编辑后的状态序列。
+"""
+
 import torch
 import torch.nn.functional as F
 from torch import Tensor

@@ -1,3 +1,8 @@
+"""用途：读取反应数据与词表，并整理训练批次。
+输入：数据目录、分割名称及 token 文件。
+输出：数据集、词表映射和补齐后的张量批次。
+"""
+
 from itertools import zip_longest
 from typing import Dict, List, Tuple
 

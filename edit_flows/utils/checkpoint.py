@@ -1,3 +1,8 @@
+"""用途：将训练状态安全地写入 checkpoint 文件。
+输入：待保存的状态对象和目标文件路径。
+输出：原子替换完成的 checkpoint 文件。
+"""
+
 import os
 import tempfile
 from pathlib import Path

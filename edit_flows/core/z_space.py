@@ -1,3 +1,8 @@
+"""用途：处理含 GAP 的对齐状态及其编辑流掩码。
+输入：对齐后的 token 状态和调度时间。
+输出：去 GAP 序列、掩码或按条件采样的中间状态。
+"""
+
 import torch
 from torch import Tensor
 

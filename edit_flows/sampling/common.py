@@ -1,3 +1,8 @@
+"""用途：提供编辑采样共用的事件概率与步长计算。
+输入：模型速率、调度器和当前采样时间。
+输出：事件概率或自适应采样步长。
+"""
+
 from __future__ import annotations
 import torch
 from torch import Tensor

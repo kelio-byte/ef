@@ -1,3 +1,8 @@
+"""用途：将 global 编码的 SMILES 顺序还原为普通 SMILES。
+输入：global SMILES 字符串。
+输出：还原后的 SMILES 字符串。
+"""
+
 import re
 
 dot_bracket_regex = re.compile("(\\(|\\)|\\.|[^\\(\\)\\.]+)")

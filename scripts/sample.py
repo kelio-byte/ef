@@ -1,4 +1,7 @@
-"""Generate predictions using the frozen formal R9K1M2 protocol."""
+"""用途：使用正式 R9K1M2 协议为产品生成逆合成候选。
+输入：产品 token 文件、checkpoint、词表和采样参数。
+输出：候选预测文件及采样元数据。
+"""
 
 import argparse
 from edit_flows.inference import DATA, CHECKPOINT, predict

@@ -1,4 +1,7 @@
-"""Sample and score dev1000 or the full test using explicit frozen presets."""
+"""用途：按正式采样协议推理并评测 dev1000 或完整 test。
+输入：数据分割、checkpoint 和预测输出目录。
+输出：候选预测、采样元数据及 Top-k 评测指标。
+"""
 
 import argparse
 from pathlib import Path

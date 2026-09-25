@@ -1,4 +1,7 @@
-"""Train from scratch, then evaluate a checkpoint on the entire test split."""
+"""用途：按配置从零训练，并用指定训练步数的 checkpoint 测试。
+输入：训练配置、设备及可选的测试范围参数。
+输出：训练文件、全量 test 预测、元数据和评测指标。
+"""
 
 import argparse
 from datetime import datetime

@@ -1,3 +1,8 @@
+"""用途：将源序列与目标序列对齐，供编辑流训练使用。
+输入：源、目标 token 张量及对齐模式。
+输出：等长的对齐序列张量。
+"""
+
 from typing import List, Tuple
 import torch
 from torch import Tensor

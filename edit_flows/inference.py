@@ -1,4 +1,7 @@
-"""Checkpoint loading and the frozen product-major, run-major sampling layout."""
+"""用途：加载模型 checkpoint，并按正式 R9K1M2 协议生成候选。
+输入：产品 token 序列、checkpoint、词表和采样参数。
+输出：候选预测文件及采样元数据。
+"""
 
 from pathlib import Path
 import hashlib

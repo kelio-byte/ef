@@ -1,3 +1,8 @@
+"""用途：定义编辑流 Transformer 及 product memory 编码器。
+输入：状态 token、时间步，以及可选的产品 token 序列。
+输出：各位置的编辑操作与 token 预测分布。
+"""
+
 import math
 from collections.abc import Sequence
 import torch
