@@ -4,7 +4,7 @@
 
 ## 安装
 
-已验证环境：Linux、Python 3.10、PyTorch 2.7.1+cu126、RTX 3090。核心依赖固定在 `pyproject.toml`。克隆前请先安装 Git 与 Git LFS。
+已验证环境：Linux、Python 3.10、PyTorch 2.7.1+cu126、RTX 3090。依赖版本统一定义在 `pyproject.toml`；`requirements.txt` 是含预处理依赖的便捷安装入口。克隆前请先安装 Git 与 Git LFS。
 
 ```bash
 git lfs install
@@ -14,7 +14,7 @@ git lfs pull
 conda create -n efretro python=3.10 -y
 conda activate efretro
 python -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu126
-python -m pip install -e '.[preprocess]'
+python -m pip install -r requirements.txt
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 python scripts/verify_assets.py
 ```
