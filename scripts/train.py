@@ -37,7 +37,7 @@ from edit_flows.core.alignment import opt_align_xs_to_zs, identity_align_xs_to_z
 
 @dataclass(frozen=True)
 class DistributedContext:
-    """Runtime topology supplied by ``torchrun`` (or the single-process default)."""
+    """作用：记录当前进程的分布式位置。输入：rank、设备和通信配置。输出：不可变的运行上下文。"""
 
     rank: int
     world_size: int
@@ -47,14 +47,17 @@ class DistributedContext:
 
     @property
     def is_distributed(self) -> bool:
+        """作用：判断是否多进程运行。输入：无。输出：布尔值。"""
         return self.world_size > 1
 
     @property
     def is_main_process(self) -> bool:
+        """作用：判断当前进程是否负责主进程任务。输入：无。输出：布尔值。"""
         return self.rank == 0
 
 
 def _env_int(name: str, default: int) -> int:
+    """作用：读取整数环境变量。输入：变量名和默认值。输出：解析后的整数；格式错误时抛出异常。"""
     value = os.environ.get(name)
     if value is None:
         return default
@@ -65,13 +68,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 def initialize_distributed(device_arg: str) -> DistributedContext:
-    """Initialize one-process-per-GPU DDP when launched through ``torchrun``.
-
-    A normal ``python scripts/train.py ...`` invocation retains the
-    existing single-process behavior.  ``torchrun`` supplies ``RANK``,
-    ``WORLD_SIZE`` and ``LOCAL_RANK``; when ``WORLD_SIZE > 1`` we use NCCL for
-    CUDA and Gloo for a CPU-only smoke test.
-    """
+    """作用：初始化单进程或 DDP 训练环境。输入：设备参数及 torchrun 环境变量。输出：进程 rank、设备和后端信息。"""
     world_size = _env_int("WORLD_SIZE", 1)
     rank = _env_int("RANK", 0)
     local_rank = _env_int("LOCAL_RANK", 0)
@@ -122,17 +119,19 @@ def initialize_distributed(device_arg: str) -> DistributedContext:
 
 
 def destroy_distributed(context: DistributedContext) -> None:
+    """作用：释放已初始化的分布式进程组。输入：分布式上下文。输出：关闭通信资源。"""
     if context.is_distributed and dist.is_available() and dist.is_initialized():
         dist.destroy_process_group()
 
 
 def distributed_barrier(context: DistributedContext) -> None:
+    """作用：等待所有训练进程到达同步点。输入：分布式上下文。输出：所有 rank 同步后返回。"""
     if context.is_distributed:
         dist.barrier()
 
 
 def broadcast_from_main(value, context: DistributedContext):
-    """Broadcast a small Python object from rank 0 without affecting single GPU."""
+    """作用：由 rank 0 广播 Python 对象。输入：主进程值和分布式上下文。输出：各 rank 收到的同一对象。"""
     if not context.is_distributed:
         return value
     values = [value if context.is_main_process else None]
@@ -141,26 +140,23 @@ def broadcast_from_main(value, context: DistributedContext):
 
 
 def rank_zero_print(context: DistributedContext, *args, **kwargs) -> None:
+    """作用：仅由主进程打印信息。输入：分布式上下文及 print 参数。输出：终端文本。"""
     if context.is_main_process:
         print(*args, **kwargs)
 
 
 class Tee:
-    """Mirror training output to the terminal and a timestamped log file.
-
-    ``print`` commonly calls ``write`` twice (once for the message and once
-    for the newline), so the timestamp is added at logical line boundaries
-    instead of once per ``write`` call.  The minute-level format is compact
-    and matches the experiment notes: ``[MM/DD/HH/MM]``.
-    """
+    """作用：将训练输出同时写入终端和带时间戳的日志。输入：日志文件路径和文本流。输出：同步的终端及日志内容。"""
 
     def __init__(self, filepath: str):
+        """作用：打开日志并保存原始输出流。输入：日志文件路径。输出：Tee 实例。"""
         self.file = open(filepath, "a", buffering=1)
         self.stdout = sys.stdout
         self.stderr = sys.stderr
         self._line_start = True
 
     def write(self, text: str):
+        """作用：为新行添加时间戳并写出文本。输入：文本片段。输出：写入终端和日志文件。"""
         if not text:
             return
         chunks = []
@@ -176,26 +172,30 @@ class Tee:
         self.stdout.write(rendered)
 
     def flush(self):
+        """作用：刷新日志和终端缓冲区。输入：无。输出：已提交的文本。"""
         self.file.flush()
         self.stdout.flush()
 
     def __enter__(self):
+        """作用：接管标准输出和标准错误。输入：无。输出：当前 Tee 实例。"""
         sys.stdout = self
         sys.stderr = self
         return self
 
     def __exit__(self, *args):
+        """作用：恢复原输出流并关闭日志。输入：上下文退出信息。输出：释放文件资源。"""
         sys.stdout = self.stdout
         sys.stderr = self.stderr
         self.file.close()
 
 
 def extract_dataset_name(data_dir: str) -> str:
+    """作用：从数据目录提取数据集名称。输入：数据目录路径。输出：末级目录名。"""
     return os.path.basename(data_dir.rstrip("/"))
 
 
 def seed_everything(seed: int, *, cuda_device: torch.device | None = None) -> None:
-    """Seed all local RNGs without touching peer CUDA devices in DDP."""
+    """作用：设置 Python、NumPy、PyTorch 随机种子。输入：种子及可选本地 CUDA 设备。输出：原地初始化随机状态。"""
     random.seed(seed)
     np.random.seed(seed)
     torch.random.default_generator.manual_seed(seed)
@@ -206,61 +206,43 @@ def seed_everything(seed: int, *, cuda_device: torch.device | None = None) -> No
 
 
 def seed_worker(worker_id: int) -> None:
-    """Seed NumPy/Python in DataLoader workers from PyTorch's worker seed."""
+    """作用：初始化 DataLoader worker 的 Python 和 NumPy 随机种子。输入：worker 编号。输出：原地设置 worker 随机状态。"""
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
 
 class EpochRandomSampler(Sampler[int]):
-    """Deterministic per-epoch permutation with a resumable batch offset.
-
-    ``DataLoader(shuffle=True)`` consumes a whole new permutation when its
-    iterator is created.  Restoring only its generator therefore cannot
-    resume from the middle of an epoch: a checkpoint would silently skip the
-    remainder of the old permutation.  This sampler derives each permutation
-    from ``seed + epoch`` and lets the training loop reconstruct the exact
-    starting offset from ``completed_steps``.  Prefetching workers can request
-    ahead, but a restart still begins at the last *consumed* batch.
-    """
+    """作用：生成可复现且支持断点续训的单进程样本顺序。输入：数据集、随机种子和恢复位置。输出：当前 epoch 的样本索引迭代器。"""
 
     def __init__(self, data_source, seed: int):
+        """作用：初始化 epoch 随机采样器。输入：数据集和种子。输出：采样器实例。"""
         self.data_source = data_source
         self.seed = int(seed)
         self.epoch = 0
         self.start_index = 0
 
     def set_position(self, epoch: int, start_index: int = 0) -> None:
+        """作用：设置恢复位置。输入：epoch 和已消费样本偏移。输出：更新采样器状态。"""
         if epoch < 0 or start_index < 0:
             raise ValueError("epoch and start_index must be non-negative")
         self.epoch = int(epoch)
         self.start_index = int(start_index)
 
     def __iter__(self):
+        """作用：生成当前 epoch 的确定性随机顺序。输入：无。输出：从恢复偏移开始的索引迭代器。"""
         generator = torch.Generator()
         generator.manual_seed(self.seed + self.epoch)
         indices = torch.randperm(len(self.data_source), generator=generator).tolist()
         return iter(indices[self.start_index :])
 
     def __len__(self) -> int:
+        """作用：计算当前剩余样本数。输入：无。输出：样本数量。"""
         return max(0, len(self.data_source) - self.start_index)
 
 
 class DistributedEpochRandomSampler(Sampler[int]):
-    """Rank-sharded deterministic sampler with an exact local resume offset.
-
-    ``DistributedSampler`` normally pads validation shards and does not expose
-    a mid-epoch offset.  Padding would bias validation metrics, and dropping a
-    partial epoch on resume would break the existing checkpoint guarantee.
-    This sampler instead takes a shared ``seed + epoch`` permutation, assigns
-    every ``world_size``-th item to each rank, and slices only that rank's
-    already-sharded sequence at ``start_index``.
-
-    For training, ``drop_last=True`` first removes the small tail needed to
-    make shards equally sized.  ``DataLoader(drop_last=True)`` then removes a
-    final incomplete *per-rank* batch, which is exactly equivalent to dropping
-    the incomplete global batch.
-    """
+    """作用：将确定性样本顺序分片给各 rank，并支持精确恢复。输入：数据集、rank 拓扑和采样配置。输出：当前 rank 的索引迭代器。"""
 
     def __init__(
         self,
@@ -272,6 +254,7 @@ class DistributedEpochRandomSampler(Sampler[int]):
         shuffle: bool,
         drop_last: bool,
     ):
+        """作用：初始化分布式采样器。输入：数据集、rank 数/编号、种子和分片选项。输出：采样器实例。"""
         if num_replicas <= 0:
             raise ValueError("num_replicas must be positive")
         if not 0 <= rank < num_replicas:
@@ -286,18 +269,21 @@ class DistributedEpochRandomSampler(Sampler[int]):
         self.start_index = 0
 
     def set_position(self, epoch: int, start_index: int = 0) -> None:
+        """作用：恢复当前 rank 的采样位置。输入：epoch 和本地偏移。输出：更新采样器状态。"""
         if epoch < 0 or start_index < 0:
             raise ValueError("epoch and start_index must be non-negative")
         self.epoch = int(epoch)
         self.start_index = int(start_index)
 
     def _local_sample_count(self) -> int:
+        """作用：计算当前 rank 的分片样本数。输入：无。输出：本地样本数量。"""
         total = len(self.data_source)
         if self.drop_last:
             return total // self.num_replicas
         return max(0, (total - self.rank + self.num_replicas - 1) // self.num_replicas)
 
     def __iter__(self):
+        """作用：生成当前 rank 的样本索引。输入：无。输出：按 epoch 种子打乱并分片的索引迭代器。"""
         total = len(self.data_source)
         if self.shuffle:
             generator = torch.Generator()
@@ -311,6 +297,7 @@ class DistributedEpochRandomSampler(Sampler[int]):
         return iter(rank_indices[self.start_index :])
 
     def __len__(self) -> int:
+        """作用：计算当前 rank 尚未消费的样本数。输入：无。输出：剩余样本数量。"""
         return max(0, self._local_sample_count() - self.start_index)
 
 
@@ -328,7 +315,7 @@ def _build_split_loader(
     distributed: DistributedContext | None = None,
     pin_memory: bool | None = None,
 ):
-    """Build a loader while failing fast on incomplete aligned/raw pairs."""
+    """作用：构建指定分割的数据集和 DataLoader。输入：数据、词表、批大小及采样/分布式配置。输出：数据集、加载器、对齐函数、来源类型和采样器。"""
     split_dir = os.path.join(data_dir, split)
     aligned_src = os.path.join(split_dir, f"{split}_aligned_src.txt")
     aligned_tgt = os.path.join(split_dir, f"{split}_aligned_tgt.txt")
@@ -393,6 +380,7 @@ def capture_rng_state(
     *,
     cuda_device: torch.device | None = None,
 ) -> dict:
+    """作用：收集可恢复的随机状态。输入：可选 DataLoader 生成器和 CUDA 设备。输出：Python、NumPy、PyTorch 及 loader RNG 状态字典。"""
     state = {
         "python": random.getstate(),
         "numpy": np.random.get_state(),
@@ -408,12 +396,7 @@ def capture_rng_state(
 
 
 def _as_cpu_rng_state(value: torch.Tensor) -> torch.Tensor:
-    """Normalize a serialized RNG state for PyTorch restore APIs.
-
-    Checkpoints are loaded with ``map_location=device``.  When ``device`` is
-    CUDA, that remaps the CPU ByteTensors returned by the RNG APIs as well.
-    Both CPU and CUDA RNG restore functions expect their state tensor on CPU.
-    """
+    """作用：将保存的随机状态转换为 PyTorch 恢复接口所需格式。输入：RNG 状态张量。输出：CPU 上的 uint8 张量。"""
     if not isinstance(value, torch.Tensor):
         raise TypeError(f"RNG state must be a tensor, got {type(value)!r}")
     return value.detach().to(device="cpu", dtype=torch.uint8)
@@ -425,6 +408,7 @@ def restore_rng_state(
     *,
     cuda_device: torch.device | None = None,
 ) -> None:
+    """作用：恢复 Python、NumPy、PyTorch 和 DataLoader 随机状态。输入：状态字典、生成器及可选 CUDA 设备。输出：原地恢复 RNG。"""
     if not state:
         return
     if "python" in state:
@@ -465,6 +449,7 @@ def restore_rng_state(
 
 
 def log_metrics(writer, prefix: str, metrics: dict, step: int) -> None:
+    """作用：记录训练或验证标量。输入：TensorBoard writer、名称前缀、指标和步数。输出：写入事件文件。"""
     if writer is None:
         return
     for key in ("loss", "u_tot", "u_ins", "u_del", "u_sub"):
@@ -496,7 +481,7 @@ def log_metrics(writer, prefix: str, metrics: dict, step: int) -> None:
 
 
 def reduce_mean_metrics(metrics: dict, context: DistributedContext) -> dict:
-    """Average scalar train diagnostics across DDP ranks for rank-0 logging."""
+    """作用：跨 DDP rank 求指标均值。输入：本地指标字典和分布式上下文。输出：平均指标字典。"""
     if not context.is_distributed:
         return metrics
     keys = tuple(metrics)
@@ -513,7 +498,7 @@ def reduce_mean_metrics(metrics: dict, context: DistributedContext) -> dict:
 def gather_rng_states(
     train_generator: torch.Generator | None, context: DistributedContext
 ) -> list[dict]:
-    """Collect rank-local RNG states only at a checkpoint boundary."""
+    """作用：汇总各 rank 的随机状态用于 checkpoint。输入：训练生成器和分布式上下文。输出：每个 rank 的状态列表。"""
     local_state = capture_rng_state(train_generator, cuda_device=context.device)
     if not context.is_distributed:
         return [local_state]
@@ -523,7 +508,7 @@ def gather_rng_states(
 
 
 def gradient_diagnostics(model) -> dict:
-    """Inspect gradient and parameter health at monitoring boundaries."""
+    """作用：统计梯度和参数的有限性、范数及最大绝对值。输入：模型。输出：数值诊断字典。"""
     grad_sq_sum = 0.0
     grad_max_abs = 0.0
     nonfinite_grad_values = 0
@@ -553,6 +538,7 @@ def gradient_diagnostics(model) -> dict:
 
 
 def _metrics_are_finite(metrics: dict) -> bool:
+    """作用：检查指标值是否均为有限数。输入：标量指标字典。输出：布尔结果。"""
     return all(
         isinstance(value, (int, float)) and np.isfinite(value)
         for value in metrics.values()
@@ -562,7 +548,7 @@ def _metrics_are_finite(metrics: dict) -> bool:
 def validation_due(
     completed_steps: int, validation_start_step: int, validation_interval: int
 ) -> bool:
-    """Return whether validation should run after this optimizer update."""
+    """作用：判断当前训练步是否触发验证。输入：完成步数、起始步数和间隔。输出：布尔结果。"""
     if validation_interval <= 0 or validation_start_step < 0:
         return False
     return (
@@ -582,7 +568,7 @@ def evaluate_model(
     cfg: dict,
     distributed: DistributedContext | None = None,
 ) -> dict:
-    """Evaluate the same objective used by train_step on a validation prefix."""
+    """作用：在验证数据上计算训练目标和速率指标。输入：模型、数据加载器、调度及设备配置。输出：按样本加权的指标字典。"""
     was_training = model.training
     model.eval()
     metric_names = (
@@ -648,6 +634,7 @@ def evaluate_model(
 
 
 def prune_checkpoints(save_dir: str, keep: int) -> None:
+    """作用：删除超出保留数量的旧 checkpoint。输入：保存目录和保留数。输出：目录中只保留最新文件。"""
     if keep < 1:
         raise ValueError("keep_checkpoints must be >= 1")
     ckpts = sorted(
@@ -679,6 +666,7 @@ def save_checkpoint(
     rng_state_by_rank: list[dict] | None = None,
     training_topology: dict | None = None,
 ) -> str:
+    """作用：保存模型、优化器、调度器和续训状态。输入：训练状态及 checkpoint 选项。输出：checkpoint 文件路径。"""
     if keep < 1:
         raise ValueError("keep_checkpoints must be >= 1")
     ckpt_name = filename or f"checkpoint_step{completed_steps}.pt"
@@ -714,7 +702,7 @@ def save_checkpoint(
 
 
 def load_model_state(model, state_dict: dict) -> None:
-    """Load historical single-GPU and accidental ``module.``-prefixed states."""
+    """作用：兼容加载带 DDP 前缀或普通模型权重。输入：模型和状态字典。输出：原地载入模型参数。"""
     if state_dict and all((key.startswith("module.") for key in state_dict)):
         state_dict = {
             key.removeprefix("module."): value for (key, value) in state_dict.items()
@@ -723,6 +711,7 @@ def load_model_state(model, state_dict: dict) -> None:
 
 
 def run_training(args, context: DistributedContext) -> None:
+    """作用：执行完整训练或从 checkpoint 续训。输入：命令行配置和分布式上下文。输出：checkpoint、日志、monitoring 与训练摘要文件。"""
     with open(args.config) as f:
         config = yaml.safe_load(f)
     cfg = config["retro"]
@@ -1101,7 +1090,7 @@ def run_training(args, context: DistributedContext) -> None:
             )
 
         def checkpoint_now(completed_steps: int, *, filename: str | None = None) -> str:
-            """Synchronously save one portable checkpoint from rank 0."""
+            """作用：由主进程同步保存可移植 checkpoint。输入：完成步数和可选文件名。输出：checkpoint 路径。"""
             rng_states = gather_rng_states(train_generator, context)
             checkpoint_path = None
             if context.is_main_process:
@@ -1358,6 +1347,7 @@ def run_training(args, context: DistributedContext) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """作用：定义并解析训练命令行参数。输入：命令行配置路径、设备和 checkpoint 选项。输出：参数对象。"""
     parser = argparse.ArgumentParser(description="Train Edit Flows for retrosynthesis")
     parser.add_argument("--config", type=str, default="configs/train.yaml")
     parser.add_argument(
@@ -1388,6 +1378,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """作用：初始化分布式运行环境并启动训练。输入：命令行参数。输出：完成训练后释放通信资源。"""
     args = parse_args()
     context = initialize_distributed(args.device)
     try:

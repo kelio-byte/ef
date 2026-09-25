@@ -12,6 +12,7 @@ RDLogger.DisableLog("rdApp.*")
 
 @lru_cache(maxsize=8192)
 def canonicalize_smiles_clear_map(smiles, return_max_frag=True):
+    """作用：解析并规范化 SMILES，同时清除原子映射。输入：global SMILES 和是否返回最大组分。输出：规范 SMILES；无法解析时为空字符串。"""
     smiles = inverse_global_align(smiles)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     if mol is not None:
@@ -54,7 +55,7 @@ def canonicalize_smiles_clear_map(smiles, return_max_frag=True):
 
 
 def _deduplicate_valid(candidates):
-    """Remove invalid and repeated canonical candidates, preserving order."""
+    """作用：按原顺序去除无效或重复候选。输入：规范化候选列表。输出：去重后的有效列表。"""
     deduplicated = []
     seen = set()
     for candidate in candidates:
@@ -66,6 +67,7 @@ def _deduplicate_valid(candidates):
 
 
 def compute_rank(prediction, alpha=1.0, beam_size=None):
+    """作用：聚合增强视图中的候选排名。输入：各视图预测、alpha 和 beam 大小。输出：候选得分字典及各名次无效率。"""
     if not prediction or not prediction[0]:
         raise ValueError("prediction must contain at least one candidate")
     if beam_size is None:

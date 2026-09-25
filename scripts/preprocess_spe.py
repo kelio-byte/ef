@@ -28,6 +28,7 @@ _WORKER_PAIR_COUNT = 0
 
 
 def _sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    """作用：分块计算文件校验和。输入：文件路径和读取块大小。输出：SHA-256 字符串。"""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(chunk_size), b""):
@@ -36,7 +37,7 @@ def _sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
 
 
 def restore_smiles(tokenized_line: str) -> str:
-    """Undo the historical whitespace-only token display format."""
+    """作用：还原带空格展示的 SMILES。输入：tokenized 文件行。输出：移除分隔空格后的 SMILES。"""
     return "".join(tokenized_line.strip().split())
 
 
@@ -46,7 +47,7 @@ def _paired_lines(
     *,
     max_lines: int | None,
 ) -> Iterator[tuple[int, str, str]]:
-    """Yield paired raw lines and fail on a length mismatch."""
+    """作用：按行读取成对文件并检查长度。输入：源/目标路径和可选行数上限。输出：行号及配对文本迭代器。"""
     with src_path.open() as src_handle, tgt_path.open() as tgt_handle:
         line_no = 0
         while True:
@@ -66,6 +67,7 @@ def _paired_lines(
 
 
 def _load_tokenizer(codes_path: Path, *, merges: int = -1):
+    """作用：载入 SmilesPE 分词器。输入：SPE 规则文件和合并次数。输出：配置好的 tokenizer。"""
     try:
         from SmilesPE.tokenizer import SPE_Tokenizer
     except ImportError as exc:  # pragma: no cover - environment dependent
@@ -82,7 +84,7 @@ def _load_tokenizer(codes_path: Path, *, merges: int = -1):
 
 
 def tokenize_smiles(tokenizer, smiles: str) -> list[str]:
-    """Tokenize one complete SMILES with deterministic standard SPE."""
+    """作用：确定性地切分一条 SMILES 并检查可逆性。输入：分词器和完整 SMILES。输出：SPE token 列表。"""
     tokens = tokenizer.tokenize(smiles, dropout=0).split()
     restored = "".join(tokens)
     if restored != smiles:
@@ -97,7 +99,7 @@ def _tokenize_pair(
     pair: tuple[int, str, str],
     tokenizer,
 ) -> tuple[list[str], list[str]]:
-    """Tokenize one source/target pair and retain the source line number."""
+    """作用：重建并切分一对反应 SMILES。输入：行号及源/目标文本行、分词器。输出：源和目标 SPE token 列表。"""
     line_no, src_line, tgt_line = pair
     src_smiles = restore_smiles(src_line)
     tgt_smiles = restore_smiles(tgt_line)
@@ -115,7 +117,7 @@ def _init_tokenizer_worker(
     merges: int,
     cache_reset_interval: int,
 ) -> None:
-    """Create one deterministic SPE tokenizer per multiprocessing worker."""
+    """作用：初始化一个并行 worker 的分词状态。输入：规则文件、合并次数和缓存清理间隔。输出：设置进程内 tokenizer。"""
     global _WORKER_TOKENIZER
     global _WORKER_CACHE_RESET_INTERVAL
     global _WORKER_PAIR_COUNT
@@ -127,7 +129,7 @@ def _init_tokenizer_worker(
 def _tokenize_pair_worker(
     pair: tuple[int, str, str],
 ) -> tuple[list[str], list[str]]:
-    """Worker entry point; Pool.imap preserves the input/output order."""
+    """作用：在 worker 中切分一对反应。输入：带行号的源/目标文本。输出：源和目标 token 列表。"""
     global _WORKER_PAIR_COUNT
     if _WORKER_TOKENIZER is None:  # pragma: no cover - defensive guard
         raise RuntimeError("SPE tokenizer worker was not initialized")
@@ -153,6 +155,7 @@ def _tokenize_split(
     max_lines: int | None,
     cache_reset_interval: int,
 ) -> dict:
+    """作用：处理一个数据分割并保存 SPE 文件。输入：源/输出目录、分割名和 tokenizer 配置。输出：该分割统计与校验和。"""
     split_source_dir = source_dir / split
     split_output_dir = output_dir / split
     split_output_dir.mkdir(parents=True, exist_ok=True)
@@ -240,14 +243,7 @@ def _summarize_existing_split(
     *,
     max_lines: int | None,
 ) -> dict:
-    """Validate and summarize an already tokenized split.
-
-    This is the safe recovery path after an interrupted preprocessing job that
-    finished writing the split files but stopped before vocabulary/metadata
-    finalization.  It checks every saved token sequence reconstructs exactly
-    to its original input SMILES, so it cannot silently accept shifted,
-    truncated, or malformed output.
-    """
+    """作用：校验已生成的 SPE 文件并汇总统计。输入：源/输出目录、分割名和可选行数上限。输出：样本数、token 统计及文件校验和。"""
     split_source_dir = source_dir / split
     split_output_dir = output_dir / split
     src_path = split_source_dir / f"src-{split}.txt"
@@ -332,7 +328,7 @@ def _summarize_existing_split(
 
 
 def build_vocab(output_dir: Path, *, train_split: str = "train") -> dict:
-    """Build the same frequency-sorted, train-union vocab as the project."""
+    """作用：按训练源、目标 token 频次生成词表。输入：数据输出目录和训练分割名。输出：词表统计字典，并写入词表文件。"""
     counter: Counter[str] = Counter()
     for side in ("src", "tgt"):
         path = output_dir / train_split / f"{side}-{train_split}.txt"
@@ -353,6 +349,7 @@ def build_vocab(output_dir: Path, *, train_split: str = "train") -> dict:
 
 
 def _validate_paths(source_dir: Path, output_dir: Path, codes_path: Path) -> None:
+    """作用：检查输入、输出和规则文件路径。输入：三个路径。输出：校验通过；无效时抛出异常。"""
     source_dir = source_dir.resolve()
     output_dir = output_dir.resolve()
     if source_dir == output_dir:
@@ -371,6 +368,7 @@ def _validate_options(
     max_lines: int | None,
     cache_reset_interval: int,
 ) -> None:
+    """作用：检查预处理参数是否合法。输入：分割、合并数、worker 及缓存选项。输出：校验通过；无效时抛出异常。"""
     if max_lines is not None and max_lines < 1:
         raise ValueError("max_lines must be positive when provided")
     if merges < -1:
@@ -397,6 +395,7 @@ def _make_metadata(
     vocab_stats: dict | None,
     finalized_existing_outputs: bool = False,
 ) -> dict:
+    """作用：组装预处理记录。输入：路径、参数、分割统计和词表统计。输出：可写入 JSON 的元数据字典。"""
     metadata = {
         "schema_version": 1,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -430,7 +429,7 @@ def preprocess(
     max_lines: int | None = None,
     cache_reset_interval: int = 50_000,
 ) -> dict:
-    """Create the SPE unaligned files and training-only vocabulary."""
+    """作用：执行 SPE 预处理并生成训练词表。输入：源目录、输出目录及预处理参数。输出：元数据字典，并写入数据和元数据文件。"""
     _validate_paths(source_dir, output_dir, codes_path)
     _validate_options(
         splits=splits,
@@ -486,12 +485,7 @@ def finalize_existing(
     max_lines: int | None = None,
     cache_reset_interval: int = 50_000,
 ) -> dict:
-    """Recover vocabulary and metadata after a completed-token-file crash.
-
-    Existing unaligned output is fully checked against source SMILES before
-    anything is written.  ``num_workers`` records the worker count used to
-    produce those files; no new tokenization workers are started here.
-    """
+    """作用：校验已有 SPE 输出并补写词表与元数据。输入：源/输出目录及处理参数。输出：最终元数据字典，不重新切分数据。"""
     _validate_paths(source_dir, output_dir, codes_path)
     _validate_options(
         splits=splits,
@@ -529,6 +523,7 @@ def finalize_existing(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """作用：解析命令行并启动预处理或恢复收尾。输入：可选命令行参数列表。输出：退出码，并写出预处理结果。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)

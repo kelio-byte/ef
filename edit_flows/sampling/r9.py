@@ -1,6 +1,6 @@
-"""用途：执行正式 R9K1M2 采样中的单步 K1M2 分支转移。
+"""用途：执行每条独立采样运行中的 K1M2 分支转移。
 输入：模型、当前状态、产品记忆、时间步及随机种子。
-输出：下一步候选状态及其采样信息。
+输出：每条运行最终保留的候选状态；R 次运行由调用方展开。
 """
 
 from dataclasses import dataclass
@@ -22,6 +22,8 @@ from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 
 @dataclass
 class Branch:
+    """作用：保存一条采样分支的状态。输入：状态、时间、随机种子和累计概率信息。输出：可逐步更新的分支记录。"""
+
     x_t: Tensor
     t: float
     seed: int
@@ -42,7 +44,10 @@ def sample_r9(
     n_steps=100,
     max_seq_len=96,
 ):
-    """Retain the original tensor batching, seed mixing and K1M2 selection."""
+    """作用：批量推进每条输入的 K1M2 分支。输入：模型、初始状态、调度器、种子及产品记忆。输出：每条输入的最终 token 状态。
+
+    名称沿用 R9K1M2 协议；R=9 次独立运行由 inference.predict 构造，本函数负责 K=1、M=2 的单步分支筛选。
+    """
     device = x_0.device
     batch_size = x_0.shape[0]
     if len(sample_seeds) != batch_size or n_steps < 1:

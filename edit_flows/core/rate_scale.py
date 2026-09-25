@@ -20,6 +20,7 @@ def get_rate_scale(
     clamp_kappa: bool = False,
     eps: float = 1e-8,
 ) -> Tensor:
+    """作用：计算时间桥接的速率缩放因子。输入：时间、调度器和限幅选项。输出：每个时间点的缩放张量。"""
     kappa_t = scheduler(t)
     deriv_t = scheduler.derivative(t)
     if clamp_kappa:
@@ -38,6 +39,7 @@ def apply_rate_parameterization(
     clamp_kappa: bool = False,
     log_eps: float = LOG_EPS,
 ) -> Tensor:
+    """作用：按配置转换基础对数速率。输入：基础速率、时间和调度参数。输出：变换后的对数速率。"""
     if not use_rate_reparam:
         return log_base_rates
 

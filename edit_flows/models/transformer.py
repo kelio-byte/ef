@@ -12,12 +12,15 @@ from torch import Tensor
 
 
 class SinusoidalTimeEmbedding(nn.Module):
+    """作用：将标量时间转换为正弦/余弦特征。输入：隐藏层宽度和时间张量。输出：时间特征。"""
 
     def __init__(self, hidden_dim: int):
+        """作用：初始化时间嵌入维度。输入：隐藏层宽度。输出：时间嵌入模块。"""
         super().__init__()
         self.hidden_dim = hidden_dim
 
     def forward(self, t: Tensor) -> Tensor:
+        """作用：编码连续时间。输入：时间张量。输出：正弦/余弦时间特征。"""
         if t.dim() == 1:
             t = t.unsqueeze(-1)
         half_dim = self.hidden_dim // 2
@@ -35,6 +38,7 @@ class SinusoidalTimeEmbedding(nn.Module):
 def sinusoidal_position_encoding(
     seq_len: int, hidden_dim: int, device: torch.device
 ) -> Tensor:
+    """作用：生成正弦位置编码。输入：序列长度、隐藏维度和设备。输出：位置特征矩阵。"""
     position = torch.arange(seq_len, device=device, dtype=torch.float).unsqueeze(1)
     div_term = torch.exp(
         torch.arange(0, hidden_dim, 2, device=device, dtype=torch.float)
@@ -47,7 +51,7 @@ def sinusoidal_position_encoding(
 
 
 class PreNormEncoderLayer(nn.Module):
-    """Pre-Norm encoder layer with separate attention/FFN dropout and configurable activation."""
+    """作用：构造前置归一化的 Transformer 编码层。输入：层宽度、注意力头数及前馈参数。输出：编码层模块。"""
 
     def __init__(
         self,
@@ -58,6 +62,7 @@ class PreNormEncoderLayer(nn.Module):
         attention_dropout: float = 0.1,
         activation: str = "relu",
     ):
+        """作用：设置自注意力与前馈子层。输入：维度、dropout 和激活函数配置。输出：编码层实例。"""
         super().__init__()
         self.self_attn = nn.MultiheadAttention(
             d_model, nhead, dropout=attention_dropout, batch_first=False
@@ -77,6 +82,7 @@ class PreNormEncoderLayer(nn.Module):
             raise ValueError(f"Unsupported activation: {activation}")
 
     def forward(self, src: Tensor, src_key_padding_mask: Tensor = None) -> Tensor:
+        """作用：更新一层状态表示。输入：序列特征和 PAD 掩码。输出：编码后的特征。"""
         x = src + self.dropout1(
             self.self_attn(
                 self.norm1(src),
@@ -92,11 +98,9 @@ class PreNormEncoderLayer(nn.Module):
 
 
 class PreNormCrossAttentionLayer(nn.Module):
-    """Residual cross-attention from a dynamic edit state to static memory.
-
-    The state remains the query sequence.  Product memory is only used as
-    keys/values, so this layer never creates edit positions for the product
-    sequence itself.
+    """作用：让动态编辑状态通过交叉注意力读取静态产品记忆。
+    输入：状态/记忆维度、注意力头数及 dropout 配置。
+    输出：交叉注意力层模块。
     """
 
     def __init__(
@@ -106,6 +110,7 @@ class PreNormCrossAttentionLayer(nn.Module):
         dropout: float = 0.1,
         attention_dropout: float = 0.1,
     ):
+        """作用：初始化状态到产品记忆的交叉注意力。输入：维度、头数和 dropout 参数。输出：注意力层实例。"""
         super().__init__()
         self.state_norm = nn.LayerNorm(d_model)
         self.memory_norm = nn.LayerNorm(d_model)
@@ -120,6 +125,7 @@ class PreNormCrossAttentionLayer(nn.Module):
         memory: Tensor,
         memory_key_padding_mask: Tensor | None = None,
     ) -> Tensor:
+        """作用：融合产品记忆到状态特征。输入：状态、记忆和记忆 PAD 掩码。输出：融合后的状态特征。"""
         normalized_memory = self.memory_norm(memory)
         attended = self.cross_attn(
             self.state_norm(state),
@@ -134,11 +140,7 @@ LOG_EPS = -1000000000.0
 
 
 def _log_softplus(x: Tensor, threshold: float = 20.0) -> Tensor:
-    """log(F.softplus(x)) with truncation for numerical stability.
-
-    For x <= -threshold:  softplus(x) ≈ exp(x), so log(softplus(x)) ≈ x.
-    For x >  -threshold:  compute directly via log(F.softplus(x)).
-    """
+    """作用：稳定计算 softplus 的对数。输入：原始速率张量和截断阈值。输出：对数速率张量。"""
     result = torch.empty_like(x)
     safe = x > -threshold
     result[~safe] = x[~safe]
@@ -148,6 +150,7 @@ def _log_softplus(x: Tensor, threshold: float = 20.0) -> Tensor:
 
 
 class EditFlowsTransformer(nn.Module):
+    """作用：构造含静态产品记忆的编辑流 Transformer。输入：词表和网络结构配置。输出：编辑流模型实例。"""
 
     def __init__(
         self,
@@ -165,6 +168,7 @@ class EditFlowsTransformer(nn.Module):
         product_memory_encoder_layers: int = 0,
         product_memory_fusion_after_layers: Sequence[int] | None = None,
     ):
+        """作用：初始化状态编码器、产品记忆编码器及输出头。输入：词表大小和模型配置。输出：可训练模型。"""
         super().__init__()
         self.vocab_size = vocab_size
         self.hidden_dim = hidden_dim
@@ -270,6 +274,7 @@ class EditFlowsTransformer(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
+        """作用：按正式初始化规则设置线性层和嵌入层权重。输入：无。输出：原地更新模型参数。"""
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight, gain=1.0)
@@ -281,13 +286,7 @@ class EditFlowsTransformer(nn.Module):
     def encode_product(
         self, product_tokens: Tensor, product_padding_mask: Tensor
     ) -> Tensor:
-        """Encode the immutable initial product once for later reuse.
-
-        This path deliberately omits the time embedding: it represents the
-        original product ``x_0``, not a dynamic edit state.  Token embeddings
-        are shared with the state encoder, while the contextual encoder is
-        separate.
-        """
+        """作用：编码初始产品，供采样过程重复读取。输入：产品 token 和 PAD 掩码。输出：静态产品记忆特征。"""
         if not self.use_product_memory:
             raise RuntimeError("encode_product requires use_product_memory=True")
         if product_tokens.ndim != 2:
@@ -323,7 +322,7 @@ class EditFlowsTransformer(nn.Module):
         product_memory: Tensor | None,
         product_memory_padding_mask: Tensor | None,
     ) -> tuple[Tensor | None, Tensor | None]:
-        """Validate or build static memory for a forward call."""
+        """作用：检查或构造产品记忆输入。输入：产品 token、掩码或缓存记忆。输出：记忆张量及其掩码。"""
         supplied = (
             product_tokens,
             product_padding_mask,
@@ -375,6 +374,7 @@ class EditFlowsTransformer(nn.Module):
         product_memory: Tensor | None = None,
         product_memory_padding_mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor, Tensor]:
+        """作用：预测各位置的编辑速率和 token 分布。输入：状态、时间、掩码及产品记忆。输出：速率、插入和替换对数概率。"""
         (batch_size, seq_len) = tokens.shape
         if seq_len == 0:
             rates = torch.empty(batch_size, 0, 3, device=tokens.device)

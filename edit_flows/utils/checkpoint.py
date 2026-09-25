@@ -11,12 +11,7 @@ import torch
 
 
 def atomic_torch_save(state, path: str | os.PathLike) -> None:
-    """Serialize beside the destination, then atomically replace it.
-
-    A same-directory temporary file keeps the rename on one filesystem.
-    This protects readers and an existing best checkpoint from partial writes;
-    it does not promise recovery from disk failure or concurrent writers.
-    """
+    """作用：安全写入 checkpoint 并原子替换目标文件。输入：待保存状态和文件路径。输出：完整 checkpoint 文件。"""
     destination = Path(path)
     temporary = None
     try:

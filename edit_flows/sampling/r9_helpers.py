@@ -1,6 +1,6 @@
-"""用途：实现 R9K1M2 批量采样的随机数、动作和子分支辅助逻辑。
-输入：模型 logits、编辑状态、分支信息和随机种子。
-输出：采样动作、子候选及对应的概率信息。
+"""用途：提供 K1M2 分支采样所需的随机数、动作和候选筛选辅助函数。
+输入：模型分布、编辑状态、分支信息和随机种子。
+输出：采样动作、子候选及概率信息；不负责展开 R 次独立运行。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 def _mix_child_seed(parent_seed: int, step: int, child_index: int) -> int:
-    """稳定混合 child seed；child 0 保留父随机流以兼容 M=1。"""
+    """作用：为子分支生成稳定随机种子。输入：父种子、步数和子分支序号。输出：子分支种子整数。"""
     if child_index < 0:
         raise ValueError(f"child_index must be >= 0, got {child_index}")
     if child_index == 0:
@@ -39,7 +39,7 @@ def _mix_child_seed(parent_seed: int, step: int, child_index: int) -> int:
 
 
 def _logaddexp_float(a: float, b: float) -> float:
-    """稳定计算两个 Python log-weight 的 logsumexp。"""
+    """作用：稳定合并两个对数权重。输入：两个 log 权重。输出：logsumexp 标量。"""
     high = max(a, b)
     low = min(a, b)
     return high + math.log1p(math.exp(low - high))
@@ -51,7 +51,7 @@ def _select_k1_m2_children(
     origin_key: Tuple[int, ...],
     changed_state_bonus: float,
 ) -> Branch:
-    """Exact two-child specialization of merge-and-Top-1 selection."""
+    """作用：合并重复状态并按 K1M2 规则保留一个子分支。输入：两个候选、状态键和变化奖励。输出：保留的分支。"""
     if len(candidates) != 2 or len(keys) != 2:
         raise ValueError("K1M2 selection requires exactly two children")
     (first, second) = candidates
@@ -70,6 +70,7 @@ def _select_k1_m2_children(
         return first
 
     def rank(branch: Branch, key: Tuple[int, ...]):
+        """作用：计算候选分支排序键。输入：分支和状态键。输出：按权重、变化奖励及种子组成的排序元组。"""
         return (
             branch.log_mass + changed_state_bonus * float(key != origin_key),
             branch.log_mass,
@@ -84,7 +85,7 @@ def _select_k1_m2_children(
 def _token_keys_batch(
     x_t: Tensor, pad_token: int, bos_token: int
 ) -> List[Tuple[int, ...]]:
-    """整批传回 CPU 后构造状态 key，避免逐行 Tensor 标量转换。"""
+    """作用：将一批状态编码为可比较键。输入：token 张量和 PAD/BOS 编号。输出：逐行 token 元组列表。"""
     rows = x_t.detach().cpu().tolist()
     excluded = (pad_token, bos_token)
     return [tuple((token for token in row if token not in excluded)) for row in rows]
@@ -100,7 +101,7 @@ def _step_log_p_batch(
     state_tokens: Optional[Tensor] = None,
     pad_token: int = PAD_TOKEN,
 ) -> Tensor:
-    """批量计算每条分支本步完整动作集合的 log-prob。"""
+    """作用：计算每条分支本步动作的对数概率。输入：动作、模型分布、步长和状态。输出：每条分支的 log 概率。"""
     rates = torch.exp(log_rates_eff)
     if state_tokens is not None:
         if state_tokens.shape != rates.shape[:2]:
@@ -163,7 +164,7 @@ def _step_log_p_batch(
 def _apply_edits_batch(
     x_t: Tensor, actions: dict, max_seq_len: int, pad_token: int
 ) -> Tensor:
-    """批量应用采样编辑。"""
+    """作用：批量执行已采样编辑。输入：状态、动作和序列长度限制。输出：编辑后的状态张量。"""
     x_next = x_t.clone()
     x_next[actions["sub_mask"]] = actions["sub_tokens"][actions["sub_mask"]]
     return apply_ins_del_operations(
@@ -179,7 +180,7 @@ def _apply_edits_batch(
 def _stateless_uniform(
     seeds: Tensor, step: int, seq_len: int, stream: int, dtype: torch.dtype
 ) -> Tensor:
-    """生成由 (seed, step, position, stream) 决定的批量均匀随机数。"""
+    """作用：生成可复现的无状态均匀随机数。输入：种子、步数、位置、随机流编号和 dtype。输出：均匀随机张量。"""
     modulus = 2147483647
     positions = torch.arange(
         1, seq_len + 1, dtype=torch.int64, device=seeds.device
@@ -198,7 +199,7 @@ def _stateless_uniform(
 
 
 def _sample_tokens_from_uniform(log_probs: Tensor, uniform: Tensor) -> Tensor:
-    """用均匀随机数对最后一维 categorical 分布做 inverse-CDF 采样。"""
+    """作用：从 token 类别分布中采样。输入：对数概率和均匀随机数。输出：采样 token 编号张量。"""
     cdf = torch.exp(log_probs).cumsum(dim=-1)
     return (cdf < uniform.unsqueeze(-1)).sum(dim=-1).clamp_max(log_probs.shape[-1] - 1)
 
@@ -214,7 +215,7 @@ def _sample_actions_per_branch(
     event_prob_mode: str,
     step: int,
 ) -> dict:
-    """按 branch seed 无状态、批量地采样所有分支动作。"""
+    """作用：批量采样各分支的插入、删除和替换动作。输入：分支种子、状态、速率及 token 分布。输出：包含动作掩码和 token 的字典。"""
     seeds = branch_seeds.to(device=x_t.device, dtype=torch.int64)
     (legal_log_ins_probs, ins_log_normalizer) = legal_token_log_probs(log_ins_probs)
     (legal_log_sub_probs, sub_log_normalizer) = legal_token_log_probs(
@@ -274,7 +275,7 @@ def _sample_actions_per_branch(
 
 
 def _set_second_child_noop(actions: dict, n_children: int) -> None:
-    """原地将每个 parent 的 child 1 设为 no-op；child 0 保持随机动作。"""
+    """作用：将每个父分支的第二个子分支设为 no-op。输入：动作字典和子分支数。输出：原地修改动作字典。"""
     noop_rows = torch.arange(
         1, actions["ins_mask"].shape[0], n_children, device=actions["ins_mask"].device
     )

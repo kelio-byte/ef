@@ -9,6 +9,7 @@ dot_bracket_regex = re.compile("(\\(|\\)|\\.|[^\\(\\)\\.]+)")
 
 
 def inverse_global_align(smiles: str):
+    """作用：还原 global 表示中的分支与组分顺序。输入：global SMILES 字符串。输出：普通 SMILES 字符串。"""
     smiles = "." + smiles + ")"
     stack = []
     level = []

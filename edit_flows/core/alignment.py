@@ -10,10 +10,12 @@ from edit_flows.utils.tokens import PAD_TOKEN, GAP_TOKEN
 
 
 def identity_align_xs_to_zs(x_0: Tensor, x_1: Tensor) -> Tuple[Tensor, Tensor]:
+    """作用：保留原始位置对应关系。输入：源、目标张量。输出：原张量对。"""
     return (x_0, x_1)
 
 
 def _align_pair(seq_0: Tensor, seq_1: Tensor) -> Tuple[List[int], List[int]]:
+    """作用：用编辑距离对齐一对序列。输入：两条 token 张量。输出：含 GAP 的等长整数列表。"""
     seq_0_np = seq_0.cpu().numpy()
     seq_1_np = seq_1.cpu().numpy()
     (m, n) = (len(seq_0_np), len(seq_1_np))
@@ -51,6 +53,7 @@ def _align_pair(seq_0: Tensor, seq_1: Tensor) -> Tuple[List[int], List[int]]:
 
 
 def opt_align_xs_to_zs(x_0: Tensor, x_1: Tensor) -> Tuple[Tensor, Tensor]:
+    """作用：逐样本计算最优编辑对齐。输入：补 PAD 的源、目标批次。输出：补齐后的对齐张量对。"""
     aligned_pairs = []
     for b in range(x_0.shape[0]):
         len_0 = int((x_0[b] != PAD_TOKEN).sum().item())

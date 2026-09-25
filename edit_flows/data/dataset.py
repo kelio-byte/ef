@@ -21,11 +21,7 @@ SPECIAL_TOKENS = {
 
 
 def load_vocab(vocab_path: str) -> Tuple[Dict[str, int], int]:
-    """Load an ordered vocabulary without silently changing token IDs.
-
-    Malformed input must fail before allocating a model: duplicate/reserved
-    entries previously overwrote IDs and could leave IDs outside model_vocab.
-    """
+    """作用：按文件顺序读取并校验词表。输入：词表文件路径。输出：token 编号映射和模型词表大小。"""
     token2id = dict(SPECIAL_TOKENS)
     with open(vocab_path) as f:
         for i, line in enumerate(f):
@@ -44,7 +40,10 @@ def load_vocab(vocab_path: str) -> Tuple[Dict[str, int], int]:
 
 
 class RetroDataset(Dataset):
+    """作用：按词表读取未对齐的源、目标反应对。输入：两份文本和 token 映射。输出：可索引的数据集。"""
+
     def __init__(self, src_path: str, tgt_path: str, token2id: Dict[str, int]):
+        """作用：载入未对齐的反应对。输入：源/目标文件和词表映射。输出：初始化后的数据集。"""
         unk_id = token2id["<UNK>"]
         self.pairs: List[Tuple[List[int], List[int]]] = []
         with open(src_path) as f_src, open(tgt_path) as f_tgt:
@@ -62,14 +61,19 @@ class RetroDataset(Dataset):
                 self.pairs.append((src_ids, tgt_ids))
 
     def __len__(self) -> int:
+        """作用：返回样本数。输入：无。输出：反应对数量。"""
         return len(self.pairs)
 
     def __getitem__(self, idx: int) -> Tuple[List[int], List[int]]:
+        """作用：读取一条反应对。输入：样本索引。输出：源、目标 token 列表。"""
         return self.pairs[idx]
 
 
 class PreAlignedDataset(Dataset):
+    """作用：按词表读取预对齐的源、目标反应对。输入：两份对齐文本和 token 映射。输出：可索引的数据集。"""
+
     def __init__(self, z0_path: str, z1_path: str, token2id: Dict[str, int]):
+        """作用：载入预先对齐的反应对。输入：对齐源/目标文件和词表映射。输出：初始化后的数据集。"""
         unk_id = token2id["<UNK>"]
         self.pairs: List[Tuple[List[int], List[int]]] = []
         with open(z0_path) as f0, open(z1_path) as f1:
@@ -93,9 +97,11 @@ class PreAlignedDataset(Dataset):
                 self.pairs.append((z0_ids, z1_ids))
 
     def __len__(self) -> int:
+        """作用：返回样本数。输入：无。输出：对齐反应对数量。"""
         return len(self.pairs)
 
     def __getitem__(self, idx: int) -> Tuple[List[int], List[int]]:
+        """作用：读取一条对齐反应对。输入：样本索引。输出：源、目标对齐 token 列表。"""
         return self.pairs[idx]
 
 
@@ -103,6 +109,7 @@ def collate_fn(
     batch: List[Tuple[List[int], List[int]]],
     pad_token: int = PAD_TOKEN,
 ) -> Tuple[Tensor, Tensor]:
+    """作用：将样本列表补齐为训练批次。输入：源、目标 token 列表和 PAD 编号。输出：两个整型张量。"""
     x0_list, x1_list = zip(*batch)
     max_src = max(len(ids) for ids in x0_list)
     max_tgt = max(len(ids) for ids in x1_list)

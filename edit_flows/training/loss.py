@@ -20,6 +20,7 @@ def bregman_loss(
     clamp_kappa: bool = False,
     clamp_max: float = 50.0,
 ) -> Tensor:
+    """作用：计算一个批次的 Bregman 训练目标。输入：模型对数速率、对齐掩码、时间和调度选项。输出：批次平均损失标量。"""
     from edit_flows.core.z_space import fill_gap_tokens_with_repeats_log
 
     ux_cat = torch.exp(log_ux_cat)

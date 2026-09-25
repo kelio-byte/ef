@@ -25,6 +25,7 @@ def prepare_batch(
     pad_token: int = PAD_TOKEN,
     use_product_memory: bool = False,
 ) -> dict:
+    """作用：采样训练中间态并构造监督掩码。输入：源/目标批次、对齐器和调度器。输出：含状态、掩码、时间及产品记忆的批次字典。"""
     if not use_product_memory:
         raise ValueError("Only product-memory training is supported")
     B = x_0.shape[0]
@@ -107,11 +108,7 @@ def _forward_loss_and_metrics(
     clamp_max: float = 50.0,
     time_input: str = "t",
 ) -> tuple[Tensor, dict]:
-    """Run one forward pass and compute loss/rate diagnostics.
-
-    Keeping this path shared by training and validation prevents TensorBoard
-    validation curves from silently using a different objective than training.
-    """
+    """作用：执行前向计算并汇总损失与速率诊断。输入：模型、准备好的批次和训练配置。输出：损失张量及标量指标字典。"""
     if time_input not in {"t", "kappa"}:
         raise ValueError(f"Unsupported time_input: {time_input}")
 
@@ -233,7 +230,7 @@ def train_step(
     clamp_max: float = 50.0,
     time_input: str = "t",
 ) -> dict:
-    """Run one optimizer update and return scalar diagnostics."""
+    """作用：完成一次参数更新。输入：模型、批次、优化器和调度配置。输出：损失与训练指标字典。"""
     loss, metrics = _forward_loss_and_metrics(
         model,
         batch_data,
@@ -261,7 +258,7 @@ def evaluate_step(
     clamp_max: float = 50.0,
     time_input: str = "t",
 ) -> dict:
-    """Compute training-objective metrics without changing model parameters."""
+    """作用：在不更新参数的情况下计算验证结果。输入：模型、批次和调度配置。输出：损失与验证指标字典。"""
     loss, metrics = _forward_loss_and_metrics(
         model,
         batch_data,

@@ -24,14 +24,7 @@ def edit_position_masks(
     *,
     pad_token: int = PAD_TOKEN,
 ) -> tuple[Tensor, Tensor]:
-    """Return legal ``(insert, substitute/delete)`` position masks.
-
-    Position 0 contains BOS.  It is immutable as a token, so substitution and
-    deletion are forbidden there.  An insertion at position 0, however,
-    means *insert immediately after BOS* in :func:`apply_ins_del_operations`.
-    That is how a leading GAP in the aligned training target is represented,
-    so it must remain a legal insertion anchor.
-    """
+    """作用：标记可编辑的位置。输入：状态序列和 PAD 编号。输出：插入掩码及替换/删除掩码。"""
     if x_t.ndim != 2:
         raise ValueError("x_t must have shape [batch, length]")
     non_pad = x_t != pad_token
@@ -48,14 +41,7 @@ def legal_token_log_probs(
     current_tokens: Tensor | None = None,
     forbidden_token_ids: tuple[int, ...] = FORBIDDEN_OUTPUT_TOKEN_IDS,
 ) -> tuple[Tensor, Tensor]:
-    """Restrict a token posterior to the training-supported action space.
-
-    INSERT/SUBSTITUTE outputs may not be structural tokens.  For substitute,
-    ``current_tokens`` additionally removes the identity/no-op token at each
-    position.  The returned distribution is renormalized over the remaining
-    legal tokens; ``log_normalizer`` is returned so callers that score sampled
-    actions can use the same conditional probability.
-    """
+    """作用：屏蔽非法输出 token 并重新归一化。输入：token 对数概率及可选当前 token。输出：合法对数概率和归一化常数。"""
     if log_probs.ndim != 3:
         raise ValueError("log_probs must have shape [batch, length, vocab]")
     if current_tokens is not None and current_tokens.shape != log_probs.shape[:2]:
@@ -90,6 +76,7 @@ def apply_ins_del_operations(
     max_seq_len: int = 512,
     pad_token: int = PAD_TOKEN,
 ) -> Tensor:
+    """作用：批量执行插入、删除和替换。输入：当前序列、动作掩码和插入 token。输出：编辑后并按最大长度截断的序列。"""
     batch_size, seq_len = x_t.shape
     device = x_t.device
 

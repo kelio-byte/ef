@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def parse_args():
+    """作用：解析一键训练评测参数。输入：命令行参数。输出：包含配置、设备和输出路径的参数对象。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "configs/train.yaml")
     parser.add_argument("--device", default="cuda")
@@ -41,6 +42,7 @@ def parse_args():
 
 
 def main():
+    """作用：串接从零训练和指定 checkpoint 的完整测试。输入：命令行参数及仓库配置。输出：训练文件和 test 评测结果。"""
     args = parse_args()
     config_path = args.config.resolve()
     with config_path.open(encoding="utf-8") as stream:

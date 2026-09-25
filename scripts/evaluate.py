@@ -10,6 +10,7 @@ from score import score
 
 
 def main():
+    """作用：解析评测选项并运行推理和评分。输入：命令行参数。输出：写入预测、元数据和指标文件。"""
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--split", choices=["dev1000", "test"], default="dev1000")
     p.add_argument("--protocol", choices=["r9"], default="r9")

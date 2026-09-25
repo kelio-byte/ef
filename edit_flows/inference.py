@@ -22,6 +22,7 @@ CHECKPOINT = ROOT / "saved_checkpoints/product_memory_m500_step500000.pt"
 
 
 def sha256(path):
+    """作用：计算文件校验和。输入：文件路径。输出：SHA-256 十六进制字符串。"""
     digest = hashlib.sha256()
     with open(path, "rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -30,6 +31,7 @@ def sha256(path):
 
 
 def load_model(checkpoint, vocab, device):
+    """作用：校验并载入模型权重。输入：checkpoint、词表路径和设备。输出：模型、配置及 token 映射。"""
     ckpt = torch.load(checkpoint, map_location="cpu", weights_only=False)
     cfg = ckpt["config"]
     required = {
@@ -77,6 +79,7 @@ def load_model(checkpoint, vocab, device):
 
 
 def make_batch(products, device):
+    """作用：将 token 列表转换为补 PAD 的模型输入。输入：一批 token 编号列表和设备。输出：含 BOS 的张量批次。"""
     batch = torch.full(
         (len(products), max(map(len, products)) + 1), PAD_TOKEN, dtype=torch.long
     )
@@ -96,6 +99,10 @@ def predict(
     device="cuda",
     max_products=None,
 ):
+    """作用：按 R9K1M2 协议采样并写出预测。输入：产品文件、模型资产和采样选项。输出：预测路径，并写入元数据。
+
+    R=9 次独立运行由此处展开；sample_r9 执行每条运行中的 K1M2 分支转移。
+    """
     device = torch.device(device)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)

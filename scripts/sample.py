@@ -8,6 +8,7 @@ from edit_flows.inference import DATA, CHECKPOINT, predict
 
 
 def parser():
+    """作用：定义独立采样命令行选项。输入：无。输出：配置好的参数解析器。"""
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--products", required=True)
     p.add_argument("--output", required=True)
@@ -20,6 +21,7 @@ def parser():
 
 
 def run(args):
+    """作用：调用正式推理入口生成候选。输入：采样参数对象。输出：预测文件路径。"""
     return predict(
         args.products,
         args.output,

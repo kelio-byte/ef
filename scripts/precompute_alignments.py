@@ -16,7 +16,7 @@ GAP_STR = "<GAP>"
 
 
 def _align_strings(seq_0: List[str], seq_1: List[str]) -> Tuple[List[str], List[str]]:
-    """Levenshtein DP alignment on string token sequences."""
+    """作用：用 Levenshtein 动态规划对齐一对序列。输入：源、目标 token 列表。输出：等长列表，缺口以 GAP 标记。"""
     m, n = len(seq_0), len(seq_1)
 
     dp = [[0] * (n + 1) for _ in range(m + 1)]
@@ -55,6 +55,7 @@ def _align_strings(seq_0: List[str], seq_1: List[str]) -> Tuple[List[str], List[
 
 
 def _process_pair(args: Tuple[str, str]) -> Tuple[List[str], List[str]]:
+    """作用：解析并对齐一行反应对。输入：源、目标原始文本行。输出：两条对齐 token 列表。"""
     src_line, tgt_line = args
     src_tokens = src_line.strip().split()
     tgt_tokens = tgt_line.strip().split()
@@ -62,6 +63,7 @@ def _process_pair(args: Tuple[str, str]) -> Tuple[List[str], List[str]]:
 
 
 def main():
+    """作用：读取指定分割并写出预计算对齐文件。输入：命令行目录、分割和 worker 参数。输出：对齐文本文件。"""
     parser = argparse.ArgumentParser(
         description="Pre-compute DP alignments for retro data"
     )

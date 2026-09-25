@@ -12,6 +12,7 @@ from edit_flows.inference import sha256
 
 
 def score(predictions, targets, workers=8):
+    """作用：对预测文件评分并保存汇总结果。输入：预测文件、目标文件和进程数。输出：指标字典，并写入 metrics.json。"""
     pred_path = Path(predictions)
     prediction_lines = pred_path.read_text().splitlines()
     target_lines = Path(targets).read_text().splitlines()

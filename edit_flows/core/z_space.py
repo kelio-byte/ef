@@ -12,6 +12,7 @@ from edit_flows.utils.tokens import PAD_TOKEN, GAP_TOKEN
 def rm_gap_tokens(
     z: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    """作用：从对齐状态中移除 GAP。输入：含 GAP、PAD 的状态批次。输出：去 GAP 序列及三种掩码。"""
     B, L = z.shape
     device = z.device
 
@@ -45,7 +46,7 @@ def fill_gap_tokens_with_repeats_log(
     z_pad_mask: Tensor,
     log_eps: float = -1e9,
 ) -> Tensor:
-    """Log-space variant: pad positions are set to log_eps instead of 0."""
+    """作用：将非 GAP 位置的对数分布扩展回对齐长度。输入：分布与 GAP/PAD 掩码。输出：扩展后的对数分布。"""
     batch_size = z_gap_mask.shape[0]
     x_seq_len = log_x_ut.shape[1]
 
@@ -64,6 +65,7 @@ def make_ut_mask_from_z(
     z_1: Tensor,
     vocab_size: int,
 ) -> Tensor:
+    """作用：标记目标相对当前状态所需的编辑操作。输入：中间/目标状态和词表大小。输出：插入、替换、删除操作掩码。"""
     batch_size, z_seq_len = z_t.shape
     n_ops = 2 * vocab_size + 1
 
@@ -92,6 +94,7 @@ def sample_cond_zt(
     kappa_fn,
     return_pick: bool = False,
 ) -> Tensor:
+    """作用：按条件桥采样中间对齐状态。输入：源、目标、时间和 κ 调度器。输出：采样状态，可选返回目标选择掩码。"""
     kappa_t = kappa_fn(t)
     rand = torch.rand_like(z_0, dtype=torch.float)
     pick_z1 = rand < kappa_t

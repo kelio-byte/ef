@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def digest(path):
+    """作用：计算文件的 SHA-256。输入：文件路径。输出：十六进制校验和。"""
     value = hashlib.sha256()
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
@@ -19,6 +20,7 @@ def digest(path):
 
 
 def main():
+    """作用：核对资产清单中的文件和 dev1000 划分。输入：仓库资产与清单。输出：校验信息；不匹配时抛出异常。"""
     manifest = json.loads((ROOT / "assets.json").read_text())
     for relative, expected in manifest["files"].items():
         path = ROOT / relative
