@@ -4,9 +4,10 @@
 
 ## 安装
 
-已验证环境：Linux、Python 3.10、PyTorch 2.7.1+cu126、RTX 3090。核心依赖固定在 `pyproject.toml`。
+已验证环境：Linux、Python 3.10、PyTorch 2.7.1+cu126、RTX 3090。核心依赖固定在 `pyproject.toml`。克隆前请先安装 Git 与 Git LFS。
 
 ```bash
+git lfs install
 git clone --branch efretro --single-branch https://github.com/kelio-byte/ef.git efretro
 cd efretro
 git lfs pull
