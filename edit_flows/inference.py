@@ -15,7 +15,7 @@ from .utils.tokens import PAD_TOKEN, BOS_TOKEN, UNK_TOKEN
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data/uspto50k_m500"
-CHECKPOINT = ROOT / "checkpoints/product_memory_m500_step500000.pt"
+CHECKPOINT = ROOT / "saved_checkpoints/product_memory_m500_step500000.pt"
 
 
 def sha256(path):

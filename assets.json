@@ -8,7 +8,7 @@
   "augmentation": 20,
   "checkpoint_completed_steps": 500000,
   "files": {
-    "checkpoints/product_memory_m500_step500000.pt": {
+    "saved_checkpoints/product_memory_m500_step500000.pt": {
       "sha256": "7fe982dcdbea59eee999fcee7fd491664c6615a9fc9498afca02e7abbff5facf",
       "bytes": 205213991
     },

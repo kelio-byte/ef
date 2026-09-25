@@ -30,7 +30,7 @@ python scripts/verify_assets.py
 | `configs/train.yaml` | 当前正式训练配置 |
 | `data/uspto50k_m500/` | 冻结的训练/验证/测试数据、词表、训练与验证对齐文件、dev1000 划分 |
 | `data/SPE_ChEMBL.txt` | SPE 规则，使用前 500 次合并 |
-| `checkpoints/product_memory_m500_step500000.pt` | 指定 checkpoint 的原样副本，含恢复训练所需状态 |
+| `saved_checkpoints/product_memory_m500_step500000.pt` | 指定 checkpoint 的原样副本，含恢复训练所需状态 |
 | `assets.json` / `reproduction.json` | 资产校验和 / 本次迁移验收结果 |
 
 模型：10 层状态 Transformer，宽度 256、8 heads、FFN 2048；2 层静态 product-memory 编码器，在状态层 5、10 后交叉注意力融合；572 个 token（568+4），长度上限 96。训练采用 Levenshtein 对齐、`κ(t)=t³` 条件桥及 Bregman 损失；推理中产品记忆只编码一次。
@@ -76,7 +76,7 @@ python scripts/train.py --config configs/train.yaml --device cuda --save_dir tra
 
 # 从随仓库提供的 500K checkpoint 继续到 600K
 python scripts/train.py --config configs/train.yaml --device cuda \
-  --checkpoint checkpoints/product_memory_m500_step500000.pt --save_dir training_runs
+  --checkpoint saved_checkpoints/product_memory_m500_step500000.pt --save_dir training_runs
 ```
 
 配置为单 GPU、batch=256、seed=42、Adam + Noam（warmup=8000），训练至 600000 步，最多保留 20 个常规 checkpoint。正式方法使用其中的 500K checkpoint；Noam 不依赖总步数。程序保存优化器、学习率、随机数与数据位置；不要用不同 batch/设备拓扑做逐位一致的续训比较。输出目录为 `save_dir/数据集名/时间戳/`。每 1000 步写入 `training_monitor.jsonl`（速度、梯度、显存和非有限值检查），完成后生成 `training_summary.json`；TensorBoard 和普通训练日志照常保留。
