@@ -1,40 +1,33 @@
-"""用途：执行每条独立采样运行中的 K1M2 分支转移。
+"""用途：执行每条独立采样运行中的 K=1、M 可配置分支转移。
 输入：模型、当前状态、产品记忆、时间步及随机种子。
-输出：每条运行最终保留的候选状态；R 次运行由调用方展开。
+输出：每条运行最终保留的候选状态；n_runs 次运行由调用方展开。
 """
 
 from dataclasses import dataclass
-import math
 import torch
 from torch import Tensor
 from .common import get_adaptive_h
-from .r9_helpers import (
+from .branch_sampler_helpers import (
     _mix_child_seed,
     _token_keys_batch,
     _sample_actions_per_branch,
-    _set_second_child_noop,
-    _step_log_p_batch,
     _apply_edits_batch,
-    _select_k1_m2_children,
+    _select_k1m_child,
 )
 from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 
 
 @dataclass
 class Branch:
-    """作用：保存一条采样分支的状态。输入：状态、时间、随机种子和累计概率信息。输出：可逐步更新的分支记录。"""
+    """作用：保存一条采样分支的状态。输入：状态、时间和随机种子。输出：可逐步更新的分支记录。"""
 
     x_t: Tensor
     t: float
     seed: int
-    state_key: tuple
-    log_mass: float = 0.0
-    path_log_p: float = 0.0
-    weight: float = 1.0
 
 
 @torch.inference_mode()
-def sample_r9(
+def sample_branches(
     model,
     x_0,
     scheduler,
@@ -43,21 +36,28 @@ def sample_r9(
     product_memory_padding_mask,
     n_steps=100,
     max_seq_len=96,
+    n_children=2,
+    changed_state_bonus=0.5,
 ):
-    """作用：批量推进每条输入的 K1M2 分支。输入：模型、初始状态、调度器、种子及产品记忆。输出：每条输入的最终 token 状态。
+    """作用：批量推进每条输入的 K=1、M 子候选分支。输入：模型、初始状态、调度器、种子、产品记忆及 M。输出：每条输入的最终 token 状态。
 
-    名称沿用 R9K1M2 协议；R=9 次独立运行由 inference.predict 构造，本函数负责 K=1、M=2 的单步分支筛选。
+    独立运行数由 inference.predict 构造；本函数每步采样 M 个候选，按状态频数和变化奖励保留一个。
     """
     device = x_0.device
     batch_size = x_0.shape[0]
     if len(sample_seeds) != batch_size or n_steps < 1:
         raise ValueError("Invalid seed count or step count")
+    if (
+        not isinstance(n_children, int)
+        or isinstance(n_children, bool)
+        or n_children < 1
+    ):
+        raise ValueError("n_children must be a positive integer")
     origin_keys = _token_keys_batch(x_0, PAD_TOKEN, BOS_TOKEN)
     branches = [
-        Branch(x_0[b : b + 1], 0.0, sample_seeds[b], origin_keys[b])
+        Branch(x_0[b : b + 1], 0.0, sample_seeds[b])
         for b in range(batch_size)
     ]
-    noop_step = min(n_steps - 1, int(0.9 * n_steps))
     for step in range(n_steps):
         flat = [(b, s) for b, s in enumerate(branches) if s.t < 1.0]
         if not flat:
@@ -89,7 +89,7 @@ def sample_r9(
             product_memory_padding_mask=memory_mask,
         )
         h = get_adaptive_h(1.0 / n_steps, t_vals, scheduler)
-        parent_values = [i for i in range(len(flat)) for _ in range(2)]
+        parent_values = [i for i in range(len(flat)) for _ in range(n_children)]
         parent_indices = torch.tensor(parent_values, dtype=torch.long, device=device)
         x_children = x_batch.index_select(0, parent_indices)
         lr = rates.index_select(0, parent_indices)
@@ -97,7 +97,9 @@ def sample_r9(
         ls = sub.index_select(0, parent_indices)
         hc = h.index_select(0, parent_indices)
         seed_values = [
-            _mix_child_seed(s.seed, step, c) for _, s in flat for c in range(2)
+            _mix_child_seed(s.seed, step, c)
+            for _, s in flat
+            for c in range(n_children)
         ]
         seeds = torch.tensor(seed_values, dtype=torch.int64, device=device)
         actions = _sample_actions_per_branch(
@@ -111,15 +113,6 @@ def sample_r9(
             event_prob_mode="poisson",
             step=step,
         )
-        if step == noop_step:
-            _set_second_child_noop(actions, 2)
-        step_log_ps = (
-            _step_log_p_batch(
-                actions, lr, li, ls, hc, state_tokens=x_children, pad_token=PAD_TOKEN
-            )
-            .cpu()
-            .tolist()
-        )
         h_values = hc.squeeze(-1).cpu().tolist()
         x_next = _apply_edits_batch(x_children, actions, max_seq_len, PAD_TOKEN)
         keys = _token_keys_batch(x_next, PAD_TOKEN, BOS_TOKEN)
@@ -132,16 +125,12 @@ def sample_r9(
                     x_next[i : i + 1],
                     s.t + h_values[i],
                     seed_values[i],
-                    keys[i],
-                    s.log_mass - math.log(2),
-                    s.path_log_p + step_log_ps[i],
-                    1.0,
                 )
             )
             child_keys[b].append(keys[i])
         for b, _ in flat:
-            branches[b] = _select_k1_m2_children(
-                candidates[b], child_keys[b], origin_keys[b], 0.5
+            branches[b] = _select_k1m_child(
+                candidates[b], child_keys[b], origin_keys[b], changed_state_bonus
             )
     out_len = max(s.x_t.shape[1] for s in branches)
     out = torch.full((batch_size, out_len), PAD_TOKEN, dtype=torch.long, device=device)

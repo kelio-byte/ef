@@ -1,10 +1,10 @@
-"""用途：提供 K1M2 分支采样所需的随机数、动作和候选筛选辅助函数。
+"""用途：提供 K=1、M 可配置分支采样所需的随机数、动作和候选筛选辅助函数。
 输入：模型分布、编辑状态、分支信息和随机种子。
 输出：采样动作、子候选及概率信息；不负责展开 R 次独立运行。
 """
 
 from __future__ import annotations
-from typing import List, Tuple, Optional, TYPE_CHECKING
+from typing import List, Tuple, TYPE_CHECKING
 import math
 import torch
 from torch import Tensor
@@ -17,7 +17,7 @@ from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 from edit_flows.sampling.common import _event_probability
 
 if TYPE_CHECKING:
-    from .r9 import Branch
+    from .branch_sampler import Branch
 
 
 def _mix_child_seed(parent_seed: int, step: int, child_index: int) -> int:
@@ -38,48 +38,38 @@ def _mix_child_seed(parent_seed: int, step: int, child_index: int) -> int:
     return x & (1 << 63) - 1
 
 
-def _logaddexp_float(a: float, b: float) -> float:
-    """作用：稳定合并两个对数权重。输入：两个 log 权重。输出：logsumexp 标量。"""
-    high = max(a, b)
-    low = min(a, b)
-    return high + math.log1p(math.exp(low - high))
-
-
-def _select_k1_m2_children(
+def _select_k1m_child(
     candidates: List[Branch],
     keys: List[Tuple[int, ...]],
     origin_key: Tuple[int, ...],
     changed_state_bonus: float,
 ) -> Branch:
-    """作用：合并重复状态并按 K1M2 规则保留一个子分支。输入：两个候选、状态键和变化奖励。输出：保留的分支。"""
-    if len(candidates) != 2 or len(keys) != 2:
-        raise ValueError("K1M2 selection requires exactly two children")
-    (first, second) = candidates
-    (first_key, second_key) = keys
-    if first_key == second_key:
-        combined_mass = _logaddexp_float(first.log_mass, second.log_mass)
-        best_path_log_p = max(first.path_log_p, second.path_log_p)
-        if second.seed < first.seed:
-            second.log_mass = combined_mass
-            second.weight += first.weight
-            second.path_log_p = best_path_log_p
-            return second
-        first.log_mass = combined_mass
-        first.weight += second.weight
-        first.path_log_p = best_path_log_p
-        return first
+    """合并相同状态并按出现次数和变化奖励保留一个候选。
 
-    def rank(branch: Branch, key: Tuple[int, ...]):
-        """作用：计算候选分支排序键。输入：分支和状态键。输出：按权重、变化奖励及种子组成的排序元组。"""
-        return (
-            branch.log_mass + changed_state_bonus * float(key != origin_key),
-            branch.log_mass,
-            -float(branch.seed),
-        )
+    输入：M 个子候选、对应状态键、原始状态键和变化奖励。
+    输出：得分最高的唯一状态代表；平分时选 seed 最小者。
+    """
+    if not candidates or len(candidates) != len(keys):
+        raise ValueError("Candidates and state keys must be non-empty and aligned")
+    grouped: dict[Tuple[int, ...], tuple[Branch, int]] = {}
+    for candidate, key in zip(candidates, keys):
+        current = grouped.get(key)
+        if current is None:
+            grouped[key] = (candidate, 1)
+            continue
+        representative, count = current
+        if candidate.seed < representative.seed:
+            representative = candidate
+        grouped[key] = (representative, count + 1)
 
-    if rank(second, second_key) > rank(first, first_key):
-        return second
-    return first
+    return max(
+        grouped.items(),
+        key=lambda item: (
+            math.log(item[1][1])
+            + changed_state_bonus * float(item[0] != origin_key),
+            -item[1][0].seed,
+        ),
+    )[1][0]
 
 
 def _token_keys_batch(
@@ -89,76 +79,6 @@ def _token_keys_batch(
     rows = x_t.detach().cpu().tolist()
     excluded = (pad_token, bos_token)
     return [tuple((token for token in row if token not in excluded)) for row in rows]
-
-
-def _step_log_p_batch(
-    actions: dict,
-    log_rates_eff: Tensor,
-    log_ins_probs: Tensor,
-    log_sub_probs: Tensor,
-    adapt_h: Tensor,
-    score_mode: str = "full_probability",
-    state_tokens: Optional[Tensor] = None,
-    pad_token: int = PAD_TOKEN,
-) -> Tensor:
-    """作用：计算每条分支本步动作的对数概率。输入：动作、模型分布、步长和状态。输出：每条分支的 log 概率。"""
-    rates = torch.exp(log_rates_eff)
-    if state_tokens is not None:
-        if state_tokens.shape != rates.shape[:2]:
-            raise ValueError(
-                "state_tokens must have shape [batch, length] matching rates"
-            )
-        (insert_positions, sub_del_positions) = edit_position_masks(
-            state_tokens, pad_token=pad_token
-        )
-    else:
-        insert_positions = actions.get("insert_position_mask")
-        sub_del_positions = actions.get("sub_del_position_mask")
-        if insert_positions is None:
-            insert_positions = torch.ones_like(rates[:, :, 0], dtype=torch.bool)
-        if sub_del_positions is None:
-            sub_del_positions = torch.ones_like(rates[:, :, 1], dtype=torch.bool)
-    ins_log_normalizer = actions.get("ins_token_log_normalizer")
-    sub_log_normalizer = actions.get("sub_token_log_normalizer")
-    ins_rates = rates[:, :, 0] * insert_positions.to(rates.dtype)
-    sub_rates = rates[:, :, 1] * sub_del_positions.to(rates.dtype)
-    del_rates = rates[:, :, 2] * sub_del_positions.to(rates.dtype)
-    eps = 1e-12
-    log_eps = math.log(eps)
-    ins_mu = adapt_h * ins_rates
-    ds_rates = sub_rates + del_rates
-    ds_mu = adapt_h * ds_rates
-    ins_event_log_p = torch.log((-torch.expm1(-ins_mu)).clamp_min(eps))
-    ds_event_log_p = torch.log((-torch.expm1(-ds_mu)).clamp_min(eps))
-    ins_token_log_p = log_ins_probs.gather(
-        2, actions["ins_tokens"].unsqueeze(-1)
-    ).squeeze(-1)
-    sub_token_log_p = log_sub_probs.gather(
-        2, actions["sub_tokens"].unsqueeze(-1)
-    ).squeeze(-1)
-    if ins_log_normalizer is not None:
-        ins_token_log_p = ins_token_log_p - ins_log_normalizer
-    if sub_log_normalizer is not None:
-        sub_token_log_p = sub_token_log_p - sub_log_normalizer
-    ins_token_log_p = ins_token_log_p.clamp_min(log_eps)
-    sub_token_log_p = sub_token_log_p.clamp_min(log_eps)
-    ins_contrib = torch.where(
-        actions["ins_mask"], ins_event_log_p + ins_token_log_p, -ins_mu
-    )
-    sub_contrib = (
-        ds_event_log_p
-        + torch.log((sub_rates / ds_rates.clamp_min(eps)).clamp_min(eps))
-        + sub_token_log_p
-    )
-    del_contrib = ds_event_log_p + torch.log(
-        (del_rates / ds_rates.clamp_min(eps)).clamp_min(eps)
-    )
-    ds_contrib = torch.where(
-        actions["sub_mask"],
-        sub_contrib,
-        torch.where(actions["del_mask"], del_contrib, -ds_mu),
-    )
-    return ins_contrib.sum(dim=1) + ds_contrib.sum(dim=1)
 
 
 def _apply_edits_batch(
@@ -272,13 +192,3 @@ def _sample_actions_per_branch(
         "sub_del_position_mask": sub_del_positions,
         "effective_log_rates": log_rates,
     }
-
-
-def _set_second_child_noop(actions: dict, n_children: int) -> None:
-    """作用：将每个父分支的第二个子分支设为 no-op。输入：动作字典和子分支数。输出：原地修改动作字典。"""
-    noop_rows = torch.arange(
-        1, actions["ins_mask"].shape[0], n_children, device=actions["ins_mask"].device
-    )
-    actions["ins_mask"][noop_rows] = False
-    actions["sub_mask"][noop_rows] = False
-    actions["del_mask"][noop_rows] = False

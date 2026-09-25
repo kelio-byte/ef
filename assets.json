@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "method": "product-memory SPE-M500, R9K1M2",
+  "method": "product-memory SPE-M500, K=1 (n_runs=9, n_children=2 defaults)",
   "spe_merges": 500,
   "spe_dropout": 0.0,
   "real_vocab_size": 568,

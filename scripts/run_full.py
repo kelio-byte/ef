@@ -32,6 +32,18 @@ def parse_args():
         default=500000,
         help="Checkpoint to test after training (official method: 500000)",
     )
+    parser.add_argument(
+        "--n-runs",
+        type=int,
+        default=9,
+        help="Independent sampling runs per product (official setting: 9)",
+    )
+    parser.add_argument(
+        "--n-children",
+        type=int,
+        default=2,
+        help="Stochastic child proposals per step M (default: 2)",
+    )
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument(
         "--max-products",
@@ -66,6 +78,10 @@ def main():
         )
     if args.workers < 1:
         raise ValueError("--workers must be positive")
+    if args.n_runs < 1:
+        raise ValueError("--n-runs must be positive")
+    if args.n_children < 1:
+        raise ValueError("--n-children must be positive")
     if args.max_products is not None and (
         args.max_products <= 0 or args.max_products % 20
     ):
@@ -120,6 +136,10 @@ def main():
         str(checkpoint),
         "--output",
         str(test_dir),
+        "--n-runs",
+        str(args.n_runs),
+        "--n-children",
+        str(args.n_children),
         "--device",
         args.device,
         "--workers",

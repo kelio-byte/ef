@@ -1,4 +1,4 @@
-"""用途：加载模型 checkpoint，并按正式 R9K1M2 协议生成候选。
+"""用途：加载模型 checkpoint，并按 K=1、M 可配置分支策略生成候选。
 输入：产品 token 序列、checkpoint、词表和采样参数。
 输出：候选预测文件及采样元数据。
 """
@@ -12,8 +12,8 @@ from tqdm import tqdm
 from .data.dataset import load_vocab
 from .models.transformer import EditFlowsTransformer
 from .core.scheduler import CubicScheduler
-from .sampling.r9 import sample_r9
-from .sampling.r9_helpers import _mix_child_seed
+from .sampling.branch_sampler import sample_branches
+from .sampling.branch_sampler_helpers import _mix_child_seed
 from .utils.tokens import PAD_TOKEN, BOS_TOKEN, UNK_TOKEN
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,15 +94,24 @@ def predict(
     output_dir,
     checkpoint=CHECKPOINT,
     vocab=DATA / "example.vocab.src",
-    protocol="r9",
+    n_runs=9,
     batch_size=32,
     device="cuda",
     max_products=None,
+    n_children=2,
 ):
-    """作用：按 R9K1M2 协议采样并写出预测。输入：产品文件、模型资产和采样选项。输出：预测路径，并写入元数据。
+    """作用：按 K=1、M 子候选分支策略采样并写出预测。输入：产品文件、模型资产和采样选项。输出：预测路径，并写入元数据。
 
-    R=9 次独立运行由此处展开；sample_r9 执行每条运行中的 K1M2 分支转移。
+    n_runs 控制独立运行数；n_children 控制每步采样的子候选数 M。
     """
+    if not isinstance(n_runs, int) or isinstance(n_runs, bool) or n_runs < 1:
+        raise ValueError("n_runs must be a positive integer")
+    if (
+        not isinstance(n_children, int)
+        or isinstance(n_children, bool)
+        or n_children < 1
+    ):
+        raise ValueError("n_children must be a positive integer")
     device = torch.device(device)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -111,8 +120,6 @@ def predict(
         raise FileExistsError(f"Refusing to overwrite {prediction_file}")
     if batch_size != 32:
         raise ValueError("Frozen reproduction batch_size is 32")
-    if protocol != "r9":
-        raise ValueError("Only the formal R9K1M2 protocol is supported")
     torch.set_float32_matmul_precision("high")
     model, cfg, token2id = load_model(checkpoint, vocab, device)
     torch.manual_seed(42)
@@ -130,30 +137,33 @@ def predict(
     ]
     id2token = {i: t for t, i in token2id.items()}
     scheduler = CubicScheduler()
+    changed_state_bonus = 0.5
     started = time.perf_counter()
     with prediction_file.open("w") as out:
         for start in tqdm(range(0, len(products), batch_size), desc="Sampling"):
             batch = product_ids[start : start + batch_size]
             x_unique = make_batch(batch, device)
-            x_0 = x_unique.repeat_interleave(9, dim=0)
+            x_0 = x_unique.repeat_interleave(n_runs, dim=0)
             mask = x_unique == PAD_TOKEN
             with torch.no_grad():
                 memory = model.encode_product(x_unique, mask).repeat_interleave(
-                    9, dim=0
+                    n_runs, dim=0
                 )
-            mask = mask.repeat_interleave(9, dim=0)
+            mask = mask.repeat_interleave(n_runs, dim=0)
             kwargs = dict(
                 product_memory=memory,
                 product_memory_padding_mask=mask,
                 n_steps=100,
                 max_seq_len=cfg["max_seq_len"],
+                n_children=n_children,
+                changed_state_bonus=changed_state_bonus,
             )
             seeds = [
                 _mix_child_seed(42, start + i, r + 1)
                 for i in range(len(batch))
-                for r in range(9)
+                for r in range(n_runs)
             ]
-            result = sample_r9(model, x_0, scheduler, seeds, **kwargs)
+            result = sample_branches(model, x_0, scheduler, seeds, **kwargs)
             for row in result.cpu().tolist():
                 out.write(
                     " ".join(
@@ -164,11 +174,11 @@ def predict(
                     + "\n"
                 )
     metadata = {
-        "protocol": protocol,
+        "sampling_method": "k1m_state_count",
         "seed": 42,
         "n_steps": 100,
-        "n_runs": 9,
-        "outputs_per_product": 9,
+        "n_runs": n_runs,
+        "outputs_per_product": n_runs,
         "n_products": len(products),
         "augmentation": 20,
         "batch_size": batch_size,
@@ -181,14 +191,14 @@ def predict(
         "seconds": time.perf_counter() - started,
         "torch": str(torch.__version__),
     }
-    if protocol == "r9":
-        metadata.update(
-            n_branches=1,
-            n_children=2,
-            score_mode="full_probability",
-            changed_state_bonus=0.5,
-            child_policy="stochastic_noop",
-        )
+    metadata.update(
+        n_branches=1,
+        n_children=n_children,
+        score_mode="full_probability",
+        changed_state_bonus=changed_state_bonus,
+        child_selection="log_occurrence_count_plus_changed_state_bonus",
+        child_tie_break="lowest_child_seed",
+    )
     (output / "sampling_metadata.json").write_text(
         json.dumps(metadata, indent=2) + "\n"
     )

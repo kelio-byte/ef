@@ -16,25 +16,53 @@ def score(predictions, targets, workers=8):
     pred_path = Path(predictions)
     prediction_lines = pred_path.read_text().splitlines()
     target_lines = Path(targets).read_text().splitlines()
-    if not prediction_lines or len(prediction_lines) % 180:
-        raise ValueError("Predictions must have 180 lines per complete reaction")
-    count = len(prediction_lines) // 180
-    if len(target_lines) % 20 or len(target_lines) < count * 20:
-        raise ValueError("Targets must cover complete 20-augmentation blocks")
     meta_path = pred_path.with_name("sampling_metadata.json")
     if not meta_path.exists():
         raise FileNotFoundError("Sampling metadata required")
     meta = json.loads(meta_path.read_text())
+    n_runs = meta.get("n_runs")
+    n_children = meta.get("n_children")
+    augmentation = meta.get("augmentation", 20)
+    if not isinstance(n_runs, int) or isinstance(n_runs, bool) or n_runs < 1:
+        raise ValueError("Sampling metadata must contain a positive integer n_runs")
+    if n_children is not None and (
+        not isinstance(n_children, int)
+        or isinstance(n_children, bool)
+        or n_children < 1
+    ):
+        raise ValueError("Sampling metadata n_children must be a positive integer")
     if (
-        meta["n_products"] * 9 != len(prediction_lines)
-        or meta["outputs_per_product"] != 9
+        not isinstance(augmentation, int)
+        or isinstance(augmentation, bool)
+        or augmentation < 1
+    ):
+        raise ValueError("Sampling metadata must contain a positive augmentation")
+    lines_per_reaction = augmentation * n_runs
+    if not prediction_lines or len(prediction_lines) % lines_per_reaction:
+        raise ValueError(
+            f"Predictions must have {lines_per_reaction} lines per complete reaction"
+        )
+    count = len(prediction_lines) // lines_per_reaction
+    if len(target_lines) % augmentation or len(target_lines) < count * augmentation:
+        raise ValueError(
+            f"Targets must cover complete {augmentation}-augmentation blocks"
+        )
+    n_products = meta.get("n_products")
+    if (
+        not isinstance(n_products, int)
+        or isinstance(n_products, bool)
+        or n_products < 1
+        or n_products * n_runs != len(prediction_lines)
+        or meta.get("outputs_per_product") != n_runs
+        or n_products % augmentation != 0
     ):
         raise ValueError("Prediction layout disagrees with metadata")
     if meta["predictions_sha256"] != sha256(pred_path):
         raise ValueError("Predictions changed since sampling")
     strings = ["".join(x.strip().split(" ")) for x in prediction_lines]
     target_strings = [
-        "".join(target_lines[i].strip().split(" ")) for i in range(0, count * 20, 20)
+        "".join(target_lines[i].strip().split(" "))
+        for i in range(0, count * augmentation, augmentation)
     ]
     with ProcessPoolExecutor(max_workers=workers) as pool:
         canonical = list(pool.map(canonicalize_smiles_clear_map, strings, chunksize=64))
@@ -47,9 +75,13 @@ def score(predictions, targets, workers=8):
     oracle_hits = invalid1 = 0
     ranks = []
     for i in range(count):
-        block = canonical[i * 180 : (i + 1) * 180]
-        views = [block[a * 9 : (a + 1) * 9] for a in range(20)]
-        rank, invalid = compute_rank(views, beam_size=9)
+        block = canonical[
+            i * lines_per_reaction : (i + 1) * lines_per_reaction
+        ]
+        views = [
+            block[a * n_runs : (a + 1) * n_runs] for a in range(augmentation)
+        ]
+        rank, invalid = compute_rank(views, beam_size=n_runs)
         ranked = sorted(rank, key=rank.get, reverse=True)[:10]
         found = next((j + 1 for j, c in enumerate(ranked) if c[0] == truth[i][0]), None)
         ranks.append(found)
@@ -65,12 +97,14 @@ def score(predictions, targets, workers=8):
         },
         "top_k_hits": hits,
         "oracle_any_percent": 100 * oracle_hits / count,
-        "invalid_at_1_percent": 100 * invalid1 / (count * 20),
+        "invalid_at_1_percent": 100 * invalid1 / (count * augmentation),
         "target_ranks": ranks,
         "aggregation_mode": "legacy_best_rank",
         "score_alpha": 1.0,
-        "augmentation": 20,
-        "beam_size": 9,
+        "augmentation": augmentation,
+        "n_runs": n_runs,
+        "n_children": n_children,
+        "beam_size": n_runs,
         "predictions_sha256": sha256(pred_path),
         "targets_sha256": sha256(targets),
     }
