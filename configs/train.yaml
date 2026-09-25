@@ -1,0 +1,57 @@
+retro:
+  vocab_size: null
+  hidden_dim: 256
+  num_layers: 10
+  num_heads: 8
+  dim_feedforward: 2048
+  max_seq_len: 96
+  dropout: 0.2
+  attention_dropout: 0.2
+  activation: relu
+  pos_encoding_scale: true
+
+  # Product memory
+  use_product_memory: true
+  product_memory_encoder_layers: 2
+  product_memory_fusion_after_layers: [5, 10]
+
+  # Training
+  batch_size: 256
+  val_batch_size: 256
+  total_steps: 600000
+  learning_rate_factor: 1.0
+  warmup_steps: 8000
+  max_grad_norm: 0.0
+
+  # Objective
+  scheduler: cubic
+  sample_scheduler: cubic
+  align_fn: opt
+  n_sampling_steps: 100
+  use_rate_reparam: false
+  time_input: t
+  clamp_kappa: false
+  clamp_max: 50.0
+
+  # data
+  data_dir: data/uspto50k_m500
+  vocab_file: example.vocab.src
+
+  seed: 42
+  num_workers: 2
+  checkpoint_interval: 10000
+  keep_checkpoints: 20
+  save_best_checkpoint: true
+  monitoring:
+    enabled: true
+    interval: 1000
+    jsonl: training_monitor.jsonl
+  tensorboard:
+    enabled: true
+    log_dir: tensorboard
+    log_interval: 100
+    validation_start_step: 20000
+    validation_interval: 20000
+    validation_batches: null
+    flush_interval: 500
+    flush_secs: 30

@@ -1,0 +1,135 @@
+{
+  "verified_at_utc": "2026-09-25T13:28:01.949784+00:00",
+  "scope": "Full frozen dev1000, supplied 500K checkpoint, old/new formal R9K1M2",
+  "environment": {
+    "python": "3.10.20",
+    "torch": "2.7.1+cu126",
+    "cuda_runtime": "12.6",
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "driver": "595.71.05",
+    "numpy": "1.23.5",
+    "rdkit": "2026.03.4"
+  },
+  "checkpoint_sha256": "7fe982dcdbea59eee999fcee7fd491664c6615a9fc9498afca02e7abbff5facf",
+  "dev1000_products_sha256": "54384b145933d85ce707f2eb5b7551e4ba3d3ab9197686ea5f1664e608fd8439",
+  "dev1000_targets_sha256": "1862b520154415e10af85bcdc2d466e741ede4643f58750f9c36f6d224fffdaf",
+  "protocol": {
+    "protocol": "r9",
+    "seed": 42,
+    "n_steps": 100,
+    "n_runs": 9,
+    "n_branches": 1,
+    "n_children": 2,
+    "batch_size": 32,
+    "scheduler": "cubic",
+    "matmul_precision": "high",
+    "score_mode": "full_probability",
+    "changed_state_bonus": 0.5,
+    "child_policy": "stochastic_noop"
+  },
+  "scoring": {
+    "aggregation_mode": "legacy_best_rank",
+    "score_alpha": 1.0,
+    "augmentation": 20,
+    "beam_size": 9
+  },
+  "reaction_count": 1000,
+  "prediction_line_count": 180000,
+  "old_new_predictions_byte_identical": true,
+  "old_new_predictions_sha256": "946a731895c69335221741ceb9010cef90aae41c12856a2d53716d834b6eebe8",
+  "old_new_target_ranks_identical": true,
+  "old_top_k_accuracy_percent": {
+    "1": 61.9,
+    "2": 75.3,
+    "3": 80.7,
+    "4": 82.7,
+    "5": 84.2,
+    "6": 85.4,
+    "7": 86.5,
+    "8": 87.0,
+    "9": 87.7,
+    "10": 88.0
+  },
+  "new_top_k_accuracy_percent": {
+    "1": 61.9,
+    "2": 75.3,
+    "3": 80.7,
+    "4": 82.7,
+    "5": 84.2,
+    "6": 85.4,
+    "7": 86.5,
+    "8": 87.0,
+    "9": 87.7,
+    "10": 88.0
+  },
+  "oracle_any_percent": 90.4,
+  "invalid_at_1_percent": 8.615,
+  "migration_checks": {
+    "training_old_new_exact": true,
+    "training_check_steps": 5,
+    "training_check_pairs": 8,
+    "training_check_batch_size": 2,
+    "training_check_device": "cpu",
+    "training_check_architecture": "full official 17080443-parameter model",
+    "resume_exact": true,
+    "final_training_exact": true,
+    "full_data_alignment_integrity": {
+      "train": {
+        "pairs": 800060,
+        "unknown_token_occurrences": 0
+      },
+      "val": {
+        "pairs": 100020,
+        "unknown_token_occurrences": 40
+      }
+    },
+    "dp_and_spe_regenerated_pairs_per_split": 100,
+    "isolated_smoke_prediction_count": 1440,
+    "isolated_smoke_sha256": "1da36b2cbbdf43cdde622b303d3d23d696cb076c13e72408412d1e821302f03a",
+    "old_repository_file_access_blocked": true,
+    "full_spe_data_and_vocabulary_regenerated_byte_identical": true,
+    "full_train_val_alignments_regenerated_byte_identical": true,
+    "preprocessing_start_point": "Frozen global strings; raw USPTO cleaning/global conversion not rerun",
+    "independent_old_scorer_smoke_ranks_exact": true,
+    "gpu_formal_training": {
+      "device": "RTX 3090",
+      "batch_size": 256,
+      "completed_steps": 1,
+      "dataset": "full frozen training split, 800060 aligned pairs",
+      "parameters_and_optimizer_finite": true,
+      "old_repository_file_access_blocked": true
+    }
+  },
+  "full_dev1000_source_sha256": "92b325f82c519d38e8e5906d8547f846a4fcea5bb04b8ccdcd48de2f66c3b3f7",
+  "current_source_sha256": "4a4f791a5f9b2859f1bdc66d161998d63e4f70be464c45e8c3200f6ce3de393a",
+  "full_workflow_smoke": {
+    "train_steps": 5,
+    "fresh_checkpoint_evaluated_at_step": 4,
+    "test_products": 160,
+    "test_reactions": 8,
+    "completed": true,
+    "not_a_formal_performance_measurement": true
+  },
+  "monitoring_check": {
+    "cpu_steps": 5,
+    "monitor_records_at_steps": [2, 4],
+    "gpu_batch_size": 256,
+    "gpu_steps": 1,
+    "gpu_memory_recorded": true,
+    "summary_written": true,
+    "anomalies": 0,
+    "model_optimizer_scheduler_and_data_position_unchanged": true
+  },
+  "after_origin_mask_removal": {
+    "dev1000_prefix_products": 160,
+    "prediction_lines": 1440,
+    "predictions_byte_identical_to_previous": true,
+    "predictions_sha256": "1da36b2cbbdf43cdde622b303d3d23d696cb076c13e72408412d1e821302f03a",
+    "five_cpu_training_steps_state_identical_to_previous": true
+  },
+  "source_hash_definition": "sorted relative path + NUL + bytes + NUL; edit_flows/**/*.py, scripts/*.py, configs/train.yaml, pyproject.toml; exclude editor .ipynb_checkpoints directories",
+  "not_rerun": [
+    "500000-step training",
+    "full test split"
+  ]
+}

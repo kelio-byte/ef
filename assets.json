@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "method": "product-memory SPE-M500, R9K1M2",
+  "spe_merges": 500,
+  "spe_dropout": 0.0,
+  "real_vocab_size": 568,
+  "model_vocab_size": 572,
+  "augmentation": 20,
+  "checkpoint_completed_steps": 500000,
+  "files": {
+    "checkpoints/product_memory_m500_step500000.pt": {
+      "sha256": "7fe982dcdbea59eee999fcee7fd491664c6615a9fc9498afca02e7abbff5facf",
+      "bytes": 205213991
+    },
+    "data/SPE_ChEMBL.txt": {
+      "sha256": "ee408e30e0aae598770f233013b312b206df424f6e593b410b0107d7d2237a43",
+      "bytes": 30881,
+      "lines": 3002
+    },
+    "data/uspto50k_m500/dev1000/manifest.json": {
+      "sha256": "bde573a2d91d29dad6916a1ac09161899dd5e0aad4f66c17210f14e1ae093748",
+      "bytes": 10784
+    },
+    "data/uspto50k_m500/dev1000/src.txt": {
+      "sha256": "54384b145933d85ce707f2eb5b7551e4ba3d3ab9197686ea5f1664e608fd8439",
+      "bytes": 1223704,
+      "lines": 20000
+    },
+    "data/uspto50k_m500/dev1000/tgt.txt": {
+      "sha256": "1862b520154415e10af85bcdc2d466e741ede4643f58750f9c36f6d224fffdaf",
+      "bytes": 1400107,
+      "lines": 20000
+    },
+    "data/uspto50k_m500/example.vocab.src": {
+      "sha256": "efb4e3ef2b62c57799287c53089f69abeaadfce1644679907f0fa241003d6483",
+      "bytes": 6513,
+      "lines": 568
+    },
+    "data/uspto50k_m500/test/src-test.txt": {
+      "sha256": "1b3663f61f7941229bb090ce463c3f68cf3eb4bc4038870c0fc14afac5a08f79",
+      "bytes": 6117850,
+      "lines": 100140
+    },
+    "data/uspto50k_m500/test/tgt-test.txt": {
+      "sha256": "429bc62014b60ed52b0c0e74403dd32e68fa50b2f875e96db2b7a8d4160a8f99",
+      "bytes": 6995992,
+      "lines": 100140
+    },
+    "data/uspto50k_m500/train/src-train.txt": {
+      "sha256": "4de9b0edf8644c971295aaed382a3174c95fbdac4a51db5e4b6f087276fddfe4",
+      "bytes": 49030563,
+      "lines": 800060
+    },
+    "data/uspto50k_m500/train/tgt-train.txt": {
+      "sha256": "a9e99b1b825a8ae11e7469ddec326d8af255ed67930df2643ef15d2a6c7f4bde",
+      "bytes": 55997796,
+      "lines": 800060
+    },
+    "data/uspto50k_m500/train/train_aligned_src.txt": {
+      "sha256": "efbe6550ec4d16bc26f3dee43b04936d5fc5406fc412f59c463ef0d21a7520fc",
+      "bytes": 62367399,
+      "lines": 800060
+    },
+    "data/uspto50k_m500/train/train_aligned_tgt.txt": {
+      "sha256": "36db3bf8a5022110aa3cc8a7fd8dcc5475e966052a5d21035f8ce2e13b04a50a",
+      "bytes": 56119980,
+      "lines": 800060
+    },
+    "data/uspto50k_m500/val/src-val.txt": {
+      "sha256": "6122011219400a36f5ce346a1ed41b7dfb593927a5414ac2d92cb4faccadaec4",
+      "bytes": 6129408,
+      "lines": 100020
+    },
+    "data/uspto50k_m500/val/tgt-val.txt": {
+      "sha256": "80a078f587e9459d117c88c28a04b1ca4d1624c6f40bec7b907834e4b8c7b409",
+      "bytes": 7002525,
+      "lines": 100020
+    },
+    "data/uspto50k_m500/val/val_aligned_src.txt": {
+      "sha256": "1c5e8fb58dd896c178dbff3b98bdfcc57a576339d161ed77ef22222db2f924cd",
+      "bytes": 7796442,
+      "lines": 100020
+    },
+    "data/uspto50k_m500/val/val_aligned_tgt.txt": {
+      "sha256": "7088f24a27431ec053d6a836b4f3ba9f6c4268ba989576cd13ce1e508eb1dcbd",
+      "bytes": 7016709,
+      "lines": 100020
+    }
+  }
+}
