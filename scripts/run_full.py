@@ -1,12 +1,11 @@
 """Train from scratch, then evaluate a checkpoint on the entire test split."""
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime
 import os
 from pathlib import Path
 import subprocess
 import sys
-from uuid import uuid4
 
 import yaml
 
@@ -18,7 +17,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "configs/train.yaml")
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--output-root", type=Path, default=ROOT / "training_runs")
+    parser.add_argument("--output-root", type=Path, default=ROOT / "training_run")
+    parser.add_argument(
+        "--run-name",
+        help="Directory name under output-root (default: config-name_MM-DD)",
+    )
     parser.add_argument(
         "--evaluate-step",
         type=int,
@@ -63,9 +66,17 @@ def main():
     ):
         raise ValueError("--max-products must be positive and divisible by 20")
 
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run_dir = args.output_root.resolve() / f"full_{run_id}_{uuid4().hex[:8]}"
-    run_dir.mkdir(parents=True, exist_ok=False)
+    run_name = args.run_name or f"{config_path.stem}_{datetime.now():%m-%d}"
+    if not run_name or Path(run_name).name != run_name or run_name in (".", ".."):
+        raise ValueError("--run-name must be one directory name")
+    run_dir = args.output_root.resolve() / run_name
+    try:
+        run_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        raise SystemExit(
+            f"Run directory already exists: {run_dir}. "
+            "Choose --run-name to keep the previous run intact."
+        ) from exc
     child_env = os.environ.copy()
     child_env["PYTHONPATH"] = os.pathsep.join(
         part for part in (str(ROOT), child_env.get("PYTHONPATH", "")) if part
@@ -80,7 +91,7 @@ def main():
             str(config_path),
             "--device",
             args.device,
-            "--save_dir",
+            "--run_dir",
             str(run_dir),
         ],
         cwd=ROOT,
@@ -88,13 +99,11 @@ def main():
         check=True,
     )
 
-    checkpoints = list(run_dir.rglob(f"checkpoint_step{step}.pt"))
-    if len(checkpoints) != 1:
+    checkpoint = run_dir / f"checkpoint_step{step}.pt"
+    if not checkpoint.is_file():
         raise RuntimeError(
-            f"Expected one freshly trained step-{step} checkpoint in {run_dir}; "
-            f"found {len(checkpoints)}"
+            f"Freshly trained step-{step} checkpoint was not saved at {checkpoint}"
         )
-    checkpoint = checkpoints[0]
     test_dir = run_dir / f"test_step{step}"
     print(f"Evaluating full test from {checkpoint}", flush=True)
     command = [

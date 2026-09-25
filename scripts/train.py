@@ -791,7 +791,9 @@ def run_training(args, context: DistributedContext) -> None:
         val_generator.manual_seed(seed + context.world_size + context.rank)
     if context.is_main_process:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        if args.save_dir:
+        if getattr(args, "run_dir", None):
+            proposed_save_dir = args.run_dir
+        elif args.save_dir:
             proposed_save_dir = os.path.join(args.save_dir, dataset_name, timestamp)
         elif args.checkpoint:
             proposed_save_dir = os.path.dirname(args.checkpoint)
@@ -1366,6 +1368,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--save_dir", type=str, default=None, help="Override save directory"
+    )
+    parser.add_argument(
+        "--run_dir",
+        type=str,
+        default=None,
+        help="Use this exact checkpoint/log directory without dataset or timestamp suffix",
     )
     parser.add_argument(
         "--keep_checkpoints",

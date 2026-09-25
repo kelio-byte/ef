@@ -101,7 +101,7 @@
     }
   },
   "full_dev1000_source_sha256": "92b325f82c519d38e8e5906d8547f846a4fcea5bb04b8ccdcd48de2f66c3b3f7",
-  "current_source_sha256": "4a4f791a5f9b2859f1bdc66d161998d63e4f70be464c45e8c3200f6ce3de393a",
+  "current_source_sha256": "ccd837e5eecf567906739989072773019995572ead0e0dd2cca2287f9b694e88",
   "full_workflow_smoke": {
     "train_steps": 5,
     "fresh_checkpoint_evaluated_at_step": 4,

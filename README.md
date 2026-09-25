@@ -67,7 +67,7 @@ python scripts/score.py --predictions outputs/sample/predictions.txt --targets d
 python scripts/run_full.py --device cuda
 ```
 
-使用当前配置从零训练 **600000 步**，然后以本次训练产生的 **500000 步 checkpoint** 对完整 test（5007 个反应）推理并评分；不会使用仓库自带的 checkpoint。结果、训练日志和 monitoring 均在 `training_runs/full_*/`，指标见其中的 `test_step500000/metrics.json`。默认不截取测试集；`--max-products` 仅供连通性检查，不能作为正式性能。若要评估最终 600K 权重，可加 `--evaluate-step 600000`。完整训练与测试需要较长时间和足够磁盘空间。
+使用当前配置从零训练 **600000 步**，然后以本次训练产生的 **500000 步 checkpoint** 对完整 test（5007 个反应）推理并评分；不会使用仓库自带的 checkpoint。训练文件直接保存在 `training_run/train_月-日/`，例如 `training_run/train_09-25/`；指标在其 `test_step500000/metrics.json`。同名目录已存在时不会覆盖，可用 `--run-name train_09-25_retry` 另起一轮。默认不截取测试集；`--max-products` 仅供连通性检查，不能作为正式性能。若要评估最终 600K 权重，可加 `--evaluate-step 600000`。完整训练与测试需要较长时间和足够磁盘空间。
 
 ## 手动训练与继续训练
 
