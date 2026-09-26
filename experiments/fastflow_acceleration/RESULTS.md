@@ -29,6 +29,9 @@
 | `static25_pilot` | Static-25 uniform + M2 GPU 选择 | pilot200 | `a1aa63f` | `44eaa6d6...` | `outputs/fastflow_accel/static25_pilot/` | 完成；预测 SHA-256 `557a633f...` |
 | `static75_pilot` | Static-75 uniform + M2 GPU 选择 | pilot200 | `a1aa63f` | `44eaa6d6...` | `outputs/fastflow_accel/static75_pilot/` | 完成；预测 SHA-256 `e3ce07ec...` |
 | `hazard04_l015_pilot` | Hazard 自适应（h≤0.04，Λh≤0.15）+ M2 GPU 选择 | pilot200 | `d99cc2a` | `44eaa6d6...` | `outputs/fastflow_accel/hazard04_l015_pilot/` | 完成；所有轨迹到达 t=1；预测 SHA-256 `89ed64dc...` |
+| `hazard04_l015_dev1000` | Hazard 自适应（h≤0.04，Λh≤0.15，max NFE 200） | dev1000 | `d99cc2a` | `54384b14...` | `outputs/fastflow_accel/hazard04_l015_dev1000/` | 完成；预测 SHA-256 `ae522bdd...` |
+| `hazard04_l015_heldout` | 同次 dev1000 输出的 heldout800 评分子集 | heldout800 | `d99cc2a` | `2bf01200...` | `outputs/fastflow_accel/hazard04_l015_heldout/` | 完成；parent prediction SHA-256 与 dev1000 相同；无额外推理 |
+| `hazard04_l015_test` | 冻结 Hazard 自适应方法 | test | `d99cc2a` | 待采样时记录 | `outputs/fastflow_accel/hazard04_l015_test/` | 待运行；仅一次 |
 
 ## B. 速度与质量
 
@@ -42,8 +45,29 @@
 | Static-25 + Exact-M2-GPU | pilot200 | 52.68 | 4.132× | 25/25 | 60.0% | 78.0% | 89.0% | 92.0% | 16.8% | 0.523 | 555.7 |
 | Static-75 + Exact-M2-GPU | pilot200 | 136.87 | 1.590× | 75/75 | 58.0% | 78.0% | 88.5% | 91.0% | 9.375% | 1.280 | 566.4 |
 | Hazard h≤0.04, Λh≤0.15 | pilot200 | 161.75 | 1.346× | 38.56/33 | 59.0% | 80.5% | 88.5% | 92.0% | 8.675% | 1.977 | 513.2 |
+| Hazard h≤0.04, Λh≤0.15 | dev1000 | 822.83 | 1.302× | 39.24/34 | 62.4% | 81.4% | 87.3% | 90.5% | 8.015% | 1.981 | 577.4 |
+| Hazard h≤0.04, Λh≤0.15 | heldout800（同次 dev1000 预测） | — | — | —（dev1000 全量 39.24/34） | 63.25% | 81.75% | 86.875% | 89.875% | 8.04375% | — | — |
 
 完整基线共处理 20,000 个增强输入、180,000 条轨迹；总 NFE 为 18,000,000，625 个 batch 共调用模型 62,500 次。`heldout800` 只从同一次完整预测提取对应反应并重新评分，因此没有独立采样耗时或显存值。历史 dev1000 的 1088.07 秒使用另一权重及旧计时口径，不参与加速比计算。
+
+### 配对质量差值及不确定性
+
+候选与基线按同一反应配对，以反应为单位有放回抽样 10,000 次，随机种子 `20260926`，报告百分比点（pp）的 2.5%～97.5% percentile 区间。预先约定的质量预算仍按点估计判断；区间用于说明不确定性，不把“包含 0”作为自动通过或失败。
+
+| 划分 | 指标 | 候选−基线 (pp) | 配对 bootstrap 95% 区间 (pp) |
+|---|---|---:|---:|
+| heldout800 | Top-1 | +0.875 | [−0.500, +2.375] |
+| heldout800 | Top-3 | +0.875 | [−0.375, +2.250] |
+| heldout800 | Top-10 | −0.750 | [−2.250, +0.750] |
+| heldout800 | oracle-any | 0.000 | [−1.250, +1.250] |
+| heldout800 | invalid-at-1 | −0.650 | [−1.181, −0.125] |
+| dev1000 | Top-1 | +0.700 | [−0.700, +2.100] |
+| dev1000 | Top-3 | +0.700 | [−0.400, +1.800] |
+| dev1000 | Top-10 | −0.700 | [−2.000, +0.600] |
+| dev1000 | oracle-any | +0.100 | [−1.000, +1.200] |
+| dev1000 | invalid-at-1 | −0.620 | [−1.085, −0.155] |
+
+Top-k 与 oracle 的区间均覆盖 0；这批样本没有清晰证据说明候选在这些指标上优于或劣于基线。heldout800 点估计满足原先固定的损失上限，invalid-at-1 的区间则显示候选低于基线。
 
 复现命令（使用该仓库源码而非环境中其他可编辑安装）：
 
@@ -58,6 +82,10 @@ PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sampl
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/static25_pilot --n-steps 25 --time-grid uniform --record-performance
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/static75_pilot --n-steps 75 --time-grid uniform --record-performance
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/hazard04_l015_pilot --n-steps 200 --time-grid hazard --hazard-max-step 0.04 --hazard-limit 0.15 --record-performance
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/evaluate.py --split dev1000 --output outputs/fastflow_accel/hazard04_l015_dev1000 --n-steps 200 --time-grid hazard --hazard-max-step 0.04 --hazard-limit 0.15 --record-performance --workers 8
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/accel_protocol.py score-heldout --split-dir outputs/fastflow_accel/split --full-output outputs/fastflow_accel/hazard04_l015_dev1000 --output outputs/fastflow_accel/hazard04_l015_heldout --workers 8
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/paired_bootstrap.py --baseline-metrics outputs/fastflow_accel/baseline_heldout/metrics.json --candidate-metrics outputs/fastflow_accel/hazard04_l015_heldout/metrics.json --output outputs/fastflow_accel/hazard04_l015_heldout/paired_bootstrap.json
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/paired_bootstrap.py --baseline-metrics outputs/fastflow_accel/baseline_dev1000/metrics.json --candidate-metrics outputs/fastflow_accel/hazard04_l015_dev1000/metrics.json --output outputs/fastflow_accel/hazard04_l015_dev1000/paired_bootstrap.json
 ```
 
 ## C. 性能构成与轨迹诊断
@@ -93,3 +121,4 @@ hazard 每四步轮转抽样 1/4 的轨迹（每时间段 225,000 个值）；�
 | 3b：Static-25 | 更少 NFE 能否提供有用的质量/速度端点 | pilot：52.68 秒、4.132×；Top-1/3/10 `60.0/78.0/89.0%`；invalid-at-1 `16.8%`（基线 `8.65%`） | 速度快但首选无效率上升 8.15 pp，排除为候选；Static-50 也高于预算，依预案补测 Static-75 | Static-75 |
 | 3c：Static-75 | 中间固定步数能否恢复质量并保留至少 1.20×速度 | pilot：136.87 秒、1.590×；Top-1/3/10 `58.0/78.0/88.5%`；invalid-at-1 `9.375%` | invalid 上升 0.725 pp 且 Top-3 下降 2.5 pp；三个固定步数点均未在 pilot 显示可接受质量，跳过该分支全量验证 | 阶段 4 Hazard 自适应步长；利用分时 hazard 区间筛保守阈值 |
 | 4a：Hazard h≤0.04 | 用总合法编辑 hazard 限制每步累计事件强度，在安全时间段跨步并保留高 hazard 区域的采样密度 | pilot：161.75 秒、1.346×；平均/中位 NFE 38.56/33，最大 157/200；Top-1/3/10 `59.0/80.5/88.5%`；invalid-at-1 `8.675%` | 达到 1.20× pilot 速度目标，五项质量指标均在默认预算内；只保留此阈值进入唯一一次 dev1000 验收 | 阶段 8：冻结 h≤0.04、Λh≤0.15、max NFE 200，完整 dev1000 + 同次预测的 heldout800 评分 |
+| 8：最终确认 | 冻结 Hazard 方法在未调参的 800 个反应上保持质量预算，完整集达到 1.20× | dev1000：822.83 秒（1.302×）；heldout800 相对基线 ΔTop-1 `+0.875 pp`、ΔTop-3 `+0.875 pp`、ΔTop-10 `−0.75 pp`、Δoracle `0 pp`、Δinvalid `−0.65 pp`；heldout Top-k 95% 配对区间均包含 0，invalid 区间 `[−1.181, −0.125] pp`；平均/中位/最大 NFE `39.24/34/185` | 按预先固定的点估计预算，dev1000 和 heldout800 均通过；达到 1.20×，配置冻结 | 按计划对完整 test 运行一次，报告泛化指标，不再调参 |
