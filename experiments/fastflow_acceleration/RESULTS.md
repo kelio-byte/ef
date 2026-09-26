@@ -28,6 +28,7 @@
 | `static50_pilot` | Static-50 uniform + M2 GPU 选择 | pilot200 | `a1aa63f` | `44eaa6d6...` | `outputs/fastflow_accel/static50_pilot/` | 完成；预测 SHA-256 `5f58ef36...` |
 | `static25_pilot` | Static-25 uniform + M2 GPU 选择 | pilot200 | `a1aa63f` | `44eaa6d6...` | `outputs/fastflow_accel/static25_pilot/` | 完成；预测 SHA-256 `557a633f...` |
 | `static75_pilot` | Static-75 uniform + M2 GPU 选择 | pilot200 | `a1aa63f` | `44eaa6d6...` | `outputs/fastflow_accel/static75_pilot/` | 完成；预测 SHA-256 `e3ce07ec...` |
+| `hazard04_l015_pilot` | Hazard 自适应（h≤0.04，Λh≤0.15）+ M2 GPU 选择 | pilot200 | `d99cc2a` | `44eaa6d6...` | `outputs/fastflow_accel/hazard04_l015_pilot/` | 完成；所有轨迹到达 t=1；预测 SHA-256 `89ed64dc...` |
 
 ## B. 速度与质量
 
@@ -40,6 +41,7 @@
 | Static-50 + Exact-M2-GPU | pilot200 | 93.82 | 2.320× | 50/50 | 59.5% | 79.5% | 89.0% | 92.0% | 10.425% | 0.858 | 577.2 |
 | Static-25 + Exact-M2-GPU | pilot200 | 52.68 | 4.132× | 25/25 | 60.0% | 78.0% | 89.0% | 92.0% | 16.8% | 0.523 | 555.7 |
 | Static-75 + Exact-M2-GPU | pilot200 | 136.87 | 1.590× | 75/75 | 58.0% | 78.0% | 88.5% | 91.0% | 9.375% | 1.280 | 566.4 |
+| Hazard h≤0.04, Λh≤0.15 | pilot200 | 161.75 | 1.346× | 38.56/33 | 59.0% | 80.5% | 88.5% | 92.0% | 8.675% | 1.977 | 513.2 |
 
 完整基线共处理 20,000 个增强输入、180,000 条轨迹；总 NFE 为 18,000,000，625 个 batch 共调用模型 62,500 次。`heldout800` 只从同一次完整预测提取对应反应并重新评分，因此没有独立采样耗时或显存值。历史 dev1000 的 1088.07 秒使用另一权重及旧计时口径，不参与加速比计算。
 
@@ -55,6 +57,7 @@ PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sampl
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/static50_pilot --n-steps 50 --time-grid uniform --record-performance
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/static25_pilot --n-steps 25 --time-grid uniform --record-performance
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/static75_pilot --n-steps 75 --time-grid uniform --record-performance
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/hazard04_l015_pilot --n-steps 200 --time-grid hazard --hazard-max-step 0.04 --hazard-limit 0.15 --record-performance
 ```
 
 ## C. 性能构成与轨迹诊断
@@ -89,3 +92,4 @@ hazard 每四步轮转抽样 1/4 的轨迹（每时间段 225,000 个值）；�
 | 3a：Static-50 | 均匀 50 格到达 `t=1` 能减少一半 NFE 并保持有竞争力的质量 | pilot：93.82 秒、2.320×；Top-1/3/10 `59.5/79.5/89.0%`；invalid-at-1 `10.425%`（基线 `8.65%`） | 很快；首选无效率在 pilot 上上升 1.775 pp，未列为正式候选；pilot 只作排序，继续测 Static-25 完成曲线端点 | Static-25 |
 | 3b：Static-25 | 更少 NFE 能否提供有用的质量/速度端点 | pilot：52.68 秒、4.132×；Top-1/3/10 `60.0/78.0/89.0%`；invalid-at-1 `16.8%`（基线 `8.65%`） | 速度快但首选无效率上升 8.15 pp，排除为候选；Static-50 也高于预算，依预案补测 Static-75 | Static-75 |
 | 3c：Static-75 | 中间固定步数能否恢复质量并保留至少 1.20×速度 | pilot：136.87 秒、1.590×；Top-1/3/10 `58.0/78.0/88.5%`；invalid-at-1 `9.375%` | invalid 上升 0.725 pp 且 Top-3 下降 2.5 pp；三个固定步数点均未在 pilot 显示可接受质量，跳过该分支全量验证 | 阶段 4 Hazard 自适应步长；利用分时 hazard 区间筛保守阈值 |
+| 4a：Hazard h≤0.04 | 用总合法编辑 hazard 限制每步累计事件强度，在安全时间段跨步并保留高 hazard 区域的采样密度 | pilot：161.75 秒、1.346×；平均/中位 NFE 38.56/33，最大 157/200；Top-1/3/10 `59.0/80.5/88.5%`；invalid-at-1 `8.675%` | 达到 1.20× pilot 速度目标，五项质量指标均在默认预算内；只保留此阈值进入唯一一次 dev1000 验收 | 阶段 8：冻结 h≤0.04、Λh≤0.15、max NFE 200，完整 dev1000 + 同次预测的 heldout800 评分 |
