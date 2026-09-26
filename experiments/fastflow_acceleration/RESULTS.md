@@ -31,7 +31,7 @@
 | `hazard04_l015_pilot` | Hazard 自适应（h≤0.04，Λh≤0.15）+ M2 GPU 选择 | pilot200 | `d99cc2a` | `44eaa6d6...` | `outputs/fastflow_accel/hazard04_l015_pilot/` | 完成；所有轨迹到达 t=1；预测 SHA-256 `89ed64dc...` |
 | `hazard04_l015_dev1000` | Hazard 自适应（h≤0.04，Λh≤0.15，max NFE 200） | dev1000 | `d99cc2a` | `54384b14...` | `outputs/fastflow_accel/hazard04_l015_dev1000/` | 完成；预测 SHA-256 `ae522bdd...` |
 | `hazard04_l015_heldout` | 同次 dev1000 输出的 heldout800 评分子集 | heldout800 | `d99cc2a` | `2bf01200...` | `outputs/fastflow_accel/hazard04_l015_heldout/` | 完成；parent prediction SHA-256 与 dev1000 相同；无额外推理 |
-| `hazard04_l015_test` | 冻结 Hazard 自适应方法 | test | `d99cc2a` | 待采样时记录 | `outputs/fastflow_accel/hazard04_l015_test/` | 待运行；仅一次 |
+| `hazard04_l015_test` | 冻结 Hazard 自适应方法 | test | `d99cc2a` | `1b3663f6...`（100,140 个输入；目标 SHA-256 `429bc620...`） | `outputs/fastflow_accel/hazard04_l015_test/` | 运行中；仅一次 |
 
 ## B. 速度与质量
 
@@ -84,6 +84,7 @@ PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sampl
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/hazard04_l015_pilot --n-steps 200 --time-grid hazard --hazard-max-step 0.04 --hazard-limit 0.15 --record-performance
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/evaluate.py --split dev1000 --output outputs/fastflow_accel/hazard04_l015_dev1000 --n-steps 200 --time-grid hazard --hazard-max-step 0.04 --hazard-limit 0.15 --record-performance --workers 8
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/accel_protocol.py score-heldout --split-dir outputs/fastflow_accel/split --full-output outputs/fastflow_accel/hazard04_l015_dev1000 --output outputs/fastflow_accel/hazard04_l015_heldout --workers 8
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/evaluate.py --split test --output outputs/fastflow_accel/hazard04_l015_test --n-steps 200 --time-grid hazard --hazard-max-step 0.04 --hazard-limit 0.15 --record-performance --workers 8
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/paired_bootstrap.py --baseline-metrics outputs/fastflow_accel/baseline_heldout/metrics.json --candidate-metrics outputs/fastflow_accel/hazard04_l015_heldout/metrics.json --output outputs/fastflow_accel/hazard04_l015_heldout/paired_bootstrap.json
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/paired_bootstrap.py --baseline-metrics outputs/fastflow_accel/baseline_dev1000/metrics.json --candidate-metrics outputs/fastflow_accel/hazard04_l015_dev1000/metrics.json --output outputs/fastflow_accel/hazard04_l015_dev1000/paired_bootstrap.json
 ```
