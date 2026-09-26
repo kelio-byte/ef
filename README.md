@@ -77,6 +77,14 @@ python scripts/run_full.py --device cuda --n-runs 9 --n-children 2
 
 使用当前配置从零训练 **600000 步**，然后以本次训练产生的 **500000 步 checkpoint** 对完整 test（5007 个反应）推理并评分；不会使用仓库自带的 checkpoint。正式设置为 `n_runs=9, n_children=2`，两者都可调节。训练文件直接保存在 `training_run/train_月-日/`，例如 `training_run/train_09-25/`；指标在其 `test_step500000/metrics.json`。同名目录已存在时不会覆盖，可用 `--run-name train_09-25_retry` 另起一轮。默认不截取测试集；`--max-products` 仅供连通性检查，不能作为正式性能。若要评估最终 600K 权重，可加 `--evaluate-step 600000`。完整训练与测试需要较长时间和足够磁盘空间。
 
+如果已有完整训练产生的 550K checkpoint，只想补跑评测而不重新训练：
+
+```bash
+bash scripts/evaluate_550k.sh training_run/train_09-25/checkpoint_step550000.pt
+```
+
+脚本使用 R=9、M=2 对完整 test 评测，结果写入 checkpoint 同目录的 `test_step550000/`。它使用当前仓库的无 `stochastic_noop` 推理规则；若要和此前带 no-op 的 500K 结果严格比较，也应使用当前规则重新评测 500K。
+
 ## 手动训练与继续训练
 
 ```bash
