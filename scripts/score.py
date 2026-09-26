@@ -73,6 +73,8 @@ def score(predictions, targets, workers=8):
         raise ValueError("An evaluation target cannot be canonicalized")
     hits = [0] * 10
     oracle_hits = invalid1 = 0
+    oracle_by_reaction = []
+    invalid1_by_reaction = []
     ranks = []
     for i in range(count):
         block = canonical[
@@ -88,8 +90,15 @@ def score(predictions, targets, workers=8):
         if found is not None:
             for k in range(found - 1, 10):
                 hits[k] += 1
-        oracle_hits += int(any(c[0] == truth[i][0] for c in block))
+        oracle_hit = any(c[0] == truth[i][0] for c in block)
+        oracle_hits += int(oracle_hit)
+        oracle_by_reaction.append(oracle_hit)
         invalid1 += invalid[0]
+        invalid1_by_reaction.append(invalid[0] / augmentation)
+    if not (
+        len(ranks) == len(oracle_by_reaction) == len(invalid1_by_reaction) == count
+    ):
+        raise RuntimeError("Per-reaction metrics are not aligned with the score count")
     result = {
         "reaction_count": count,
         "top_k_accuracy_percent": {
@@ -99,6 +108,8 @@ def score(predictions, targets, workers=8):
         "oracle_any_percent": 100 * oracle_hits / count,
         "invalid_at_1_percent": 100 * invalid1 / (count * augmentation),
         "target_ranks": ranks,
+        "oracle_any_by_reaction": oracle_by_reaction,
+        "invalid_at_1_by_reaction": invalid1_by_reaction,
         "aggregation_mode": "legacy_best_rank",
         "score_alpha": 1.0,
         "augmentation": augmentation,
@@ -111,7 +122,19 @@ def score(predictions, targets, workers=8):
     output = pred_path.with_name("metrics.json")
     output.write_text(json.dumps(result, indent=2) + "\n")
     print(
-        json.dumps({k: v for k, v in result.items() if k != "target_ranks"}, indent=2)
+        json.dumps(
+            {
+                k: v
+                for k, v in result.items()
+                if k
+                not in {
+                    "target_ranks",
+                    "oracle_any_by_reaction",
+                    "invalid_at_1_by_reaction",
+                }
+            },
+            indent=2,
+        )
     )
     return result
 
