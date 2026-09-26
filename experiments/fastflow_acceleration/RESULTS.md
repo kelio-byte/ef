@@ -26,6 +26,7 @@
 | `trajectory_pilot` | Full-100 轨迹诊断 | pilot200 | `066cb59` | `44eaa6d6...` | `outputs/fastflow_accel/trajectory_pilot/` | 完成；预测 SHA 与基线相同；评分与 pilot 基线一致 |
 | `exact_gpu_select_pilot` | Full-100 + M2 GPU 选择 | pilot200 | `ac39a8c` | `44eaa6d6...` | `outputs/fastflow_accel/exact_gpu_select_pilot/` | 完成；预测逐字节与基线一致；预测 SHA-256 `17f7c190...` |
 | `static50_pilot` | Static-50 uniform + M2 GPU 选择 | pilot200 | `a1aa63f` | `44eaa6d6...` | `outputs/fastflow_accel/static50_pilot/` | 完成；预测 SHA-256 `5f58ef36...` |
+| `static25_pilot` | Static-25 uniform + M2 GPU 选择 | pilot200 | `a1aa63f` | `44eaa6d6...` | `outputs/fastflow_accel/static25_pilot/` | 完成；预测 SHA-256 `557a633f...` |
 
 ## B. 速度与质量
 
@@ -36,6 +37,7 @@
 | Full-100 | heldout800（从 dev1000 输出评分） | — | — | 100/100 | 62.375% | 80.875% | 87.625% | 89.875% | 8.69375% | — | — |
 | Exact-M2-GPU | pilot200 | 188.31 | 1.156× | 100/100 | 58.5% | 80.5% | 88.0% | 91.5% | 8.65% | 1.733 | 556.3 |
 | Static-50 + Exact-M2-GPU | pilot200 | 93.82 | 2.320× | 50/50 | 59.5% | 79.5% | 89.0% | 92.0% | 10.425% | 0.858 | 577.2 |
+| Static-25 + Exact-M2-GPU | pilot200 | 52.68 | 4.132× | 25/25 | 60.0% | 78.0% | 89.0% | 92.0% | 16.8% | 0.523 | 555.7 |
 
 完整基线共处理 20,000 个增强输入、180,000 条轨迹；总 NFE 为 18,000,000，625 个 batch 共调用模型 62,500 次。`heldout800` 只从同一次完整预测提取对应反应并重新评分，因此没有独立采样耗时或显存值。历史 dev1000 的 1088.07 秒使用另一权重及旧计时口径，不参与加速比计算。
 
@@ -49,6 +51,7 @@ PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sampl
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/score.py --predictions outputs/fastflow_accel/trajectory_pilot/predictions.txt --targets outputs/fastflow_accel/split/pilot/tgt.txt --workers 8
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/exact_gpu_select_pilot --record-performance
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/static50_pilot --n-steps 50 --time-grid uniform --record-performance
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/static25_pilot --n-steps 25 --time-grid uniform --record-performance
 ```
 
 ## C. 性能构成与轨迹诊断
@@ -81,3 +84,4 @@ hazard 每四步轮转抽样 1/4 的轨迹（每时间段 225,000 个值）；�
 | 1：性能与轨迹诊断 | 热点及状态稳定区足以支持后续优化筛选 | Transformer 占标记 CUDA 时间 82.6%～83.5%；状态不变率 92.1%～99.6%；理想可省 NFE 上限 92.1%～99.6%；诊断输出与基线预测哈希、评分一致 | 阶段 1 完成；足以解释热点；无事件跳步及强度复用都值得小规模验证，后段 hazard/误差更高 | 阶段 2 先做保持语义的 CPU 同步/编辑开销优化；之后按计划对照 Static-50/25 |
 | 2a：M2 选择工程优化 | 避免把全部子候选状态传回 CPU 并逐条 Python 分组，保留原选择结果 | pilot：188.31 秒，对比 217.68 秒；提速 13.49%；预测 SHA、Top-k、oracle、invalid 全部一致；NFE 仍为 100 | pilot 达到 Exact 保留线（逐字节一致且快至少 5%）；仅有 pilot 级证据，尚未全量确认 | 阶段 3 固定步数对照；该优化合入候选 |
 | 3a：Static-50 | 均匀 50 格到达 `t=1` 能减少一半 NFE 并保持有竞争力的质量 | pilot：93.82 秒、2.320×；Top-1/3/10 `59.5/79.5/89.0%`；invalid-at-1 `10.425%`（基线 `8.65%`） | 很快；首选无效率在 pilot 上上升 1.775 pp，未列为正式候选；pilot 只作排序，继续测 Static-25 完成曲线端点 | Static-25 |
+| 3b：Static-25 | 更少 NFE 能否提供有用的质量/速度端点 | pilot：52.68 秒、4.132×；Top-1/3/10 `60.0/78.0/89.0%`；invalid-at-1 `16.8%`（基线 `8.65%`） | 速度快但首选无效率上升 8.15 pp，排除为候选；Static-50 也高于预算，依预案补测 Static-75 | Static-75 |
