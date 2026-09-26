@@ -6,6 +6,7 @@
 from pathlib import Path
 import hashlib
 import json
+import math
 import time
 import torch
 from tqdm import tqdm
@@ -99,6 +100,7 @@ def predict(
     device="cuda",
     max_products=None,
     n_children=2,
+    record_performance=False,
 ):
     """作用：按 K=1、M 子候选分支策略采样并写出预测。输入：产品文件、模型资产和采样选项。输出：预测路径，并写入元数据。
 
@@ -138,9 +140,16 @@ def predict(
     id2token = {i: t for t, i in token2id.items()}
     scheduler = CubicScheduler()
     changed_state_bonus = 0.5
+    batch_seconds = []
+    sampler_statistics = {} if record_performance else None
+    if device.type == "cuda":
+        if record_performance:
+            torch.cuda.reset_peak_memory_stats(device)
+        torch.cuda.synchronize(device)
     started = time.perf_counter()
     with prediction_file.open("w") as out:
         for start in tqdm(range(0, len(products), batch_size), desc="Sampling"):
+            batch_started = time.perf_counter() if record_performance else None
             batch = product_ids[start : start + batch_size]
             x_unique = make_batch(batch, device)
             x_0 = x_unique.repeat_interleave(n_runs, dim=0)
@@ -158,6 +167,8 @@ def predict(
                 n_children=n_children,
                 changed_state_bonus=changed_state_bonus,
             )
+            if sampler_statistics is not None:
+                kwargs["statistics"] = sampler_statistics
             seeds = [
                 _mix_child_seed(42, start + i, r + 1)
                 for i in range(len(batch))
@@ -173,6 +184,11 @@ def predict(
                     )
                     + "\n"
                 )
+            if batch_started is not None:
+                batch_seconds.append(time.perf_counter() - batch_started)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    elapsed_seconds = time.perf_counter() - started
     metadata = {
         "sampling_method": "k1m_state_count",
         "seed": 42,
@@ -188,9 +204,30 @@ def predict(
         "products_sha256": sha256(products_file),
         "vocab_sha256": sha256(vocab),
         "predictions_sha256": sha256(prediction_file),
-        "seconds": time.perf_counter() - started,
+        "seconds": elapsed_seconds,
         "torch": str(torch.__version__),
     }
+    if sampler_statistics is not None:
+        sorted_batch_seconds = sorted(batch_seconds)
+        metadata["performance"] = {
+            "device": str(device),
+            "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
+            "cuda": str(torch.version.cuda),
+            "batch_seconds": batch_seconds,
+            "batch_seconds_p50": sorted_batch_seconds[len(batch_seconds) // 2],
+            "batch_seconds_p95": sorted_batch_seconds[
+                math.ceil(0.95 * len(batch_seconds)) - 1
+            ],
+            "model_calls": sampler_statistics["model_calls"],
+            "nfe_total": sampler_statistics["nfe_total"],
+            "nfe_mean": sampler_statistics["nfe_total"] / (len(products) * n_runs),
+            "nfe_histogram": sampler_statistics["nfe_histogram"],
+            "peak_gpu_memory_mb": (
+                torch.cuda.max_memory_allocated(device) / (1024**2)
+                if device.type == "cuda"
+                else None
+            ),
+        }
     metadata.update(
         n_branches=1,
         n_children=n_children,

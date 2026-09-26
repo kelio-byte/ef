@@ -38,6 +38,7 @@ def sample_branches(
     max_seq_len=96,
     n_children=2,
     changed_state_bonus=0.5,
+    statistics=None,
 ):
     """作用：批量推进每条输入的 K=1、M 子候选分支。输入：模型、初始状态、调度器、种子、产品记忆及 M。输出：每条输入的最终 token 状态。
 
@@ -58,10 +59,16 @@ def sample_branches(
         Branch(x_0[b : b + 1], 0.0, sample_seeds[b])
         for b in range(batch_size)
     ]
+    nfe_counts = [0] * batch_size if statistics is not None else None
+    model_calls = 0
     for step in range(n_steps):
         flat = [(b, s) for b, s in enumerate(branches) if s.t < 1.0]
         if not flat:
             break
+        if nfe_counts is not None:
+            model_calls += 1
+            for b, _ in flat:
+                nfe_counts[b] += 1
         branch_tensors = [s.x_t for _, s in flat]
         widths = [x.shape[1] for x in branch_tensors]
         max_l = max(widths)
@@ -136,4 +143,10 @@ def sample_branches(
     out = torch.full((batch_size, out_len), PAD_TOKEN, dtype=torch.long, device=device)
     for row, state in enumerate(branches):
         out[row, : state.x_t.shape[1]] = state.x_t
+    if nfe_counts is not None:
+        statistics["model_calls"] = statistics.get("model_calls", 0) + model_calls
+        statistics["nfe_total"] = statistics.get("nfe_total", 0) + sum(nfe_counts)
+        histogram = statistics.setdefault("nfe_histogram", {})
+        for count in nfe_counts:
+            histogram[str(count)] = histogram.get(str(count), 0) + 1
     return out

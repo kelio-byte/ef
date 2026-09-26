@@ -20,6 +20,7 @@ def parser():
                    help="每步采样的子候选数 M（默认 2）")
     p.add_argument("--device", default="cuda")
     p.add_argument("--max-products", type=int)
+    p.add_argument("--record-performance", action="store_true")
     return p
 
 
@@ -34,6 +35,7 @@ def run(args):
         n_children=args.n_children,
         device=args.device,
         max_products=args.max_products,
+        record_performance=args.record_performance,
     )
 
 
