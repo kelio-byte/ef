@@ -14,6 +14,7 @@ from .branch_sampler_helpers import (
     _apply_edits_batch,
     _select_k1m_child,
     _select_k1m_child_indices,
+    _total_edit_hazard,
 )
 from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 
@@ -21,6 +22,16 @@ from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 def _adaptive_h_to_list(adapt_h):
     """Convert per-branch step sizes to host values for Python branch state."""
     return adapt_h.squeeze(-1).cpu().tolist()
+
+
+def _advance_time(current, step_size, step, n_steps, time_grid):
+    if time_grid == "uniform" and step == n_steps - 1:
+        return 1.0
+    if time_grid == "hazard":
+        if 1.0 - current <= 1e-3:
+            return 1.0
+        return min(1.0, current + step_size)
+    return current + step_size
 
 
 @dataclass
@@ -47,6 +58,8 @@ def sample_branches(
     changed_state_bonus=0.5,
     statistics=None,
     diagnostics=None,
+    hazard_max_step=0.04,
+    hazard_limit=0.15,
 ):
     """作用：批量推进每条输入的 K=1、M 子候选分支。输入：模型、初始状态、调度器、种子、产品记忆及 M。输出：每条输入的最终 token 状态。
 
@@ -61,8 +74,10 @@ def sample_branches(
         or n_steps < 1
     ):
         raise ValueError("Invalid seed count or step count")
-    if time_grid not in ("adaptive", "uniform"):
-        raise ValueError("time_grid must be 'adaptive' or 'uniform'")
+    if time_grid not in ("adaptive", "uniform", "hazard"):
+        raise ValueError("time_grid must be 'adaptive', 'uniform', or 'hazard'")
+    if not 0.0 < hazard_max_step <= 1.0 or not 0.0 < hazard_limit <= 1.0:
+        raise ValueError("hazard_max_step and hazard_limit must be positive and <= 1")
     if (
         not isinstance(n_children, int)
         or isinstance(n_children, bool)
@@ -122,6 +137,13 @@ def sample_branches(
             h = torch.full_like(t_vals, 1.0 / n_steps)
             if step == n_steps - 1:
                 h = 1.0 - t_vals
+        elif time_grid == "hazard":
+            scheduler_step = get_adaptive_h(hazard_max_step, t_vals, scheduler)
+            remaining = 1.0 - t_vals
+            total_hazard = _total_edit_hazard(x_batch, rates)
+            hazard_step = hazard_limit / total_hazard.clamp_min(1e-8)
+            h = torch.minimum(torch.minimum(scheduler_step, hazard_step), remaining)
+            h = torch.where(remaining <= 1e-3, remaining, h)
         else:
             h = get_adaptive_h(1.0 / n_steps, t_vals, scheduler)
         parent_values = [i for i in range(len(flat)) for _ in range(n_children)]
@@ -165,10 +187,8 @@ def sample_branches(
                 child_row = parent_i * n_children + child_i
                 branches[b] = Branch(
                     x_next[child_row : child_row + 1],
-                    (
-                        1.0
-                        if time_grid == "uniform" and step == n_steps - 1
-                        else state.t + h_values[child_row]
+                    _advance_time(
+                        state.t, h_values[child_row], step, n_steps, time_grid
                     ),
                     seed_values[child_row],
                 )
@@ -182,11 +202,7 @@ def sample_branches(
                 candidates[b].append(
                     Branch(
                         x_next[i : i + 1],
-                        (
-                            1.0
-                            if time_grid == "uniform" and step == n_steps - 1
-                            else s.t + h_values[i]
-                        ),
+                        _advance_time(s.t, h_values[i], step, n_steps, time_grid),
                         seed_values[i],
                     )
                 )
@@ -218,6 +234,12 @@ def sample_branches(
                 actions=actions,
                 n_children=n_children,
             )
+    if time_grid == "hazard" and any(state.t < 1.0 for state in branches):
+        unfinished = sum(state.t < 1.0 for state in branches)
+        raise RuntimeError(
+            f"Hazard adaptive sampler reached max_nfe={n_steps} with "
+            f"{unfinished} trajectories short of t=1"
+        )
     out_len = max(s.x_t.shape[1] for s in branches)
     out = torch.full((batch_size, out_len), PAD_TOKEN, dtype=torch.long, device=device)
     for row, state in enumerate(branches):

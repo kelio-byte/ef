@@ -99,6 +99,8 @@ def predict(
     batch_size=32,
     n_steps=100,
     time_grid="adaptive",
+    hazard_max_step=0.04,
+    hazard_limit=0.15,
     device="cuda",
     max_products=None,
     n_children=2,
@@ -113,8 +115,12 @@ def predict(
         raise ValueError("n_runs must be a positive integer")
     if not isinstance(n_steps, int) or isinstance(n_steps, bool) or n_steps < 1:
         raise ValueError("n_steps must be a positive integer")
-    if time_grid not in ("adaptive", "uniform"):
-        raise ValueError("time_grid must be 'adaptive' or 'uniform'")
+    if time_grid not in ("adaptive", "uniform", "hazard"):
+        raise ValueError("time_grid must be 'adaptive', 'uniform', or 'hazard'")
+    if not 0.0 < hazard_max_step <= 1.0:
+        raise ValueError("hazard_max_step must be in (0, 1]")
+    if not 0.0 < hazard_limit <= 1.0:
+        raise ValueError("hazard_limit must be in (0, 1]")
     if (
         not isinstance(n_children, int)
         or isinstance(n_children, bool)
@@ -176,6 +182,8 @@ def predict(
                 product_memory_padding_mask=mask,
                 n_steps=n_steps,
                 time_grid=time_grid,
+                hazard_max_step=hazard_max_step,
+                hazard_limit=hazard_limit,
                 max_seq_len=cfg["max_seq_len"],
                 n_children=n_children,
                 changed_state_bonus=changed_state_bonus,
@@ -223,6 +231,10 @@ def predict(
         "seconds": elapsed_seconds,
         "torch": str(torch.__version__),
     }
+    if time_grid == "hazard":
+        metadata["hazard_max_step"] = hazard_max_step
+        metadata["hazard_limit"] = hazard_limit
+        metadata["max_nfe"] = n_steps
     if sampler_statistics is not None:
         sorted_batch_seconds = sorted(batch_seconds)
         metadata["performance"] = {

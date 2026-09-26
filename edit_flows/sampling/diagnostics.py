@@ -5,9 +5,9 @@ import math
 import torch
 
 from edit_flows.sampling.ops import (
-    edit_position_masks,
     legal_token_log_probs,
 )
+from edit_flows.sampling.branch_sampler_helpers import _total_edit_hazard
 from edit_flows.utils.tokens import PAD_TOKEN
 
 
@@ -78,15 +78,10 @@ class TrajectoryDiagnostics:
         if parent_count == 0:
             return
 
-        rates = torch.exp(log_rates)
-        insert_positions, sub_del_positions = edit_position_masks(x_batch)
         # The checkpoint emits finite log-softmax values at non-padding rows;
         # legal token renormalization therefore has support at each legal edit
         # position. These position masks match the sampler's INS/SUB/DEL sites.
-        lambda_ins = rates[:, :, 0] * insert_positions
-        lambda_sub = rates[:, :, 1] * sub_del_positions
-        lambda_del = rates[:, :, 2] * sub_del_positions
-        hazard = (lambda_ins + lambda_sub + lambda_del).sum(dim=1)
+        hazard = _total_edit_hazard(x_batch, log_rates).squeeze(-1)
         # A rotating systematic sample bounds host/device memory while covering
         # every row over four adjacent steps.
         hazard_sample = hazard[step % 4 :: 4].detach()
@@ -117,7 +112,7 @@ class TrajectoryDiagnostics:
             ]
         tracked = torch.tensor(rows, device=x_batch.device, dtype=torch.long)
         tracked_x = x_batch.index_select(0, tracked)
-        tracked_rates = rates.index_select(0, tracked)
+        tracked_rates = torch.exp(log_rates.index_select(0, tracked))
         tracked_ins_positions, tracked_sub_positions = edit_position_masks(tracked_x)
         ins_legal, ins_norm = legal_token_log_probs(
             log_ins_probs.index_select(0, tracked)

@@ -18,8 +18,10 @@ def parser():
                    help="每个产品的独立采样次数（默认 9）")
     p.add_argument("--n-steps", type=int, default=100,
                    help="采样时间步数（默认 100）")
-    p.add_argument("--time-grid", choices=["adaptive", "uniform"], default="adaptive",
-                   help="adaptive 保持当前调度步长；uniform 均匀推进到 t=1")
+    p.add_argument("--time-grid", choices=["adaptive", "uniform", "hazard"], default="adaptive",
+                   help="adaptive 保持当前调度步长；uniform 固定步长；hazard 按总 hazard 调步")
+    p.add_argument("--hazard-max-step", type=float, default=0.04)
+    p.add_argument("--hazard-limit", type=float, default=0.15)
     p.add_argument("--n-children", type=int, default=2,
                    help="每步采样的子候选数 M（默认 2）")
     p.add_argument("--device", default="cuda")
@@ -40,6 +42,8 @@ def run(args):
         n_children=args.n_children,
         n_steps=args.n_steps,
         time_grid=args.time_grid,
+        hazard_max_step=args.hazard_max_step,
+        hazard_limit=args.hazard_limit,
         device=args.device,
         max_products=args.max_products,
         record_performance=args.record_performance,

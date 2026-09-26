@@ -155,6 +155,16 @@ def _apply_edits_batch(
     )
 
 
+def _total_edit_hazard(x_t: Tensor, log_rates: Tensor) -> Tensor:
+    """Sum insert, substitute, and delete rates over legal edit positions."""
+    insert_positions, sub_del_positions = edit_position_masks(x_t)
+    rates = torch.exp(log_rates)
+    lambda_ins = rates[:, :, 0] * insert_positions
+    lambda_sub = rates[:, :, 1] * sub_del_positions
+    lambda_del = rates[:, :, 2] * sub_del_positions
+    return (lambda_ins + lambda_sub + lambda_del).sum(dim=1, keepdim=True)
+
+
 def _stateless_uniform(
     seeds: Tensor, step: int, seq_len: int, stream: int, dtype: torch.dtype
 ) -> Tensor:
