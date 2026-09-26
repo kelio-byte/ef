@@ -13,6 +13,7 @@ from .branch_sampler_helpers import (
     _sample_actions_per_branch,
     _apply_edits_batch,
     _select_k1m_child,
+    _select_k1m_child_indices,
 )
 from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 
@@ -60,8 +61,13 @@ def sample_branches(
         or n_children < 1
     ):
         raise ValueError("n_children must be a positive integer")
-    origin_keys = _token_keys_batch(x_0, PAD_TOKEN, BOS_TOKEN)
-    branch_keys = list(origin_keys)
+    fast_m2_selection = n_children == 2 and diagnostics is None
+    origin_keys = (
+        None
+        if fast_m2_selection
+        else _token_keys_batch(x_0, PAD_TOKEN, BOS_TOKEN)
+    )
+    branch_keys = list(origin_keys) if origin_keys is not None else None
     if diagnostics is not None:
         diagnostics.begin_batch()
     branches = [
@@ -131,34 +137,53 @@ def sample_branches(
         )
         h_values = _adaptive_h_to_list(hc)
         x_next = _apply_edits_batch(x_children, actions, max_seq_len, PAD_TOKEN)
-        keys = _token_keys_batch(x_next, PAD_TOKEN, BOS_TOKEN)
-        candidates = {b: [] for b, _ in flat}
-        child_keys = {b: [] for b, _ in flat}
-        for i, parent_i in enumerate(parent_values):
-            b, s = flat[parent_i]
-            candidates[b].append(
-                Branch(
-                    x_next[i : i + 1],
-                    s.t + h_values[i],
-                    seed_values[i],
-                )
-            )
-            child_keys[b].append(keys[i])
         parent_ids = [b for b, _ in flat]
-        parent_keys = [branch_keys[b] for b in parent_ids]
-        selected_keys = []
-        for b, _ in flat:
-            selected = _select_k1m_child(
-                candidates[b], child_keys[b], origin_keys[b], changed_state_bonus
+        if fast_m2_selection:
+            initial_states = x_0.index_select(0, parent_sample_indices)
+            selected_children = _select_k1m_child_indices(
+                x_next,
+                initial_states,
+                seed_values,
+                changed_state_bonus,
             )
-            branches[b] = selected
-            selected_key = next(
-                key
-                for candidate, key in zip(candidates[b], child_keys[b])
-                if candidate is selected
-            )
-            branch_keys[b] = selected_key
-            selected_keys.append(selected_key)
+            for parent_i, ((b, state), child_i) in enumerate(
+                zip(flat, selected_children.cpu().tolist())
+            ):
+                child_row = parent_i * n_children + child_i
+                branches[b] = Branch(
+                    x_next[child_row : child_row + 1],
+                    state.t + h_values[child_row],
+                    seed_values[child_row],
+                )
+            parent_keys = selected_keys = None
+        else:
+            keys = _token_keys_batch(x_next, PAD_TOKEN, BOS_TOKEN)
+            candidates = {b: [] for b, _ in flat}
+            child_keys = {b: [] for b, _ in flat}
+            for i, parent_i in enumerate(parent_values):
+                b, s = flat[parent_i]
+                candidates[b].append(
+                    Branch(
+                        x_next[i : i + 1],
+                        s.t + h_values[i],
+                        seed_values[i],
+                    )
+                )
+                child_keys[b].append(keys[i])
+            parent_keys = [branch_keys[b] for b in parent_ids]
+            selected_keys = []
+            for b, _ in flat:
+                selected = _select_k1m_child(
+                    candidates[b], child_keys[b], origin_keys[b], changed_state_bonus
+                )
+                branches[b] = selected
+                selected_key = next(
+                    key
+                    for candidate, key in zip(candidates[b], child_keys[b])
+                    if candidate is selected
+                )
+                branch_keys[b] = selected_key
+                selected_keys.append(selected_key)
         if diagnostics is not None:
             diagnostics.record_step(
                 step=step,

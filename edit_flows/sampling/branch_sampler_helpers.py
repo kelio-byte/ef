@@ -72,6 +72,64 @@ def _select_k1m_child(
     )[1][0]
 
 
+def _select_k1m_child_indices(
+    child_states: Tensor,
+    origin_states: Tensor,
+    child_seeds: list[int],
+    changed_state_bonus: float,
+) -> Tensor:
+    """Select K=1 from paired M=2 states using exact tensor equality.
+
+    Token rows use right padding and keep BOS at position zero, so equality of
+    padded token rows is equivalent to equality of the canonical keys used by
+    ``_select_k1m_child``. The returned child indices stay on the input device.
+    """
+    if child_states.ndim != 2 or origin_states.ndim != 2:
+        raise ValueError("Child and origin states must be rank-2 token batches")
+    batch_size = origin_states.shape[0]
+    if child_states.shape[0] != batch_size * 2 or len(child_seeds) != batch_size * 2:
+        raise ValueError("Expected exactly two aligned children per origin state")
+
+    width = max(child_states.shape[1], origin_states.shape[1])
+    if child_states.shape[1] < width:
+        child_states = torch.nn.functional.pad(
+            child_states, (0, width - child_states.shape[1]), value=PAD_TOKEN
+        )
+    if origin_states.shape[1] < width:
+        origin_states = torch.nn.functional.pad(
+            origin_states, (0, width - origin_states.shape[1]), value=PAD_TOKEN
+        )
+
+    paired_children = child_states.reshape(batch_size, 2, width)
+    same_child_state = (paired_children[:, 0] == paired_children[:, 1]).all(dim=1)
+    changed = (paired_children != origin_states.unsqueeze(1)).any(dim=2)
+    seed_prefers_child_zero = torch.tensor(
+        [
+            child_seeds[2 * index] <= child_seeds[2 * index + 1]
+            for index in range(batch_size)
+        ],
+        dtype=torch.bool,
+        device=child_states.device,
+    )
+    changed_differs = changed[:, 0] != changed[:, 1]
+    if changed_state_bonus > 0:
+        score_prefers_child_zero = changed[:, 0]
+    elif changed_state_bonus < 0:
+        score_prefers_child_zero = ~changed[:, 0]
+    else:
+        score_prefers_child_zero = seed_prefers_child_zero
+    prefer_child_zero = torch.where(
+        same_child_state,
+        seed_prefers_child_zero,
+        torch.where(
+            changed_differs,
+            score_prefers_child_zero,
+            seed_prefers_child_zero,
+        ),
+    )
+    return (~prefer_child_zero).to(torch.long)
+
+
 def _token_keys_batch(
     x_t: Tensor, pad_token: int, bos_token: int
 ) -> List[Tuple[int, ...]]:
