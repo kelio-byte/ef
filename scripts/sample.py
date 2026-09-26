@@ -21,6 +21,7 @@ def parser():
     p.add_argument("--device", default="cuda")
     p.add_argument("--max-products", type=int)
     p.add_argument("--record-performance", action="store_true")
+    p.add_argument("--record-trajectory-diagnostics", action="store_true")
     return p
 
 
@@ -36,6 +37,7 @@ def run(args):
         device=args.device,
         max_products=args.max_products,
         record_performance=args.record_performance,
+        record_trajectory_diagnostics=args.record_trajectory_diagnostics,
     )
 
 

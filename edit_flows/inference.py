@@ -101,6 +101,7 @@ def predict(
     max_products=None,
     n_children=2,
     record_performance=False,
+    record_trajectory_diagnostics=False,
 ):
     """作用：按 K=1、M 子候选分支策略采样并写出预测。输入：产品文件、模型资产和采样选项。输出：预测路径，并写入元数据。
 
@@ -142,6 +143,11 @@ def predict(
     changed_state_bonus = 0.5
     batch_seconds = []
     sampler_statistics = {} if record_performance else None
+    trajectory_diagnostics = None
+    if record_trajectory_diagnostics:
+        from .sampling.diagnostics import TrajectoryDiagnostics
+
+        trajectory_diagnostics = TrajectoryDiagnostics()
     if device.type == "cuda":
         if record_performance:
             torch.cuda.reset_peak_memory_stats(device)
@@ -169,6 +175,8 @@ def predict(
             )
             if sampler_statistics is not None:
                 kwargs["statistics"] = sampler_statistics
+            if trajectory_diagnostics is not None:
+                kwargs["diagnostics"] = trajectory_diagnostics
             seeds = [
                 _mix_child_seed(42, start + i, r + 1)
                 for i in range(len(batch))
@@ -236,6 +244,19 @@ def predict(
         child_selection="log_occurrence_count_plus_changed_state_bonus",
         child_tie_break="lowest_child_seed",
     )
+    if trajectory_diagnostics is not None:
+        diagnostic_path = output / "trajectory_diagnostics.json"
+        diagnostic_payload = {
+            "tracked_trajectories_per_batch": trajectory_diagnostics.tracked_trajectories,
+            "time_buckets": trajectory_diagnostics.report(),
+            "notes": {
+                "hazard_sampling": "rotating one-in-four trajectory sample; exact event and unchanged fractions use all active trajectories",
+                "intensity_change": "relative L1 change in legal per-token edit intensities; only consecutive observations of the same selected state are compared",
+                "ideal_nfe_savings_ceiling": "oracle upper bound counting unchanged transitions; assumes an exact cached forward is free and is not a speedup prediction",
+            },
+        }
+        diagnostic_path.write_text(json.dumps(diagnostic_payload, indent=2) + "\n")
+        metadata["trajectory_diagnostics_file"] = diagnostic_path.name
     (output / "sampling_metadata.json").write_text(
         json.dumps(metadata, indent=2) + "\n"
     )

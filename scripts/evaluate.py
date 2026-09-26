@@ -24,6 +24,7 @@ def main():
     p.add_argument("--max-products", type=int)
     p.add_argument("--score-only", action="store_true")
     p.add_argument("--record-performance", action="store_true")
+    p.add_argument("--record-trajectory-diagnostics", action="store_true")
     args = p.parse_args()
     if args.n_runs < 1:
         p.error("--n-runs must be a positive integer")
@@ -45,6 +46,7 @@ def main():
             device=args.device,
             max_products=args.max_products,
             record_performance=args.record_performance,
+            record_trajectory_diagnostics=args.record_trajectory_diagnostics,
         )
     score(Path(args.output) / "predictions.txt", tgt, args.workers)
 

@@ -17,6 +17,11 @@ from .branch_sampler_helpers import (
 from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 
 
+def _adaptive_h_to_list(adapt_h):
+    """Convert per-branch step sizes to host values for Python branch state."""
+    return adapt_h.squeeze(-1).cpu().tolist()
+
+
 @dataclass
 class Branch:
     """作用：保存一条采样分支的状态。输入：状态、时间和随机种子。输出：可逐步更新的分支记录。"""
@@ -39,6 +44,7 @@ def sample_branches(
     n_children=2,
     changed_state_bonus=0.5,
     statistics=None,
+    diagnostics=None,
 ):
     """作用：批量推进每条输入的 K=1、M 子候选分支。输入：模型、初始状态、调度器、种子、产品记忆及 M。输出：每条输入的最终 token 状态。
 
@@ -55,6 +61,9 @@ def sample_branches(
     ):
         raise ValueError("n_children must be a positive integer")
     origin_keys = _token_keys_batch(x_0, PAD_TOKEN, BOS_TOKEN)
+    branch_keys = list(origin_keys)
+    if diagnostics is not None:
+        diagnostics.begin_batch()
     branches = [
         Branch(x_0[b : b + 1], 0.0, sample_seeds[b])
         for b in range(batch_size)
@@ -120,7 +129,7 @@ def sample_branches(
             event_prob_mode="poisson",
             step=step,
         )
-        h_values = hc.squeeze(-1).cpu().tolist()
+        h_values = _adaptive_h_to_list(hc)
         x_next = _apply_edits_batch(x_children, actions, max_seq_len, PAD_TOKEN)
         keys = _token_keys_batch(x_next, PAD_TOKEN, BOS_TOKEN)
         candidates = {b: [] for b, _ in flat}
@@ -135,9 +144,33 @@ def sample_branches(
                 )
             )
             child_keys[b].append(keys[i])
+        parent_ids = [b for b, _ in flat]
+        parent_keys = [branch_keys[b] for b in parent_ids]
+        selected_keys = []
         for b, _ in flat:
-            branches[b] = _select_k1m_child(
+            selected = _select_k1m_child(
                 candidates[b], child_keys[b], origin_keys[b], changed_state_bonus
+            )
+            branches[b] = selected
+            selected_key = next(
+                key
+                for candidate, key in zip(candidates[b], child_keys[b])
+                if candidate is selected
+            )
+            branch_keys[b] = selected_key
+            selected_keys.append(selected_key)
+        if diagnostics is not None:
+            diagnostics.record_step(
+                step=step,
+                parent_ids=parent_ids,
+                parent_keys=parent_keys,
+                selected_keys=selected_keys,
+                x_batch=x_batch,
+                log_rates=rates,
+                log_ins_probs=ins,
+                log_sub_probs=sub,
+                actions=actions,
+                n_children=n_children,
             )
     out_len = max(s.x_t.shape[1] for s in branches)
     out = torch.full((batch_size, out_len), PAD_TOKEN, dtype=torch.long, device=device)
