@@ -97,6 +97,8 @@ def predict(
     vocab=DATA / "example.vocab.src",
     n_runs=9,
     batch_size=32,
+    n_steps=100,
+    time_grid="adaptive",
     device="cuda",
     max_products=None,
     n_children=2,
@@ -109,6 +111,10 @@ def predict(
     """
     if not isinstance(n_runs, int) or isinstance(n_runs, bool) or n_runs < 1:
         raise ValueError("n_runs must be a positive integer")
+    if not isinstance(n_steps, int) or isinstance(n_steps, bool) or n_steps < 1:
+        raise ValueError("n_steps must be a positive integer")
+    if time_grid not in ("adaptive", "uniform"):
+        raise ValueError("time_grid must be 'adaptive' or 'uniform'")
     if (
         not isinstance(n_children, int)
         or isinstance(n_children, bool)
@@ -168,7 +174,8 @@ def predict(
             kwargs = dict(
                 product_memory=memory,
                 product_memory_padding_mask=mask,
-                n_steps=100,
+                n_steps=n_steps,
+                time_grid=time_grid,
                 max_seq_len=cfg["max_seq_len"],
                 n_children=n_children,
                 changed_state_bonus=changed_state_bonus,
@@ -200,7 +207,8 @@ def predict(
     metadata = {
         "sampling_method": "k1m_state_count",
         "seed": 42,
-        "n_steps": 100,
+        "n_steps": n_steps,
+        "time_grid": time_grid,
         "n_runs": n_runs,
         "outputs_per_product": n_runs,
         "n_products": len(products),

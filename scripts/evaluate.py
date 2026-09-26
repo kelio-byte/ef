@@ -15,6 +15,10 @@ def main():
     p.add_argument("--split", choices=["dev1000", "test"], default="dev1000")
     p.add_argument("--n-runs", type=int, default=9,
                    help="每个产品的独立采样次数（正式设置为 9）")
+    p.add_argument("--n-steps", type=int, default=100,
+                   help="采样时间步数（默认 100）")
+    p.add_argument("--time-grid", choices=["adaptive", "uniform"], default="adaptive",
+                   help="adaptive 保持当前调度步长；uniform 均匀推进到 t=1")
     p.add_argument("--n-children", type=int, default=2,
                    help="每步采样的子候选数 M（默认 2）")
     p.add_argument("--checkpoint", default=str(CHECKPOINT))
@@ -28,6 +32,8 @@ def main():
     args = p.parse_args()
     if args.n_runs < 1:
         p.error("--n-runs must be a positive integer")
+    if args.n_steps < 1:
+        p.error("--n-steps must be a positive integer")
     if args.n_children < 1:
         p.error("--n-children must be a positive integer")
     if args.max_products is not None and (
@@ -43,6 +49,8 @@ def main():
             args.checkpoint,
             n_runs=args.n_runs,
             n_children=args.n_children,
+            n_steps=args.n_steps,
+            time_grid=args.time_grid,
             device=args.device,
             max_products=args.max_products,
             record_performance=args.record_performance,

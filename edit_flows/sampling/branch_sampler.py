@@ -41,6 +41,7 @@ def sample_branches(
     product_memory,
     product_memory_padding_mask,
     n_steps=100,
+    time_grid="adaptive",
     max_seq_len=96,
     n_children=2,
     changed_state_bonus=0.5,
@@ -53,8 +54,15 @@ def sample_branches(
     """
     device = x_0.device
     batch_size = x_0.shape[0]
-    if len(sample_seeds) != batch_size or n_steps < 1:
+    if (
+        len(sample_seeds) != batch_size
+        or not isinstance(n_steps, int)
+        or isinstance(n_steps, bool)
+        or n_steps < 1
+    ):
         raise ValueError("Invalid seed count or step count")
+    if time_grid not in ("adaptive", "uniform"):
+        raise ValueError("time_grid must be 'adaptive' or 'uniform'")
     if (
         not isinstance(n_children, int)
         or isinstance(n_children, bool)
@@ -110,7 +118,12 @@ def sample_branches(
             product_memory=memory,
             product_memory_padding_mask=memory_mask,
         )
-        h = get_adaptive_h(1.0 / n_steps, t_vals, scheduler)
+        if time_grid == "uniform":
+            h = torch.full_like(t_vals, 1.0 / n_steps)
+            if step == n_steps - 1:
+                h = 1.0 - t_vals
+        else:
+            h = get_adaptive_h(1.0 / n_steps, t_vals, scheduler)
         parent_values = [i for i in range(len(flat)) for _ in range(n_children)]
         parent_indices = torch.tensor(parent_values, dtype=torch.long, device=device)
         x_children = x_batch.index_select(0, parent_indices)
@@ -152,7 +165,11 @@ def sample_branches(
                 child_row = parent_i * n_children + child_i
                 branches[b] = Branch(
                     x_next[child_row : child_row + 1],
-                    state.t + h_values[child_row],
+                    (
+                        1.0
+                        if time_grid == "uniform" and step == n_steps - 1
+                        else state.t + h_values[child_row]
+                    ),
                     seed_values[child_row],
                 )
             parent_keys = selected_keys = None
@@ -165,7 +182,11 @@ def sample_branches(
                 candidates[b].append(
                     Branch(
                         x_next[i : i + 1],
-                        s.t + h_values[i],
+                        (
+                            1.0
+                            if time_grid == "uniform" and step == n_steps - 1
+                            else s.t + h_values[i]
+                        ),
                         seed_values[i],
                     )
                 )

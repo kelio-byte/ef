@@ -16,6 +16,10 @@ def parser():
     p.add_argument("--vocab", default=str(DATA / "example.vocab.src"))
     p.add_argument("--n-runs", type=int, default=9,
                    help="每个产品的独立采样次数（默认 9）")
+    p.add_argument("--n-steps", type=int, default=100,
+                   help="采样时间步数（默认 100）")
+    p.add_argument("--time-grid", choices=["adaptive", "uniform"], default="adaptive",
+                   help="adaptive 保持当前调度步长；uniform 均匀推进到 t=1")
     p.add_argument("--n-children", type=int, default=2,
                    help="每步采样的子候选数 M（默认 2）")
     p.add_argument("--device", default="cuda")
@@ -34,6 +38,8 @@ def run(args):
         vocab=args.vocab,
         n_runs=args.n_runs,
         n_children=args.n_children,
+        n_steps=args.n_steps,
+        time_grid=args.time_grid,
         device=args.device,
         max_products=args.max_products,
         record_performance=args.record_performance,
