@@ -22,6 +22,8 @@
 | `baseline_pilot` | Full-100 | pilot200 | `bf8ab00` | `44eaa6d6...` | `outputs/fastflow_accel/baseline_pilot/` | 完成；预测 SHA-256 `17f7c190...` |
 | `baseline_dev1000` | Full-100 | dev1000 | `bf8ab00` | `54384b14...` | `outputs/fastflow_accel/baseline_dev1000/` | 完成；预测 SHA-256 `f3406c06...` |
 | `baseline_heldout` | Full-100 的评分子集 | heldout800 | `bf8ab00` | `2bf01200...` | `outputs/fastflow_accel/baseline_heldout/` | 完成；从 `baseline_dev1000` 提取，无额外推理；预测 SHA-256 `aca2b8e8...` |
+| `profile_pilot_batch` | Full-100 诊断 profiling | pilot 中位长度批次（batch 53） | `066cb59` | `44eaa6d6...` | `outputs/fastflow_accel/profile_baseline.json` | 完成；与基线对应 288 条预测完全一致；计时含 profiler 开销，不作速度比较 |
+| `trajectory_pilot` | Full-100 轨迹诊断 | pilot200 | `066cb59` | `44eaa6d6...` | `outputs/fastflow_accel/trajectory_pilot/` | 完成；预测 SHA 与基线相同；评分与 pilot 基线一致 |
 
 ## B. 速度与质量
 
@@ -38,19 +40,36 @@
 ```bash
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/evaluate.py --split dev1000 --output outputs/fastflow_accel/baseline_dev1000 --record-performance --workers 8
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/accel_protocol.py score-heldout --split-dir outputs/fastflow_accel/split --full-output outputs/fastflow_accel/baseline_dev1000 --output outputs/fastflow_accel/baseline_heldout --workers 8
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/profile_sampler_batch.py --products outputs/fastflow_accel/split/pilot/src.txt --reference-predictions outputs/fastflow_accel/baseline_pilot/predictions.txt --output outputs/fastflow_accel/profile_baseline.json
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/sample.py --products outputs/fastflow_accel/split/pilot/src.txt --output outputs/fastflow_accel/trajectory_pilot --record-trajectory-diagnostics
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/score.py --predictions outputs/fastflow_accel/trajectory_pilot/predictions.txt --targets outputs/fastflow_accel/split/pilot/tgt.txt --workers 8
 ```
 
 ## C. 性能构成与轨迹诊断
 
-| 时间段 | Transformer 占比 | 同步占比 | 选中状态不变比例 | 双 child 无事件比例 | 合法 hazard p50/p90 | 强度变化 p50/p90 | 理想可省 NFE | 结论 |
+| 时间段 | Transformer 占标记 CUDA 时间 | 同步函数 CPU 占比¹ | 选中状态不变比例 | 双 child 无事件比例 | 合法 hazard p50/p90 | 状态不变时 1 格强度变化 p50/p90 | 理想可省 NFE 上限 | 结论 |
 |---|---:|---:|---:|---:|---|---|---:|---|
-| 0.00～0.25 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
-| 0.25～0.50 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
-| 0.50～0.75 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
-| 0.75～1.00 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+| 0.00～0.25 | 82.76% | 15.17% | 99.575% | 99.562% | 0.132 / 0.557 | 0.180 / 0.554 | 896,175（99.575%） | 计算路径主要在 Transformer；状态高度稳定，强度 1 格变化仍较大 |
+| 0.25～0.50 | 82.60% | 15.99% | 97.533% | 96.973% | 1.266 / 2.908 | 0.060 / 0.081 | 877,798（97.533%） | 状态稳定，强度变化较平缓 |
+| 0.50～0.75 | 83.48% | 16.23% | 95.333% | 92.336% | 3.361 / 7.861 | 0.049 / 0.054 | 857,997（95.333%） | 状态稳定，短跨度强度变化最低 |
+| 0.75～1.00 | 83.23% | 16.90% | 92.114% | 86.085% | 5.487 / 21.314 | 0.078 / 0.209 | 829,025（92.114%） | hazard 上升且分布尾部变宽，后段需谨慎跳步 |
+
+¹“同步函数 CPU 占比”是 `state_keys`、步长转 CPU 列表、编辑应用三个含同步操作函数的 CPU 总时间，占 profiling 中已标记采样函数 CPU 总时间的比例；包括这些函数里的其他主机工作，不代表纯 GPU 等待时间。Transformer 百分比以四个时间段里已标记 CUDA 函数的设备时间之和为分母。单批 Python child selection 另计 58.45 ms/28,800 次调用。profiling batch 为 pilot 按输入 token 数排序后的中位批次；包含 profiler 时总 wall time 约 7.00 秒，不作为采样基准。
+
+强度变化是同一状态、位置对应的合法 INS/SUB/DEL 每 token 强度的相对 L1 差，分母为前一时刻强度总量；诊断每个 batch 跟踪 16 条代表轨迹。强度变化跨度补充如下：
+
+| 时间段 | 1 格 p50/p90 | 2 格 p50/p90 | 4 格 p50/p90 |
+|---|---|---|---|
+| 0.00～0.25 | 0.180 / 0.554 | 0.394 / 1.403 | 0.957 / 4.361 |
+| 0.25～0.50 | 0.060 / 0.081 | 0.125 / 0.172 | 0.274 / 0.392 |
+| 0.50～0.75 | 0.049 / 0.054 | 0.101 / 0.110 | 0.211 / 0.230 |
+| 0.75～1.00 | 0.078 / 0.209 | 0.154 / 0.387 | 0.304 / 0.668 |
+
+hazard 每四步轮转抽样 1/4 的轨迹（每时间段 225,000 个值）；无事件率和状态变化率使用全部轨迹（每段 900,000 个轨迹步）。理想 NFE 上限把每个“选中状态未变”的转移都算作下一格可复用一次精确 forward；假设知道未来结果且复用免费，因此只能用于筛选分支，不能当作预计加速比。原始统计、分位误差样本和 profiling 明细保存在对应输出目录。
 
 ## D. 阶段决定
 
 | 阶段 | 假设 | 已有证据 | 决定 | 下一步 |
 |---|---|---|---|---|
-| 0：新基线 | 同一权重和代码可以得到可复现的速度、质量口径 | pilot200：217.68 秒；dev1000：1071.01 秒，Top-1 61.7%、Top-10 88.0%；heldout800：Top-1 62.375%、Top-10 87.625%；所有轨迹均为 100 NFE | 阶段 0 完成，已固定后续质量和速度对照 | 应用户要求暂停；恢复后进入阶段 1 性能构成与轨迹诊断 |
+| 0：新基线 | 同一权重和代码可以得到可复现的速度、质量口径 | pilot200：217.68 秒；dev1000：1071.01 秒，Top-1 61.7%、Top-10 88.0%；heldout800：Top-1 62.375%、Top-10 87.625%；所有轨迹均为 100 NFE | 阶段 0 完成，固定后续质量和速度对照 | 阶段 1 |
+| 1：性能与轨迹诊断 | 热点及状态稳定区足以支持后续优化筛选 | Transformer 占标记 CUDA 时间 82.6%～83.5%；状态不变率 92.1%～99.6%；理想可省 NFE 上限 92.1%～99.6%；诊断输出与基线预测哈希、评分一致 | 阶段 1 完成；足以解释热点；无事件跳步及强度复用都值得小规模验证，后段 hazard/误差更高 | 阶段 2 先做保持语义的 CPU 同步/编辑开销优化；之后按计划对照 Static-50/25 |
