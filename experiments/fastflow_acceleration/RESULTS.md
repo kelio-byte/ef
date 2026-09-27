@@ -137,3 +137,25 @@ hazard 每四步轮转抽样 1/4 的轨迹（每时间段 225,000 个值）；�
 | 4a：Hazard h≤0.04 | 用总编辑 hazard 限制单步累计强度，在允许时跨大步 | pilot：161.75 秒、对原始 Full-100 为 1.346×；相对已优化 Exact-M2-GPU Full-100 为 1.164×；平均/中位 NFE 38.56/33，最大 157/200；Top-1/3/10 `59.0/80.5/88.5%`；invalid-at-1 `8.675%` | 同选择实现的 pilot 显示 Hazard 调步额外减少耗时 14.1%；pilot 质量用于筛选。全量最终候选的加速还包含 GPU 选择优化 | 阶段 8：冻结参数，完整 dev1000 + 同次预测的 heldout800 评分 |
 | 8：最终确认 | 最终候选整套实现相对原始 Full-100 达到目标，并在未调参的 800 个反应上保持质量预算 | dev1000：822.83 秒（1.302×，包含 Exact-M2-GPU 与 Hazard）；heldout800 相对基线 ΔTop-1 `+0.875 pp`、ΔTop-3 `+0.875 pp`、ΔTop-10 `−0.75 pp`、Δoracle `0 pp`、Δinvalid `−0.65 pp`；heldout Top-k 95% 配对区间均包含 0，invalid 区间 `[−1.181, −0.125] pp`；平均/中位/最大 NFE `39.24/34/185` | 按预先固定的点估计预算，整套候选在 dev1000 和 heldout800 均通过；目前没有 Hazard 单项的全量速度消融 | 冻结整套参数，进入完整 test 单次评估 |
 | 9：完整 test 泛化评估 | 冻结方法能否在未参与选择的完整 test 上完成推理并给出泛化指标 | 5,007 个反应；3967.39 秒；平均/中位/最大 NFE `39.04/34/222`；Top-1/3/10 `64.170/82.564/89.415%`；oracle `92.251%`；invalid-at-1 `8.300%`；901,260 条候选输出，文件哈希已记录 | test 完整运行和评分通过；因没有同策略 test 基线，不计算 test 加速比或按 test 调参；NFE 200 上限导致的首次中断已由 500 保护上限完整重跑 | 本轮实验完成；保留冻结配置及全部结果记录，后续如需部署再单独评估运行成本与接口集成 |
+
+## E. 同条件轨迹案例诊断
+
+为解释步长如何改变模型调用分布，从 dev1000 中**未参与调参的 800 个反应**选取反应编号 `0`、`4`、`5`（均为从 0 起的编号），各取第 1 个增强视图和第 1 次独立采样。案例是看到输出后选出的示例，不用于估计总体质量或速度。`scripts/visualize_trajectory.py` 用正式 checkpoint、完整 32 输入 batch、每输入 `R=9`、每步 `M=2`、seed `42` 重跑 Full-100 与 Hazard；两边使用同一 GPU 子候选选择实现，只改变时间步规则。Hazard 运行使用 `h≤0.04`、普通步 `Λh≤0.15`；保护上限 500，大于这些轨迹的实际 NFE。六条最终预测均逐字节匹配已保存的 dev1000 预测文件。
+
+| 反应编号 | Full-100：NFE / 保留状态变化 / 单轨迹命中 | Hazard：NFE / 保留状态变化 / 单轨迹命中 | `t<0.25` 调用数：基线→Hazard | `t≥0.75` 调用数：基线→Hazard |
+|---:|---|---|---:|---:|
+| 0 | `100 / 4 / 是` | `50 / 4 / 是` | `26→7` | `24→29` |
+| 4 | `100 / 12 / 否` | `57 / 7 / 是` | `26→7` | `24→23` |
+| 5 | `100 / 5 / 是` | `61 / 4 / 否（无效分子）` | `26→7` | `24→38` |
+
+“保留状态变化”统计两个子候选中选中的状态是否与该步之前不同；“单轨迹命中”以规范化产物与目标的精确匹配判断，不等于反应级 Top-k。反应 0 的最终分子保持正确而 NFE 减半；反应 4 的单轨迹结果改善；反应 5 的单轨迹结果退化并变成无效分子。早段调用显著减少，后段可因强度升高而更密集：反应 5 的 Hazard 轨迹在实际模型调用点观测到的 `Λ` 中位数，前四分之一时间为 `0.204`，末四分之一时间为 `22.269`；相应区间调用数为 `7` 和 `38`。逐步图与数据见 [trajectories.html](case_study/trajectories.html) 和 [trajectories.json.gz](case_study/trajectories.json.gz)。两文件的 SHA-256 分别为 `58c60d888f6f8007153a20540f1c7bce6e1e7ab6d1fc213c64aa4e40c97ffa67` 和 `899ee6eda3179c8d07c225011a18023bc6393d3f8978f3e363c3f9a588e53031`。轨迹记录会增加同步开销，因此这些案例**只比较 NFE 和采样路径，不比较墙钟时间**。
+
+复现命令：
+
+```bash
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/visualize_trajectory.py \
+  --indices 0,80,100 --run-index 0 \
+  --baseline-predictions outputs/fastflow_accel/baseline_dev1000/predictions.txt \
+  --hazard-predictions outputs/fastflow_accel/hazard04_l015_dev1000/predictions.txt \
+  --output experiments/fastflow_acceleration/case_study/trajectories.html --force
+```

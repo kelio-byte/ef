@@ -58,12 +58,14 @@ def sample_branches(
     changed_state_bonus=0.5,
     statistics=None,
     diagnostics=None,
+    trace_steps: dict[int, list[dict]] | None = None,
     hazard_max_step=0.04,
     hazard_limit=0.15,
 ):
     """作用：批量推进每条输入的 K=1、M 子候选分支。输入：模型、初始状态、调度器、种子、产品记忆及 M。输出：每条输入的最终 token 状态。
 
     独立运行数由 inference.predict 构造；本函数每步采样 M 个候选，按状态频数和变化奖励保留一个。
+    trace_steps 可选地把指定 batch 行的逐步状态和速率写入对应列表；默认关闭。
     """
     device = x_0.device
     batch_size = x_0.shape[0]
@@ -173,6 +175,7 @@ def sample_branches(
         h_values = _adaptive_h_to_list(hc)
         x_next = _apply_edits_batch(x_children, actions, max_seq_len, PAD_TOKEN)
         parent_ids = [b for b, _ in flat]
+        chosen_rows = [] if trace_steps is not None else None
         if fast_m2_selection:
             initial_states = x_0.index_select(0, parent_sample_indices)
             selected_children = _select_k1m_child_indices(
@@ -185,6 +188,8 @@ def sample_branches(
                 zip(flat, selected_children.cpu().tolist())
             ):
                 child_row = parent_i * n_children + child_i
+                if chosen_rows is not None:
+                    chosen_rows.append(child_row)
                 branches[b] = Branch(
                     x_next[child_row : child_row + 1],
                     _advance_time(
@@ -209,7 +214,7 @@ def sample_branches(
                 child_keys[b].append(keys[i])
             parent_keys = [branch_keys[b] for b in parent_ids]
             selected_keys = []
-            for b, _ in flat:
+            for parent_i, (b, _) in enumerate(flat):
                 selected = _select_k1m_child(
                     candidates[b], child_keys[b], origin_keys[b], changed_state_bonus
                 )
@@ -219,8 +224,35 @@ def sample_branches(
                     for candidate, key in zip(candidates[b], child_keys[b])
                     if candidate is selected
                 )
+                if chosen_rows is not None:
+                    child_i = next(
+                        i for i, candidate in enumerate(candidates[b])
+                        if candidate is selected
+                    )
+                    chosen_rows.append(parent_i * n_children + child_i)
                 branch_keys[b] = selected_key
                 selected_keys.append(selected_key)
+        if trace_steps is not None:
+            traced = [(i, b, state) for i, (b, state) in enumerate(flat) if b in trace_steps]
+            if traced:
+                trace_hazard = _total_edit_hazard(x_batch, rates)
+                for parent_i, b, state in traced:
+                    child_row = chosen_rows[parent_i]
+                    before = [int(v) for v in x_batch[parent_i].tolist() if v != PAD_TOKEN]
+                    after = [int(v) for v in branches[b].x_t[0].tolist() if v != PAD_TOKEN]
+                    trace_steps[b].append({
+                        "step": step,
+                        "t_start": state.t,
+                        "t_end": branches[b].t,
+                        "h": float(h[parent_i].item()),
+                        "edit_hazard": float(trace_hazard[parent_i].item()),
+                        "before_ids": before,
+                        "after_ids": after,
+                        "insert_events": int(actions["ins_mask"][child_row].sum().item()),
+                        "substitute_events": int(actions["sub_mask"][child_row].sum().item()),
+                        "delete_events": int(actions["del_mask"][child_row].sum().item()),
+                        "selected_child": child_row - parent_i * n_children,
+                    })
         if diagnostics is not None:
             diagnostics.record_step(
                 step=step,
