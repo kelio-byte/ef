@@ -231,6 +231,7 @@ def main() -> None:
     parser.add_argument("--baseline-predictions", type=Path)
     parser.add_argument("--hazard-predictions", type=Path)
     parser.add_argument("--output", required=True, type=Path, help="Standalone HTML output; compressed JSON is written beside it")
+    parser.add_argument("--per-case-html", action="store_true", help="Also write one reaction-index-trajectory.html file per selected reaction")
     parser.add_argument("--force", action="store_true", help="Replace existing HTML and JSON.gz outputs")
     args = parser.parse_args()
     if not 0 <= args.run_index < N_RUNS:
@@ -239,8 +240,16 @@ def main() -> None:
         parser.error("--rate-detail-step must be positive")
     if args.output.suffix.lower() != ".html":
         parser.error("--output must end in .html")
+    if args.per_case_html and len({index // 20 for index in args.indices}) != len(args.indices):
+        parser.error("--per-case-html requires distinct reaction indices")
     json_path = args.output.with_suffix(".json.gz")
-    if not args.force and (args.output.exists() or json_path.exists()):
+    case_paths = (
+        [args.output.with_name(f"{index // 20}-trajectory.html") for index in args.indices]
+        if args.per_case_html else []
+    )
+    if args.output in case_paths:
+        parser.error("--output must differ from per-reaction HTML filenames")
+    if not args.force and any(path.exists() for path in (args.output, json_path, *case_paths)):
         parser.error("output exists; use --force to replace it")
     device = torch.device(args.device)
     torch.set_float32_matmul_precision("high")
@@ -316,7 +325,11 @@ def main() -> None:
     args.output.write_text(_render_html(report), encoding="utf-8")
     payload = (json.dumps(report, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
     json_path.write_bytes(gzip.compress(payload, compresslevel=9, mtime=0))
-    print(f"Wrote {args.output} and {json_path}")
+    if args.per_case_html:
+        for case in cases:
+            path = args.output.with_name(f'{case["reaction_index"]}-trajectory.html')
+            path.write_text(_render_html({**report, "cases": [case]}), encoding="utf-8")
+    print(f"Wrote {args.output}, {json_path}, and {len(case_paths)} per-reaction HTML files")
 
 
 if __name__ == "__main__":

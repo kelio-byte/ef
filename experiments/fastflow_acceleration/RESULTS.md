@@ -162,3 +162,15 @@ PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/visua
   --hazard-predictions outputs/fastflow_accel/hazard04_l015_dev1000/predictions.txt \
   --output experiments/fastflow_acceleration/case_study/trajectories.html --force
 ```
+
+## F. 固定随机抽样的 10 个补充案例
+
+从未参与调参的 800 个反应中排除上节的 `0`、`4`、`5`，对剩余反应编号排序后用 `random.Random(20260927).sample(..., 10)` 抽取，选中 `99`、`107`、`164`、`316`、`410`、`468`、`524`、`637`、`646`、`882`（编号从 0 起）。每例仍取第 1 个增强视图和第 1 次独立采样；重跑完整 32 输入 batch、每输入 9 次采样，两种方法使用同一 checkpoint 与 GPU 子候选选择实现。20 条最终预测都与已保存的 dev1000 预测逐条一致。逐例四段调用次数、结果和链接见[随机案例索引](case_study/random10/README.md)，独立页面均命名为 `反应编号-trajectory.html`。
+
+| 范围 | 平均 NFE：加速前 → 后 | 第1段调用合计 | 第2段调用合计 | 第3段调用合计 | 第4段调用合计 | 最终 token 完全相同 | 单条轨迹命中：前 → 后 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 随机 10 例，仅作轨迹分析 | 100 → 38.4（后者范围 26～60） | 260 → 70 | 250 → 60 | 250 → 93 | 240 → 161 | 9/10 | 7/10 → 6/10 |
+
+四段按模型调用的 `t_start` 分为 `[0,0.25)`、`[0.25,0.50)`、`[0.50,0.75)`、`[0.75,1)`。唯一最终输出不同的是反应 `882`：加速前命中，加速后生成有效但未命中的分子。10 例中的单轨迹命中数不代表反应级 Top-k，也不能用于估计总体质量；总体结论仍以完整 dev1000、未调参 800 反应和完整 test 为准。轨迹记录增加同步开销，不用这些页面的运行时间计算加速比。
+
+[合并轨迹页面](case_study/random10/index.html) SHA-256 为 `2ff579a286df52b96ace874e7891b31523419bdbbec6d3586b20d15fc88f369a`；[压缩逐步数据](case_study/random10/index.json.gz) SHA-256 为 `403ea159060edac43685db87391f19385e8332a61f5deef61fa1d2360fd4a3b7`。复现命令见案例索引。
