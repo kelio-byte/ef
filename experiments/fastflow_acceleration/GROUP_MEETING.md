@@ -106,6 +106,7 @@ h = min(h时间上限, h强度上限, 1 - 当前时间)
 
 ## 实验记录与复现
 
+- 按“引言 → FastFlow → 我们的做法 → 结果分析”讲述的版本：[GROUP_MEETING_NARRATIVE.md](GROUP_MEETING_NARRATIVE.md)
 - 完整实验台账、分步实验和数据哈希：[RESULTS.md](RESULTS.md)
 - 任务步骤与预先固定的验收预算：[FastFlow_EFRetro_Acceleration_Task_Plan.md](../../FastFlow_EFRetro_Acceleration_Task_Plan.md)
 - FastFlow 方案分析：[FastFlow_EFRetro_Inference_Acceleration.md](../../FastFlow_EFRetro_Inference_Acceleration.md)
