@@ -4,7 +4,7 @@
 
 从 dev1000 中未参与调参的 800 个反应里，排除先前展示的反应 `0`、`4`、`5`，对其余反应编号排序，再用 `random.Random(20260927).sample(..., 10)` 抽取。选中的是 `99`、`107`、`164`、`316`、`410`、`468`、`524`、`637`、`646`、`882`。反应编号和文件名均**从 0 开始**；每个反应取第 1 个增强视图（dev1000 产品行号为反应编号 × 20）和第 1 次独立采样。
 
-每个独立 HTML 同时显示加速前、加速后的模型调用时间轴、逐步 token 状态和最终结果，文件名为 `反应编号-trajectory.html`。[全部 10 例合并浏览](index.html)；[原始逐步数据](index.json.gz)。两种方法使用同一 checkpoint 和 GPU 子候选选择实现。重跑完整的 32 输入 batch、每输入 9 次采样后，10 例共 20 条最终预测均与已保存的 dev1000 预测逐条一致。
+每个独立 HTML 同时显示加速前、加速后的模型调用时间轴、逐步 token 状态和最终结果，文件名为 `反应编号-trajectory.html`。[单页汇总分析与全部 10 例轨迹](index.html)把对照表、观察和完整案例放在同一个 HTML 中；[原始逐步数据](index.json.gz)供核对。两种方法使用同一 checkpoint 和 GPU 子候选选择实现。重跑完整的 32 输入 batch、每输入 9 次采样后，10 例共 20 条最终预测均与已保存的 dev1000 预测逐条一致。
 
 ## 逐例对比
 
@@ -33,6 +33,16 @@
 
 ## 复现与校验
 
+本轮**只读取已有的 `index.json.gz` 重绘合并分析页面，没有重新运行模型**：
+
+```bash
+PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/render_trajectory_analysis.py \
+  --input experiments/fastflow_acceleration/case_study/random10/index.json.gz \
+  --output experiments/fastflow_acceleration/case_study/random10/index.html --force
+```
+
+下列命令是原始逐步数据的完整复现方式，本轮未执行：
+
 ```bash
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/visualize_trajectory.py \
   --indices 1980,2140,3280,6320,8200,9360,10480,12740,12920,17640 --run-index 0 \
@@ -41,4 +51,6 @@ PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/visua
   --output experiments/fastflow_acceleration/case_study/random10/index.html --per-case-html --force
 ```
 
-合并页面 `index.html` 的 SHA-256：`2ff579a286df52b96ace874e7891b31523419bdbbec6d3586b20d15fc88f369a`；压缩逐步数据 `index.json.gz` 的 SHA-256：`403ea159060edac43685db87391f19385e8332a61f5deef61fa1d2360fd4a3b7`。
+若从头复现原始逐步数据，最后再运行上面的纯重绘命令，生成带汇总分析的 `index.html`。
+
+合并分析页面 `index.html` 的 SHA-256：`7a12d9ad787860353401c5827194b4bca949648fc13e53457e5c2d9e4761a69b`；压缩逐步数据 `index.json.gz` 的 SHA-256：`403ea159060edac43685db87391f19385e8332a61f5deef61fa1d2360fd4a3b7`。
