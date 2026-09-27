@@ -148,13 +148,13 @@ hazard 每四步轮转抽样 1/4 的轨迹（每时间段 225,000 个值）；�
 | 4 | `100 / 12 / 否` | `57 / 7 / 是` | `26→7` | `24→23` |
 | 5 | `100 / 5 / 是` | `61 / 4 / 否（无效分子）` | `26→7` | `24→38` |
 
-“保留状态变化”统计两个子候选中选中的状态是否与该步之前不同；“单轨迹命中”以规范化产物与目标的精确匹配判断，不等于反应级 Top-k。反应 0 的最终分子保持正确而 NFE 减半；反应 4 的单轨迹结果改善；反应 5 的单轨迹结果退化并变成无效分子。早段调用显著减少，后段可因强度升高而更密集：反应 5 的 Hazard 轨迹在实际模型调用点观测到的 `Λ` 中位数，前四分之一时间为 `0.204`，末四分之一时间为 `22.269`；相应区间调用数为 `7` 和 `38`。逐步图与数据见 [trajectories.html](case_study/trajectories.html) 和 [trajectories.json.gz](case_study/trajectories.json.gz)。两文件的 SHA-256 分别为 `58c60d888f6f8007153a20540f1c7bce6e1e7ab6d1fc213c64aa4e40c97ffa67` 和 `899ee6eda3179c8d07c225011a18023bc6393d3f8978f3e363c3f9a588e53031`。轨迹记录会增加同步开销，因此这些案例**只比较 NFE 和采样路径，不比较墙钟时间**。
+“保留状态变化”统计两个子候选中选中的状态是否与该步之前不同；“单轨迹命中”以规范化产物与目标的精确匹配判断，不等于反应级 Top-k。反应 0 的最终分子保持正确而 NFE 减半；反应 4 的单轨迹结果改善；反应 5 的单轨迹结果退化并变成无效分子。早段调用显著减少，后段可因强度升高而更密集：反应 5 的 Hazard 轨迹在实际模型调用点观测到的 `Λ` 中位数，前四分之一时间为 `0.204`，末四分之一时间为 `22.269`；相应区间调用数为 `7` 和 `38`。逐步图与数据见 [trajectories.html](case_study/trajectories.html) 和 [trajectories.json.gz](case_study/trajectories.json.gz)。HTML 已将对照标为“加速前／加速后”；JSON 仍使用 `baseline`／`hazard` 键以保持内部数据口径。新增的 `rate_detail_step=18` 为六条轨迹保存第 18 次模型调用的逐位置、掩码后速率；[组会叙述文档](GROUP_MEETING_NARRATIVE.md)选用反应 4 的加速后轨迹作为真实计算示例，其 `t=0.56174071`、`Λ=9.51519966`、`h=0.01576425`。两文件的 SHA-256 分别为 `5db5b0b400ce8ee099e3e864b56fde9beb3cdbe9d8981dddbb854d91bf033177` 和 `69fd2038d52da02a7c2c0d9f87457ff9281edbaac05cfbf2b3859c1f7e4f18d2`。轨迹记录会增加同步开销，因此这些案例**只比较 NFE 和采样路径，不比较墙钟时间**。
 
 复现命令：
 
 ```bash
 PYTHONPATH=/root/autodl-tmp/efretro /root/autodl-tmp/ef/bin/python scripts/visualize_trajectory.py \
-  --indices 0,80,100 --run-index 0 \
+  --indices 0,80,100 --run-index 0 --rate-detail-step 18 \
   --baseline-predictions outputs/fastflow_accel/baseline_dev1000/predictions.txt \
   --hazard-predictions outputs/fastflow_accel/hazard04_l015_dev1000/predictions.txt \
   --output experiments/fastflow_acceleration/case_study/trajectories.html --force

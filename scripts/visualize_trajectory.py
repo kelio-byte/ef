@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Compare official Full-100 and hazard trajectories for selected product views.
+"""Visualize inference trajectories before and after acceleration.
 
 The tool reruns complete 32-product batches with R=9 and M=2, preserving the
 official per-product seeds. Optional reference predictions verify that a traced
@@ -69,7 +69,7 @@ def _reference_lines(path: Path | None, n_products: int, checkpoint_hash: str, s
     return lines
 
 
-def _run_batch(model, cfg, token2id, products: list[str], start: int, selected: list[int], run_index: int, device: torch.device):
+def _run_batch(model, cfg, token2id, products: list[str], start: int, selected: list[int], run_index: int, device: torch.device, rate_detail_step: int | None):
     product_ids = [[token2id.get(token, UNK_TOKEN) for token in line.split()] for line in products]
     x_unique = make_batch(product_ids, device)
     x_0 = x_unique.repeat_interleave(N_RUNS, dim=0)
@@ -85,6 +85,10 @@ def _run_batch(model, cfg, token2id, products: list[str], start: int, selected: 
     results = {}
     for name, time_grid, max_nfe in (("baseline", "adaptive", 100), ("hazard", "hazard", 500)):
         trace_steps = {row: [] for row in traced_rows}
+        trace_rate_steps = (
+            {row: {rate_detail_step - 1} for row in traced_rows}
+            if rate_detail_step is not None else None
+        )
         output = sample_branches(
             model,
             x_0,
@@ -100,6 +104,7 @@ def _run_batch(model, cfg, token2id, products: list[str], start: int, selected: 
             n_children=N_CHILDREN,
             changed_state_bonus=0.5,
             trace_steps=trace_steps,
+            trace_rate_steps=trace_rate_steps,
         )
         results[name] = (output, trace_steps)
     return results
@@ -110,6 +115,8 @@ def _method_result(output, trace: list[dict], row: int, id2token: dict[int, str]
     if not trace:
         raise RuntimeError(f"No trace steps recorded for batch row {row}")
     for step in trace:
+        for position in step.get("position_rates", ()):
+            position["token"] = id2token.get(position["token_id"], "<UNK>")
         step["before_tokens"] = _tokens(step.pop("before_ids"), id2token)
         step["after_tokens"] = _tokens(step.pop("after_ids"), id2token)
         step["state_changed"] = step["before_tokens"] != step["after_tokens"]
@@ -136,7 +143,7 @@ def _timeline(case: dict) -> str:
         px = x(tick)
         parts.append(f'<line x1="{px:.1f}" y1="20" x2="{px:.1f}" y2="130" stroke="#dce3eb"/>')
         parts.append(f'<text x="{px:.1f}" y="148" text-anchor="middle" fill="#526174" font-size="12">{tick:g}</text>')
-    for name, label, y, color in (("baseline", "Full-100", 52, "#3867b0"), ("hazard", "Hazard", 104, "#bb5638")):
+    for name, label, y, color in (("baseline", "加速前", 52, "#3867b0"), ("hazard", "加速后", 104, "#bb5638")):
         parts.append(f'<text x="6" y="{y+4}" fill="{color}" font-size="14">{label}</text>')
         parts.append(f'<line x1="{left}" y1="{y}" x2="{left+span}" y2="{y}" stroke="{color}" opacity=".45"/>')
         for step in case[name]["trace"]:
@@ -184,20 +191,20 @@ def _render_html(report: dict) -> str:
             f'<b>目标：</b><code>{escape(" ".join(case["target_tokens"]))}</code></p>'
             + _timeline(case)
             + '<div class="stats">'
-            + f'<div><b>Full-100</b><br>NFE {base["nfe"]} · 状态变化 {base["changed_steps"]} 次'
+            + f'<div><b>加速前</b><br>NFE {base["nfe"]} · 状态变化 {base["changed_steps"]} 次'
             + f'<br>单轨迹命中目标：{"是" if base["correct"] else "否"}'
             + f'<br><code>{escape(" ".join(base["final_tokens"]))}</code></div>'
-            + f'<div><b>Hazard</b><br>NFE {fast["nfe"]} · 状态变化 {fast["changed_steps"]} 次'
+            + f'<div><b>加速后</b><br>NFE {fast["nfe"]} · 状态变化 {fast["changed_steps"]} 次'
             + f'<br>单轨迹命中目标：{"是" if fast["correct"] else "否"}'
             + f'<br><code>{escape(" ".join(fast["final_tokens"]))}</code></div>'
             + '</div>'
             + f'<p>两种方法的最终规范化分子{"相同" if same else "不同或无效"}。'
             '单条轨迹是否命中目标，不等于反应级 Top-k。</p>'
-            + _step_table("Full-100", base) + _step_table("Hazard", fast)
+            + _step_table("加速前", base) + _step_table("加速后", fast)
             + '</section>'
         )
     return (
-        '<!doctype html><html lang="zh"><meta charset="utf-8"><title>EFRetro 轨迹案例对比</title>'
+        '<!doctype html><html lang="zh"><meta charset="utf-8"><title>推理轨迹可视化分析</title>'
         '<style>body{font:16px/1.55 system-ui,sans-serif;max-width:1180px;margin:32px auto;padding:0 22px;color:#172536;background:#f7f9fc}'
         'section{background:white;border:1px solid #dfe7ef;border-radius:12px;padding:22px;margin:24px 0}'
         'h1,h2{line-height:1.25}svg{width:100%;height:auto;background:#fafcff;border:1px solid #e7edf4;border-radius:8px}'
@@ -205,10 +212,8 @@ def _render_html(report: dict) -> str:
         'code{font:13px/1.4 ui-monospace,monospace;overflow-wrap:anywhere}.scroll{overflow-x:auto}'
         'table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid #e1e7ef;padding:6px;vertical-align:top;text-align:left}'
         'details{margin:12px 0}summary{cursor:pointer;font-weight:600}</style><body>'
-        '<h1>EFRetro 推理轨迹：Full-100 与 Hazard</h1>'
-        '<p>同一模型权重、输入、随机种子、R=9、M=2 和 batch size=32。'
-        'Full-100 与 Hazard 都使用当前正式的 GPU 子候选选择实现，便于单独观察步长变化。'
-        '此图的 NFE 是轨迹调用次数，不是单案例墙钟加速倍数。</p>'
+        '<h1>推理轨迹可视化分析</h1>'
+        '<p>每条竖线代表一次模型调用；NFE 是模型调用次数，不是单案例的墙钟加速倍数。</p>'
         + "".join(cards) + '</body></html>'
     )
 
@@ -221,6 +226,7 @@ def main() -> None:
     parser.add_argument("--vocab", type=Path, default=DATA / "example.vocab.src")
     parser.add_argument("--indices", required=True, type=_indices, help="0-based product-view line indices, comma-separated")
     parser.add_argument("--run-index", type=int, default=0, help="0-based independent run index in 0..8")
+    parser.add_argument("--rate-detail-step", type=int, help="1-based model call for saving per-position masked edit rates")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--baseline-predictions", type=Path)
     parser.add_argument("--hazard-predictions", type=Path)
@@ -229,6 +235,8 @@ def main() -> None:
     args = parser.parse_args()
     if not 0 <= args.run_index < N_RUNS:
         parser.error(f"--run-index must be in 0..{N_RUNS-1}")
+    if args.rate_detail_step is not None and args.rate_detail_step < 1:
+        parser.error("--rate-detail-step must be positive")
     if args.output.suffix.lower() != ".html":
         parser.error("--output must end in .html")
     json_path = args.output.with_suffix(".json.gz")
@@ -260,7 +268,7 @@ def main() -> None:
         for start, indices in sorted(grouped.items()):
             print(f"Tracing batch {start // BATCH_SIZE + 1}: product lines {indices}")
             batch = products[start : start + BATCH_SIZE]
-            results = _run_batch(model, cfg, token2id, batch, start, indices, args.run_index, device)
+            results = _run_batch(model, cfg, token2id, batch, start, indices, args.run_index, device, args.rate_detail_step)
             for index in indices:
                 row = (index - start) * N_RUNS + args.run_index
                 target_tokens = targets[index].split()
@@ -289,7 +297,8 @@ def main() -> None:
                 print(f'  product {index}: NFE {case["baseline"]["nfe"]} -> {case["hazard"]["nfe"]}; '
                       f'correct {case["baseline"]["correct"]} -> {case["hazard"]["correct"]}')
     report = {
-        "protocol": "same-checkpoint matched Full-100 versus hazard trajectory visualization",
+        "protocol": "同条件加速前后推理轨迹对比",
+        "rate_detail_step": args.rate_detail_step,
         "checkpoint_sha256": checkpoint_hash,
         "products_sha256": source_hash,
         "targets_sha256": sha256(args.targets_file),

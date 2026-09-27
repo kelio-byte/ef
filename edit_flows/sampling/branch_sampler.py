@@ -4,6 +4,7 @@
 """
 
 from dataclasses import dataclass
+import math
 import torch
 from torch import Tensor
 from .common import get_adaptive_h
@@ -16,6 +17,7 @@ from .branch_sampler_helpers import (
     _select_k1m_child_indices,
     _total_edit_hazard,
 )
+from .ops import edit_position_masks
 from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 
 
@@ -59,13 +61,15 @@ def sample_branches(
     statistics=None,
     diagnostics=None,
     trace_steps: dict[int, list[dict]] | None = None,
+    trace_rate_steps: dict[int, set[int]] | None = None,
     hazard_max_step=0.04,
     hazard_limit=0.15,
 ):
     """作用：批量推进每条输入的 K=1、M 子候选分支。输入：模型、初始状态、调度器、种子、产品记忆及 M。输出：每条输入的最终 token 状态。
 
     独立运行数由 inference.predict 构造；本函数每步采样 M 个候选，按状态频数和变化奖励保留一个。
-    trace_steps 可选地把指定 batch 行的逐步状态和速率写入对应列表；默认关闭。
+    trace_steps 可选地把指定 batch 行的逐步状态和总速率写入对应列表；
+    trace_rate_steps 可选地为指定行和步骤额外保存逐位置、经掩码过滤的速率。
     """
     device = x_0.device
     batch_size = x_0.shape[0]
@@ -80,6 +84,8 @@ def sample_branches(
         raise ValueError("time_grid must be 'adaptive', 'uniform', or 'hazard'")
     if not 0.0 < hazard_max_step <= 1.0 or not 0.0 < hazard_limit <= 1.0:
         raise ValueError("hazard_max_step and hazard_limit must be positive and <= 1")
+    if trace_rate_steps is not None and trace_steps is None:
+        raise ValueError("trace_rate_steps requires trace_steps")
     if (
         not isinstance(n_children, int)
         or isinstance(n_children, bool)
@@ -240,7 +246,7 @@ def sample_branches(
                     child_row = chosen_rows[parent_i]
                     before = [int(v) for v in x_batch[parent_i].tolist() if v != PAD_TOKEN]
                     after = [int(v) for v in branches[b].x_t[0].tolist() if v != PAD_TOKEN]
-                    trace_steps[b].append({
+                    record = {
                         "step": step,
                         "t_start": state.t,
                         "t_end": branches[b].t,
@@ -252,7 +258,34 @@ def sample_branches(
                         "substitute_events": int(actions["sub_mask"][child_row].sum().item()),
                         "delete_events": int(actions["del_mask"][child_row].sum().item()),
                         "selected_child": child_row - parent_i * n_children,
-                    })
+                    }
+                    if trace_rate_steps is not None and step in trace_rate_steps.get(b, ()):
+                        row_rates = rates[parent_i].exp()
+                        insert_mask, sub_del_mask = edit_position_masks(x_batch[parent_i : parent_i + 1])
+                        masked_rates = torch.stack(
+                            (
+                                row_rates[:, 0] * insert_mask[0],
+                                row_rates[:, 1] * sub_del_mask[0],
+                                row_rates[:, 2] * sub_del_mask[0],
+                            ),
+                            dim=-1,
+                        )
+                        record["position_rates"] = [
+                            {
+                                "token_id": int(token_id),
+                                "insert": float(values[0]),
+                                "substitute": float(values[1]),
+                                "delete": float(values[2]),
+                            }
+                            for token_id, values in zip(x_batch[parent_i].tolist(), masked_rates.tolist())
+                            if token_id != PAD_TOKEN
+                        ]
+                        if not math.isclose(
+                            float(masked_rates.sum()), record["edit_hazard"],
+                            rel_tol=1e-5, abs_tol=1e-6,
+                        ):
+                            raise RuntimeError("Position rates do not sum to the traced edit hazard")
+                    trace_steps[b].append(record)
         if diagnostics is not None:
             diagnostics.record_step(
                 step=step,
