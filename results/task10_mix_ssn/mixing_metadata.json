@@ -1,0 +1,37 @@
+{
+  "augmentation": 20,
+  "created_at_utc": "2026-08-01T08:40:31.468224+00:00",
+  "input_beam_size": 3,
+  "input_line_count_per_source": 3000,
+  "layout": "reaction-major, augmentation-major, run-minor",
+  "output_beam_size": 3,
+  "output_line_count": 3000,
+  "output_sha256": "dd98a218c28ea4d3a6f275fea58ab3c77a3df1988525333575de9b09c7a6b198",
+  "reaction_count": 50,
+  "run_sources": [
+    {
+      "label": "stochastic",
+      "run": 1
+    },
+    {
+      "label": "stochastic",
+      "run": 2
+    },
+    {
+      "label": "noop",
+      "run": 3
+    }
+  ],
+  "sources": {
+    "noop": {
+      "line_count": 3000,
+      "path": "/root/autodl-tmp/edit_flows/results/task8_noop_full/predictions.txt",
+      "sha256": "527980cf5225e53c5d44ad3a31000fe7790ba0400108ed81fbd96c0d30e01418"
+    },
+    "stochastic": {
+      "line_count": 3000,
+      "path": "/root/autodl-tmp/edit_flows/results/task7_precision_full_tf32/predictions.txt",
+      "sha256": "961c46a7169f11b1037f6bb20325e0bdb26375e74f81c6c1b2fab5e82a96082b"
+    }
+  }
+}

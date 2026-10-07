@@ -38,6 +38,7 @@ import glob
 import os
 import re
 import torch
+from edit_flows.utils.checkpoint import average_model_checkpoints, atomic_torch_save
 
 
 def _extract_step(filename: str) -> int:
@@ -53,8 +54,13 @@ def gather_checkpoints(
     last_n: int | None,
     step_range: tuple[int, int] | None,
 ) -> list[str]:
+    if last_n is not None and last_n <= 0:
+        raise ValueError("last_n must be > 0")
+    if step_range is not None and step_range[0] > step_range[1]:
+        raise ValueError("step_range must be ordered low to high")
     if checkpoints:
-        return sorted(checkpoints)
+        # Keep manual weights paired with the caller's explicit path order.
+        return list(checkpoints)
 
     if not checkpoint_dir:
         raise ValueError("Either --checkpoints or --checkpoint_dir is required.")
@@ -81,6 +87,8 @@ def compute_weights(
     exp_decay_factor: float,
 ) -> torch.Tensor:
     n = len(ckpt_paths)
+    if n == 0:
+        raise ValueError("No checkpoints selected")
 
     if manual_weights is not None:
         if len(manual_weights) != n:
@@ -88,12 +96,17 @@ def compute_weights(
                 f"Got {n} checkpoints but {len(manual_weights)} manual weights."
             )
         w = torch.tensor(manual_weights, dtype=torch.float32)
+        if (not torch.isfinite(w).all() or (w < 0).any()
+                or not torch.isfinite(w.sum()) or w.sum() <= 0):
+            raise ValueError("Manual weights must be finite, non-negative, with positive sum")
         return w / w.sum()
 
     if weight_scheme == "uniform":
         return torch.full((n,), 1.0 / n)
 
     if weight_scheme == "exp_decay":
+        if not 0 < exp_decay_factor <= 1:
+            raise ValueError("exp_decay_factor must be in (0, 1]")
         # newest last: weight = factor^(n-1-i)
         indices = torch.arange(n, dtype=torch.float32)
         w = exp_decay_factor ** (n - 1 - indices)
@@ -157,6 +170,8 @@ def main():
         help="Also save optimizer state from the first checkpoint (rarely needed)",
     )
     args = parser.parse_args()
+    if args.step_interval <= 0:
+        parser.error("--step_interval must be > 0")
 
     # --- gather ---
     ckpt_paths = gather_checkpoints(
@@ -178,53 +193,13 @@ def main():
     )
     print(f"Weights ({args.weight_scheme}): {weights.tolist()}")
 
-    # --- load & average ---
-    device = torch.device("cpu")
-    avg_state = None
-    reference_config = None
-    reference_vocab_info: dict = {}
-
-    for i, path in enumerate(ckpt_paths):
-        ckpt = torch.load(path, map_location=device, weights_only=False)
-        sd = ckpt["model_state_dict"]
-
-        if i == 0:
-            avg_state = {k: v.float() * weights[0] for k, v in sd.items()}
-            reference_config = ckpt["config"]
-            reference_vocab_info = {
-                k: ckpt[k]
-                for k in ["real_vocab_size", "model_vocab"]
-                if k in ckpt
-            }
-        else:
-            # sanity: config consistency
-            if ckpt["config"] != reference_config:
-                print(f"  [WARN] config mismatch for {path} — using reference config")
-            for k, v in sd.items():
-                avg_state[k] += v.float() * weights[i]
-
-    print("Averaging done.")
-
-    # --- build output checkpoint ---
-    avg_state = {k: v.to(dtype=sd[k].dtype) for k, v in avg_state.items()}  # type: ignore
-
-    out_ckpt = {
-        "model_state_dict": avg_state,
-        "config": reference_config,
-        "step": -1,
-        **reference_vocab_info,
-    }
-
-    if args.save_optimizer:
-        first_ckpt = torch.load(ckpt_paths[0], map_location="cpu", weights_only=False)
-        for key in ["optimizer_state_dict", "lr_scheduler_state"]:
-            if key in first_ckpt:
-                out_ckpt[key] = first_ckpt[key]
-                out_ckpt["step"] = first_ckpt.get("step", -1)
+    out_ckpt = average_model_checkpoints(
+        ckpt_paths, weights, save_optimizer=args.save_optimizer,
+    )
 
     # --- save ---
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    torch.save(out_ckpt, args.output)
+    atomic_torch_save(out_ckpt, args.output)
     print(f"Saved averaged checkpoint to {args.output}")
 
 

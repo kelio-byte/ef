@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-08-24",
+  "stage": "after_spe_stage1_reaction_center_first_edit",
+  "git": {
+    "branch": "task18-all-branches-eval",
+    "commit": "d4b99a6568e333517911bee8ede1f7b8744a73f5",
+    "preexisting_dirty_paths": [
+      "PROJECT_FACTS_SUMMARY.md (deleted)",
+      "PROJECT_OVERVIEW.md (deleted)",
+      "session-handoff.md (deleted)"
+    ]
+  },
+  "baseline_protocol": {
+    "dataset": "datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500",
+    "checkpoint": "new_checkpoints/spe_m500_checkpoints/checkpoint_step490000.pt",
+    "sampler": "euler",
+    "n_samples": 9,
+    "n_steps": 100,
+    "scheduler": "cubic",
+    "seed": 42,
+    "augmentation": 20,
+    "split": "dev_unique1000_aug20",
+    "reaction_count": 1000,
+    "input_row_count": 20000,
+    "batch_size": 32,
+    "historical_metrics_only": {
+      "top1_percent": 60.1,
+      "top3_percent": 76.6,
+      "top5_percent": 80.5,
+      "top10_percent": 83.7,
+      "oracle_any_percent": 90.0,
+      "invalid_at_1_percent": 12.85,
+      "runtime_minutes": 24.34,
+      "source": "SPE/summary.md",
+      "formal_reuse_allowed": false,
+      "reason": "The complete seed-42 Euler prediction artifact and sampling metadata are not present locally. The documented aggregate values cannot support paired reaction-level comparison."
+    }
+  },
+  "artifacts": {
+    "checkpoint": {
+      "path": "new_checkpoints/spe_m500_checkpoints/checkpoint_step490000.pt",
+      "size_bytes": 167251335,
+      "sha256": "225156c3e0120bba2f019285670f43a5bbbada1f6e29b75b208255e0abbfefc5"
+    },
+    "vocab": {
+      "path": "datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/example.vocab.src",
+      "size_bytes": 6513,
+      "sha256": "efb4e3ef2b62c57799287c53089f69abeaadfce1644679907f0fa241003d6483",
+      "real_token_count": 568,
+      "model_token_count": 572
+    },
+    "spe_codes": {
+      "path": "scripts/preprocessing/SPE_ChEMBL.txt",
+      "size_bytes": 30881,
+      "sha256": "ee408e30e0aae598770f233013b312b206df424f6e593b410b0107d7d2237a43",
+      "merges": 500,
+      "dropout": 0
+    },
+    "spe_preprocessing_metadata": {
+      "path": "datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/spe_preprocessing_metadata.json",
+      "size_bytes": 2897,
+      "sha256": "5eb282ae6bafabb07dc5030565362ee7b8db881e9c7ed3065e9b9d1ef61d1ff1"
+    },
+    "raw_train": {
+      "path": "datasets/USPTO_50K/raw_train.csv",
+      "size_bytes": 15958271,
+      "sha256": "69661b12baa44d5a0be6cfc7698af8b518341fcb4427780c60358e0d9dcd8e7f",
+      "reaction_count": 40008
+    },
+    "raw_val": {
+      "path": "datasets/USPTO_50K/raw_val.csv",
+      "size_bytes": 1992406,
+      "sha256": "a52eb4cfd889820cf5172f65ac0e1ac124f3a36051674d5ca8bd63d037e149ee",
+      "reaction_count": 5001
+    },
+    "dev_src": {
+      "path": "datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/evaluation_v2/dev_unique1000_aug20/src.txt",
+      "size_bytes": 1223704,
+      "sha256": "54384b145933d85ce707f2eb5b7551e4ba3d3ab9197686ea5f1664e608fd8439",
+      "row_count": 20000
+    },
+    "dev_tgt": {
+      "path": "datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/evaluation_v2/dev_unique1000_aug20/tgt.txt",
+      "size_bytes": 1400107,
+      "sha256": "1862b520154415e10af85bcdc2d466e741ede4643f58750f9c36f6d224fffdaf",
+      "row_count": 20000
+    },
+    "evaluation_manifest": {
+      "path": "datasets/USPTO_50K_PtoR_aug20_#global#/evaluation_v2/manifest.json",
+      "size_bytes": 66477,
+      "sha256": "1d030df8a52d3fdc2c9fd8bf82b1a247ad70b87784b2a843ee4fc87ac96e1f35"
+    }
+  },
+  "environment": {
+    "python_executable": "/root/miniconda3/envs/ef/bin/python",
+    "python": "3.10.20",
+    "pytorch": "2.7.1+cu126",
+    "rdkit": "2026.03.4",
+    "numpy": "2.2.6",
+    "pyyaml": "6.0.3",
+    "smilespe": "0.0.3",
+    "cuda_available": false,
+    "gpu_count": 0,
+    "gpu": null
+  },
+  "baseline_decision": {
+    "rerun_required": true,
+    "when": "At RC1 GPU gate, run B0 Euler together with B1 oracle-center and B2 pseudo-center under one code revision.",
+    "why": "Only the aggregate seed-42 metrics survive locally; seed-7/123 Euler and seed-42 R9K1M2 artifacts are not substitutes for the frozen seed-42 ordinary Euler baseline."
+  }
+}

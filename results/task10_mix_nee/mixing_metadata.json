@@ -1,0 +1,37 @@
+{
+  "augmentation": 20,
+  "created_at_utc": "2026-08-01T08:43:20.298271+00:00",
+  "input_beam_size": 3,
+  "input_line_count_per_source": 3000,
+  "layout": "reaction-major, augmentation-major, run-minor",
+  "output_beam_size": 3,
+  "output_line_count": 3000,
+  "output_sha256": "32ec2a9dfaee15a46a40dc7aee3e263f9b9a835f3a9f13716dd27eb1c1d65240",
+  "reaction_count": 50,
+  "run_sources": [
+    {
+      "label": "noop",
+      "run": 1
+    },
+    {
+      "label": "euler",
+      "run": 2
+    },
+    {
+      "label": "euler",
+      "run": 3
+    }
+  ],
+  "sources": {
+    "euler": {
+      "line_count": 3000,
+      "path": "/root/autodl-tmp/edit_flows/results/bench_euler/predictions.txt",
+      "sha256": "cb19f08466234eceddeec9cb7c92bea996aad4bc16cef45f98dfd80e9caa12f0"
+    },
+    "noop": {
+      "line_count": 3000,
+      "path": "/root/autodl-tmp/edit_flows/results/task8_noop_full/predictions.txt",
+      "sha256": "527980cf5225e53c5d44ad3a31000fe7790ba0400108ed81fbd96c0d30e01418"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "file": "datasets/USPTO_50K_PtoR_aug20_#global#/test/tgt-test.txt",
+  "line_statistics": {
+    "total_lines": 100140,
+    "blank_lines": 0,
+    "nonempty_lines": 100140,
+    "lines_with_dot": 71300,
+    "lines_without_dot": 28840,
+    "line_dot_percentage": 71.20031955262633,
+    "total_dot_tokens": 71460,
+    "mean_fragments_per_nonempty_line": 1.7136009586578789,
+    "max_fragments": 3,
+    "fragment_histogram_all_lines": {
+      "1": 28840,
+      "2": 71140,
+      "3": 160
+    },
+    "fragment_histogram_dot_lines": {
+      "2": 71140,
+      "3": 160
+    }
+  },
+  "augmentation_statistics": {
+    "augmentation": 20,
+    "complete_blocks": 5007,
+    "partial_tail_lines": 0,
+    "blocks_with_any_dot": 3565,
+    "blocks_with_any_dot_percentage": 71.20031955262633,
+    "blocks_all_lines_with_dot": 3565,
+    "blocks_all_lines_with_dot_percentage": 71.20031955262633,
+    "mean_dot_line_percentage_per_complete_block": 71.20031955262633,
+    "block_dot_line_count_histogram": {
+      "0": 1442,
+      "20": 3565
+    },
+    "interpretation": "Blocks are contiguous groups of augmentation lines; this assumes the input file preserves the dataset's augmentation ordering."
+  }
+}

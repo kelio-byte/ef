@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 from edit_flows.core.coupling import Coupling
-from edit_flows.core.rate_scale import apply_rate_parameterization
+from edit_flows.core.rate_scale import apply_rate_parameterization, get_rate_scale
 from edit_flows.core.scheduler import KappaScheduler
 from edit_flows.core.z_space import rm_gap_tokens, make_ut_mask_from_z, sample_cond_zt, project_mask_z_to_x
 from edit_flows.training.loss import bregman_loss
@@ -20,6 +20,7 @@ def prepare_batch(
     bos_token: int = BOS_TOKEN,
     pad_token: int = PAD_TOKEN,
     use_origin_mask: bool = False,
+    use_product_memory: bool = False,
 ) -> dict:
     B = x_0.shape[0]
     device = x_0.device
@@ -70,20 +71,50 @@ def prepare_batch(
         )
         batch["origin_mask"] = origin_mask
 
+    if use_product_memory:
+        # Preserve the *unaligned* product before noising.  Pre-aligned
+        # training files contain GAP symbols that do not exist at inference;
+        # remove them here and prepend BOS so the static-memory sequence is
+        # exactly the same representation built by sample_retro._make_batch.
+        # Unlike origin_mask, this also retains source tokens that disappear
+        # from the dynamic state x_t later in the trajectory.
+        product_source_mask = (x_0 != pad_token) & (x_0 != GAP_TOKEN)
+        product_lengths = product_source_mask.sum(dim=1)
+        max_product_length = int(product_lengths.max().item())
+        product_tokens = torch.full(
+            (B, max_product_length + 1),
+            pad_token,
+            dtype=x_0.dtype,
+            device=device,
+        )
+        product_tokens[:, 0] = bos_token
+        source_rows, source_columns = product_source_mask.nonzero(as_tuple=True)
+        if source_rows.numel() > 0:
+            product_positions = product_source_mask.long().cumsum(dim=1)
+            product_tokens[
+                source_rows,
+                product_positions[source_rows, source_columns],
+            ] = x_0[source_rows, source_columns]
+        batch["product_tokens"] = product_tokens
+        batch["product_padding_mask"] = product_tokens == pad_token
+
     return batch
 
 
-def train_step(
+def _forward_loss_and_metrics(
     model,
     batch_data: dict,
     scheduler: KappaScheduler,
-    optimizer: torch.optim.Optimizer,
-    max_grad_norm: float = 1.0,
     use_rate_reparam: bool = False,
     clamp_kappa: bool = False,
     clamp_max: float = 50.0,
     time_input: str = "t",
-) -> dict:
+) -> tuple[Tensor, dict]:
+    """Run one forward pass and compute loss/rate diagnostics.
+
+    Keeping this path shared by training and validation prevents TensorBoard
+    validation curves from silently using a different objective than training.
+    """
     if time_input not in {"t", "kappa"}:
         raise ValueError(f"Unsupported time_input: {time_input}")
 
@@ -101,9 +132,23 @@ def train_step(
     if origin_mask is not None:
         origin_mask = origin_mask.to(device)
 
-    log_rates, log_ins_probs, log_sub_probs = model(
-        x_t, t_model, x_pad_mask, origin_mask=origin_mask,
-    )
+    product_tokens = batch_data.get("product_tokens")
+    product_padding_mask = batch_data.get("product_padding_mask")
+    if (product_tokens is None) != (product_padding_mask is None):
+        raise ValueError(
+            "product_tokens and product_padding_mask must be supplied together"
+        )
+    if product_tokens is not None:
+        product_tokens = product_tokens.to(device)
+        product_padding_mask = product_padding_mask.to(device)
+
+    model_kwargs = {"origin_mask": origin_mask}
+    if product_tokens is not None:
+        model_kwargs.update({
+            "product_tokens": product_tokens,
+            "product_padding_mask": product_padding_mask,
+        })
+    log_rates, log_ins_probs, log_sub_probs = model(x_t, t_model, x_pad_mask, **model_kwargs)
 
     log_lambda_ins = log_rates[:, :, 0]
     log_lambda_sub = log_rates[:, :, 1]
@@ -126,12 +171,6 @@ def train_step(
         clamp_max=clamp_max,
     )
 
-    optimizer.zero_grad()
-    loss.backward()
-    if max_grad_norm > 0.0:
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
-    optimizer.step()
-
     with torch.no_grad():
         log_rates_eff = apply_rate_parameterization(
             log_rates, t, scheduler, use_rate_reparam=use_rate_reparam,
@@ -149,10 +188,71 @@ def train_step(
         )
         u_tot = torch.exp(log_ux_cat_eff).sum(dim=(1, 2)).mean()
 
-    return {
-        "loss": loss.item(),
+    return loss, {
         "u_tot": u_tot.item(),
         "u_ins": u_ins.item(),
         "u_del": u_del.item(),
         "u_sub": u_sub.item(),
+        # These aliases make the TensorBoard names explicit: each lambda is
+        # the batch-mean sum of the corresponding per-position edit rate.
+        "lambda_total": u_tot.item(),
+        "lambda_ins": u_ins.item(),
+        "lambda_del": u_del.item(),
+        "lambda_sub": u_sub.item(),
+        "t_mean": t.mean().item(),
+        "kappa_mean": scheduler(t).mean().item(),
+        "rate_scale_mean": get_rate_scale(
+            t, scheduler, clamp_max=clamp_max, clamp_kappa=clamp_kappa,
+        ).mean().item(),
+        "rate_scale_max": get_rate_scale(
+            t, scheduler, clamp_max=clamp_max, clamp_kappa=clamp_kappa,
+        ).max().item(),
     }
+
+
+def train_step(
+    model,
+    batch_data: dict,
+    scheduler: KappaScheduler,
+    optimizer: torch.optim.Optimizer,
+    max_grad_norm: float = 1.0,
+    use_rate_reparam: bool = False,
+    clamp_kappa: bool = False,
+    clamp_max: float = 50.0,
+    time_input: str = "t",
+) -> dict:
+    """Run one optimizer update and return scalar diagnostics."""
+    loss, metrics = _forward_loss_and_metrics(
+        model, batch_data, scheduler,
+        use_rate_reparam=use_rate_reparam,
+        clamp_kappa=clamp_kappa,
+        clamp_max=clamp_max,
+        time_input=time_input,
+    )
+    optimizer.zero_grad()
+    loss.backward()
+    if max_grad_norm > 0.0:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+    optimizer.step()
+    return {"loss": loss.item(), **metrics}
+
+
+@torch.no_grad()
+def evaluate_step(
+    model,
+    batch_data: dict,
+    scheduler: KappaScheduler,
+    use_rate_reparam: bool = False,
+    clamp_kappa: bool = False,
+    clamp_max: float = 50.0,
+    time_input: str = "t",
+) -> dict:
+    """Compute training-objective metrics without changing model parameters."""
+    loss, metrics = _forward_loss_and_metrics(
+        model, batch_data, scheduler,
+        use_rate_reparam=use_rate_reparam,
+        clamp_kappa=clamp_kappa,
+        clamp_max=clamp_max,
+        time_input=time_input,
+    )
+    return {"loss": loss.item(), **metrics}

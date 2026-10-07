@@ -1,0 +1,57 @@
+retro:
+  # Paired original-R-SMILES atom-level control for Full-SPE and M500-SPE.
+  # Keep model/optimizer settings matched to the unclipped SPE controls;
+  # only tokenization and its lossless maximum sequence length differ.
+  vocab_size: null
+  hidden_dim: 256
+  num_layers: 10
+  num_heads: 8
+  dim_feedforward: 2048
+  # Pre-aligned atom-level training pairs reach 189 tokens; 256 is lossless.
+  max_seq_len: 256
+  dropout: 0.2
+  attention_dropout: 0.2
+  activation: relu
+  pos_encoding_scale: true
+
+  batch_size: 256
+  val_batch_size: 256
+  total_steps: 600000
+  learning_rate_factor: 1.0
+  warmup_steps: 8000
+  max_grad_norm: 0.0
+
+  scheduler: cubic
+  sample_scheduler: cubic
+  align_fn: opt
+  n_sampling_steps: 100
+  use_rate_reparam: false
+  time_input: t
+  clamp_kappa: false
+  clamp_max: 50.0
+  use_origin_mask: false
+
+  data_dir: datasets/USPTO_50K_PtoR_aug20
+  vocab_file: example.vocab.src
+
+  seed: 42
+  num_workers: 2
+  checkpoint_interval: 10000
+  keep_checkpoints: 40
+  save_best_checkpoint: true
+
+  tensorboard:
+    enabled: true
+    log_dir: tensorboard
+    log_interval: 100
+    # Health monitoring only; checkpoint choice uses generation metrics.
+    validation_start_step: 100000
+    validation_interval: 50000
+    validation_batches: null
+    flush_interval: 500
+    flush_secs: 30
+
+  monitoring:
+    enabled: true
+    interval: 1000
+    jsonl: training_monitor.jsonl

@@ -1,0 +1,58 @@
+{
+  "augmentation": 20,
+  "augmentation_inferred_from": "datasets/USPTO_50K_PtoR_aug20_#global#/val/src-val.txt",
+  "checkpoint": {
+    "mtime_ns": 1785470613084893869,
+    "path": "/root/autodl-tmp/edit_flows/checkpoint_step600000.pt",
+    "size_bytes": 162620771
+  },
+  "created_at_utc": "2026-08-03T05:04:37.315857+00:00",
+  "git": {
+    "commit": "ab185d0f2a998d709f646e293a45afb670fbd692",
+    "dirty": false
+  },
+  "input": {
+    "kind": "products_file",
+    "mtime_ns": 1758090690000000000,
+    "path": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/val/src-val.txt",
+    "product_count": 4000,
+    "selection_end_product_exclusive": 4000,
+    "selection_start_product": 0,
+    "sha256": "9341e28d721fc36a082979d550eeb85b81bd573c7140e0db3ca3006bc6fb8e69",
+    "size_bytes": 9350401,
+    "source_product_count": 100020
+  },
+  "layout": "input-product-major, output-minor",
+  "model": {
+    "configured_use_origin_mask": false,
+    "effective_use_origin_mask": false
+  },
+  "output_beam_size": 3,
+  "output_line_count": 12000,
+  "output_sha256": "795b150d7f1f7be59b1b939fb213cbb78142b412e06d7cdd85f6e240881af591",
+  "product_count": 4000,
+  "runtime": {
+    "batch_size": 64,
+    "device": "cuda",
+    "elapsed_seconds": 487.30273147812113,
+    "peak_cuda_allocated_bytes": 1600589824,
+    "peak_cuda_reserved_bytes": 24559747072
+  },
+  "sampler": "euler_beam",
+  "sampling": {
+    "changed_state_bonus": 0.5,
+    "child_policy": "stochastic_noop",
+    "matmul_precision": "high",
+    "n_branches": 3,
+    "n_children": 2,
+    "n_runs": 3,
+    "n_steps": 100,
+    "sample_scheduler": "cubic",
+    "score_mode": "full_probability",
+    "seed": 42,
+    "seed_applied_to_sampler": true,
+    "seed_scope": "stable product/run streams",
+    "train_scheduler": "cubic"
+  },
+  "schema_version": 1
+}

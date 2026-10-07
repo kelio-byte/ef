@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why visualize_trajectory.py Produced [Zn][Si][NH3+] — The Rate Correction Explosion</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+:root {
+  --surface: #fcfcfb;
+  --page: #f9f9f7;
+  --text: #0b0b0b;
+  --text2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --blue: #2a78d6;
+  --orange: #eb6834;
+  --aqua: #1baf7a;
+  --red: #e34948;
+  --violet: #4a3aa7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1a1a19;
+    --page: #0d0d0d;
+    --text: #ffffff;
+    --text2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --blue: #3987e5;
+    --orange: #d95926;
+    --aqua: #199e70;
+    --red: #e66767;
+    --violet: #9085e9;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--page);
+  color: var(--text);
+  line-height: 1.6;
+  padding: 40px 24px 80px;
+}
+.container { max-width: 1100px; margin: 0 auto; }
+h1 {
+  font-size: 1.7rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+  line-height: 1.3;
+}
+.subtitle {
+  color: var(--text2);
+  font-size: 0.95rem;
+  margin-bottom: 40px;
+}
+.chart-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+.chart-box {
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--grid);
+  overflow: hidden;
+}
+.chart-box.single { grid-column: 1 / -1; }
+.chart-box .plot { min-height: 360px; }
+.section-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 16px 20px 0;
+}
+hr {
+  border: 0;
+  border-top: 1px solid var(--grid);
+  margin: 40px 0;
+}
+
+/* Flow diagram */
+.flow-diagram {
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--grid);
+  padding: 32px 28px 28px;
+  margin-bottom: 32px;
+}
+.flow-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 24px;
+}
+.flow-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.flow-step {
+  background: var(--page);
+  border: 1px solid var(--grid);
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  text-align: center;
+}
+.flow-step.bad {
+  border-color: #e66767;
+  background: rgba(230, 103, 103, 0.08);
+}
+.flow-step.good {
+  border-color: #199e70;
+  background: rgba(25, 158, 112, 0.08);
+}
+.flow-arrow {
+  color: var(--muted);
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+.flow-value {
+  font-weight: 700;
+  font-size: 1.05rem;
+  display: block;
+}
+.flow-desc {
+  font-size: 0.78rem;
+  color: var(--text2);
+  display: block;
+  margin-top: 2px;
+}
+.flow-row.big .flow-step {
+  padding: 14px 20px;
+  font-size: 1rem;
+}
+
+.conclusion {
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--grid);
+  padding: 24px 28px;
+  margin-top: 32px;
+}
+.conclusion h3 { margin-bottom: 12px; }
+.conclusion code {
+  background: var(--grid);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.fix-box {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+.fix-card {
+  border-radius: 6px;
+  padding: 16px 18px;
+}
+.fix-card.before {
+  border: 1px solid #e66767;
+  background: rgba(230, 103, 103, 0.06);
+}
+.fix-card.after {
+  border: 1px solid #199e70;
+  background: rgba(25, 158, 112, 0.06);
+}
+.fix-card .label {
+  font-weight: 700;
+  font-size: 0.85rem;
+  margin-bottom: 6px;
+}
+.fix-card code { font-size: 0.95rem; }
+
+@media (max-width: 700px) {
+  .chart-row { grid-template-columns: 1fr; }
+  .fix-box { grid-template-columns: 1fr; }
+  .flow-row { flex-direction: column; align-items: flex-start; }
+  .flow-arrow { transform: rotate(90deg); }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Why <span style="color:var(--red)">visualize_trajectory.py</span> Produced [Zn][Si][NH3+]</h1>
+<p class="subtitle">The Rate Correction Explosion — switching from cubic (training) to linear (sampling) scheduler</p>
+
+<!-- ====== Row 1: kappa(t) and derivative(t) ====== -->
+<div class="chart-row">
+  <div class="chart-box">
+    <div class="section-label">κ(t) — Kappa</div>
+    <div class="plot" id="chart-kappa"></div>
+  </div>
+  <div class="chart-box">
+    <div class="section-label">κ′(t) — Derivative</div>
+    <div class="plot" id="chart-deriv"></div>
+  </div>
+</div>
+
+<!-- ====== Row 2: The Correction Ratio Explosion ====== -->
+<div class="chart-row">
+  <div class="chart-box single">
+    <div class="section-label">log₁₀ Correction Ratio k_sample / k_train — Zoomed to Early t</div>
+    <div class="plot" id="chart-ratio"></div>
+  </div>
+</div>
+
+<!-- ====== Row 3: The Chain of Events ====== -->
+<div class="flow-diagram">
+  <div class="flow-title">The Chain of Events at t ≈ 0 (first Euler step)</div>
+
+  <div class="flow-row">
+    <div class="flow-step">
+      <span class="flow-desc">Model trained with cubic</span>
+      <span class="flow-value">κ(t) = t³, κ′(t) = 3t²</span>
+    </div>
+    <span class="flow-arrow">+</span>
+    <div class="flow-step bad">
+      <span class="flow-desc">Sampling with linear</span>
+      <span class="flow-value">κ(t) = t, κ′(t) = 1</span>
+    </div>
+    <span class="flow-arrow">=</span>
+    <div class="flow-step bad">
+      <span class="flow-desc">Scheduler mismatch</span>
+      <span class="flow-value">Need rate correction</span>
+    </div>
+  </div>
+
+  <div class="flow-row" style="margin-top:20px">
+    <div class="flow-step">
+      <span class="flow-desc">Model outputs raw log_rate</span>
+      <span class="flow-value" style="color:var(--blue)">≈ −19</span>
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-step bad">
+      <span class="flow-desc">Correction factor at t=0</span>
+      <span class="flow-value" style="color:var(--red)">k_sample / k_train<br>= 1 / clamp(0, 1e-12)<br>= 1e12 → log = +27.6</span>
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-step bad">
+      <span class="flow-desc">Corrected log_rate</span>
+      <span class="flow-value" style="color:var(--red)">−19 + 27.6 = +8.6</span>
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-step bad">
+      <span class="flow-desc">Rate = exp(8.6)</span>
+      <span class="flow-value" style="color:var(--red)">≈ 5,400 edits/position</span>
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-step bad">
+      <span class="flow-desc">Edit probability</span>
+      <span class="flow-value" style="color:var(--red)">1−e^(−54) ≈ 100%</span>
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-step bad">
+      <span class="flow-desc" style="font-weight:700">Random garbage</span>
+      <span class="flow-value" style="color:var(--red)">[Zn][Si][NH3+]</span>
+    </div>
+  </div>
+
+  <p style="margin-top:28px; color:var(--text2); font-size:0.9rem; text-align:center">
+  ⬆ <strong>Before fix</strong> — every position edited at step 1, SMILES destroyed irreversibly
+  </p>
+
+  <hr style="margin:20px 0; border-color:var(--grid)">
+
+  <div class="flow-row">
+    <div class="flow-step good">
+      <span class="flow-desc">Corrected log_rate</span>
+      <span class="flow-value" style="color:var(--aqua)">−19 + 4.6 = −14.4</span>
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-step good">
+      <span class="flow-desc">Rate = exp(−14.4)</span>
+      <span class="flow-value" style="color:var(--aqua)">≈ 5.6×10⁻⁷</span>
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-step good">
+      <span class="flow-desc">Edit probability</span>
+      <span class="flow-value" style="color:var(--aqua)">≈ 0% (correct)</span>
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-step good">
+      <span class="flow-desc" style="font-weight:700">SMILES preserved</span>
+      <span class="flow-value" style="color:var(--aqua)">Clc1ccc(-n2nc...</span>
+    </div>
+  </div>
+  <p style="margin-top:28px; color:var(--text2); font-size:0.9rem; text-align:center">
+  ⬆ <strong>After fix</strong> — clamp_min raised from 1e-12 to 1e-2, capping correction at ~100×
+  </p>
+</div>
+
+<!-- ====== The Fix ====== -->
+<div class="conclusion">
+  <h3>The Fix — One Character Changed</h3>
+  <p style="color:var(--text2); margin-bottom:16px">
+    In <code>edit_flows/sampling/euler.py</code>, the rate correction divides
+    <code>k_sample</code> by <code>k_train</code>. Cubic's derivative is 0 at
+    t=0, so <code>k_train = 0</code>. The old <code>clamp_min(1e-12)</code>
+    let the ratio reach 1 trillion. Changing to <code>clamp_min(1e-2)</code>
+    caps it at 100×, which is harmless since the model outputs near-zero rates
+    at t=0 anyway (no training signal there under cubic).
+  </p>
+  <div class="fix-box">
+    <div class="fix-card before">
+      <div class="label" style="color:var(--red)">❌ Before (broken)</div>
+      <code>k_train.clamp_min(<strong>1e-12</strong>)</code>
+      <p style="margin-top:8px;font-size:0.82rem;color:var(--text2)">
+        Ratio up to 1e12 → log_correction ≈ +27.6 → rates explode at first step
+      </p>
+    </div>
+    <div class="fix-card after">
+      <div class="label" style="color:var(--aqua)">✓ After (fixed)</div>
+      <code>k_train.clamp_min(<strong>1e-2</strong>)</code>
+      <p style="margin-top:8px;font-size:0.82rem;color:var(--text2)">
+        Ratio capped at 100 → log_correction ≤ +4.6 → rates stay near 0 at t=0
+      </p>
+    </div>
+  </div>
+</div>
+
+</div><!-- container -->
+
+<script>
+// ── Shared data ──
+const t = Array.from({length: 500}, (_, i) => i / 499);
+const tZoom = Array.from({length: 1000}, (_, i) => i / 999 * 0.05);
+
+// Cubic scheduler
+const kappaCubic = t.map(v => v*v*v);
+const derivCubic = t.map(v => 3*v*v);
+
+// Linear scheduler
+const kappaLinear = t.map(v => v);
+const derivLinear = t.map(v => 1);
+
+// Rate scales k(t) = deriv / (1 - kappa)
+const kCubic   = t.map(v => 3*v*v / (1 - v*v*v));
+const kLinear  = t.map(v => 1 / (1 - v));
+
+// For the correction ratio: model sees t_model = t^(1/3) when sampling linear
+// k_train = k_cubic(t_model) = 3*(t^(1/3))^2 / (1 - t) = 3*t^(2/3) / (1-t)
+// k_sample = k_linear(t) = 1 / (1-t)
+// ratio = k_sample/k_train = 1 / (3*t^(2/3))
+const ratioIdeal  = tZoom.map(v => v > 0 ? 1 / (3 * Math.pow(v, 2/3)) : Infinity);
+const ratioBug    = tZoom.map(v => 1 / Math.max(3 * Math.pow(v, 2/3), 1e-12));
+const ratioFixed  = tZoom.map(v => 1 / Math.max(3 * Math.pow(v, 2/3), 1e-2));
+
+// Natural log of ratios (torch.log uses ln, not log10)
+const lnBug   = ratioBug.map(v => Math.log(v));
+const lnFixed = ratioFixed.map(v => Math.log(v));
+
+// ── Layout theme ──
+const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+const ink    = isDark ? '#ffffff' : '#0b0b0b';
+const ink2   = isDark ? '#c3c2b7' : '#52514e';
+const surf   = isDark ? '#1a1a19' : '#fcfcfb';
+const gridC  = isDark ? '#2c2c2a' : '#e1e0d9';
+const blue   = isDark ? '#3987e5' : '#2a78d6';
+const orange = isDark ? '#d95926' : '#eb6834';
+const red    = isDark ? '#e66767' : '#e34948';
+const aqua   = isDark ? '#199e70' : '#1baf7a';
+const violet = isDark ? '#9085e9' : '#4a3aa7';
+
+const baseLayout = {
+  plot_bgcolor: surf,
+  paper_bgcolor: surf,
+  font: { color: ink, family: 'system-ui, -apple-system, "Segoe UI", sans-serif', size: 13 },
+  xaxis: {
+    gridcolor: gridC, zerolinecolor: gridC, linecolor: gridC,
+    title: { text: 't', font: { size: 13, color: ink2 } },
+  },
+  yaxis: {
+    gridcolor: gridC, zerolinecolor: gridC, linecolor: gridC,
+    title: { font: { size: 13, color: ink2 } },
+  },
+  margin: { l: 60, r: 40, t: 20, b: 50 },
+  legend: { x: 0.02, y: 0.98, bgcolor: 'transparent', font: { size: 11, color: ink2 } },
+  hovermode: 'x unified',
+};
+
+// ── Chart 1: Kappa ──
+const kappaLayout = JSON.parse(JSON.stringify(baseLayout));
+kappaLayout.yaxis.title.text = 'κ(t)';
+kappaLayout.xaxis.range = [0, 1];
+kappaLayout.yaxis.range = [0, 1.05];
+
+Plotly.newPlot('chart-kappa', [
+  { x: t, y: kappaCubic, name: 'Cubic t³', type: 'scatter', mode: 'lines',
+    line: { color: orange, width: 2.5 },
+    hovertemplate: 't=%{x:.3f}<br>κ=%{y:.3f}<extra></extra>' },
+  { x: t, y: kappaLinear, name: 'Linear t', type: 'scatter', mode: 'lines',
+    line: { color: blue, width: 2.5 },
+    hovertemplate: 't=%{x:.3f}<br>κ=%{y:.3f}<extra></extra>' },
+], kappaLayout, { responsive: true, displayModeBar: false });
+
+// Annotation: both 0 at t=0
+Plotly.relayout('chart-kappa', {
+  annotations: [{
+    x: 0.02, y: 0.12, xref: 'x', yref: 'y',
+    text: 'Both κ(0)=0', showarrow: true, arrowhead: 2, arrowsize: 0.8,
+    ax: -10, ay: -35, font: { size: 11, color: ink2 },
+  }],
+});
+
+// ── Chart 2: Derivative ──
+const derivLayout = JSON.parse(JSON.stringify(baseLayout));
+derivLayout.yaxis.title.text = "κ'(t)";
+derivLayout.xaxis.range = [0, 1];
+derivLayout.yaxis.range = [0, 3.2];
+
+Plotly.newPlot('chart-deriv', [
+  { x: t, y: derivCubic, name: 'Cubic 3t²', type: 'scatter', mode: 'lines',
+    line: { color: orange, width: 2.5 },
+    hovertemplate: 't=%{x:.3f}<br>κ\'=%{y:.3f}<extra></extra>' },
+  { x: t, y: derivLinear, name: 'Linear 1', type: 'scatter', mode: 'lines',
+    line: { color: blue, width: 2.5 },
+    hovertemplate: 't=%{x:.3f}<br>κ\'=%{y:.3f}<extra></extra>' },
+], derivLayout, { responsive: true, displayModeBar: false });
+
+Plotly.relayout('chart-deriv', {
+  annotations: [{
+    x: 0.02, y: 0.3, xref: 'x', yref: 'y',
+    text: "Cubic κ'(0)=0<br>(no training signal<br>at early t!)",
+    showarrow: true, arrowhead: 2, arrowsize: 0.8,
+    ax: 30, ay: -45, font: { size: 11, color: ink2 },
+  }],
+});
+
+// ── Chart 3: Correction Ratio ──
+const ratioLayout = JSON.parse(JSON.stringify(baseLayout));
+ratioLayout.yaxis.title.text = 'ln(k_sample / k_train)  = log correction applied';
+ratioLayout.yaxis.range = [-2, 32];
+ratioLayout.xaxis.range = [0, 0.05];
+ratioLayout.xaxis.title.text = 't (first few Euler steps)';
+ratioLayout.legend.x = 0.65;
+ratioLayout.legend.y = 0.98;
+
+// Add a horizontal shaded band for "safe zone"
+const safeBandX  = [0, 0.05, 0.05, 0];
+const safeBandY  = [-2, -2, 2, -2];
+
+Plotly.newPlot('chart-ratio', [
+  // Safe zone band
+  { x: safeBandX, y: safeBandY, fill: 'toself', mode: 'none',
+    fillcolor: 'rgba(25,158,112,0.08)', line: { width: 0 },
+    name: 'Safe (|correction| < 2)', showlegend: true,
+    hovertemplate: 'Safe zone<extra></extra>' },
+  // Buggy line
+  { x: tZoom, y: lnBug, name: 'clamp_min=1e-12 (bug)', type: 'scatter', mode: 'lines',
+    line: { color: red, width: 2.8 },
+    hovertemplate: 't=%{x:.4f}<br>ln ratio=%{y:.2f}<extra></extra>' },
+  // Fixed line
+  { x: tZoom, y: lnFixed, name: 'clamp_min=1e-2 (fixed)', type: 'scatter', mode: 'lines',
+    line: { color: aqua, width: 2.8 },
+    hovertemplate: 't=%{x:.4f}<br>ln ratio=%{y:.2f}<extra></extra>' },
+], ratioLayout, { responsive: true, displayModeBar: false });
+
+// Annotations
+Plotly.relayout('chart-ratio', {
+  annotations: [
+    {
+      x: 0.018, y: 24, xref: 'x', yref: 'y',
+      text: '<b>ln(1e12) ≈ +27.6</b><br>Rate multiplied by<br>1,000,000,000,000×',
+      showarrow: true, arrowhead: 2, arrowsize: 1,
+      ax: -30, ay: -30,
+      font: { size: 12, color: red }, bgcolor: surf,
+      borderpad: 6,
+    },
+    {
+      x: 0.001, y: 3.5, xref: 'x', yref: 'y',
+      text: '<b>ln(100) ≈ +4.6</b><br>Bounded correction<br>(100× max)',
+      showarrow: true, arrowhead: 2, arrowsize: 1,
+      ax: 40, ay: -20,
+      font: { size: 12, color: aqua }, bgcolor: surf,
+      borderpad: 6,
+    },
+    {
+      x: 0.042, y: 0, xref: 'x', yref: 'y',
+      text: 'Reasonable range<br>(same scale)', showarrow: false,
+      font: { size: 11, color: ink2 },
+    },
+    {
+      x: 0.003, y: 26.5, xref: 'x', yref: 'y',
+      text: '≈ first Euler step (h=0.01)', showarrow: false,
+      font: { size: 10, color: ink2 },
+    },
+  ],
+  shapes: [{
+    type: 'line', x0: 0.01, x1: 0.01, y0: -2, y1: 28,
+    line: { color: gridC, width: 1, dash: 'dot' },
+  }],
+});
+
+</script>
+</body>
+</html>

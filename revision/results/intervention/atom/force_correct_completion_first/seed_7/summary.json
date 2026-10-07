@@ -1,0 +1,21 @@
+{
+  "augmentation": 20,
+  "checkpoint": "/root/autodl-tmp/edit_flows/new_checkpoints/checkpoint_step600000.pt",
+  "final_hit_rate_all": 0.5142222222222222,
+  "final_valid_rate_all": 0.8748888888888889,
+  "forced_final_hit_rate": 0.5394721407624633,
+  "forced_final_valid_rate": 0.8681524926686217,
+  "intervention_coverage_among_first_events": 0.9918557300756253,
+  "mode": "force_correct_completion_first",
+  "n_first_event": 8595,
+  "n_intervention_applied": 8525,
+  "n_intervention_records": 8595,
+  "n_reactions": 1000,
+  "n_samples": 9,
+  "n_steps": 100,
+  "n_trajectories": 9000,
+  "products_file": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/evaluation_v2/dev_unique1000_aug20/src.txt",
+  "scheduler": "cubic",
+  "seed": 7,
+  "targets_file": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/evaluation_v2/dev_unique1000_aug20/tgt.txt"
+}

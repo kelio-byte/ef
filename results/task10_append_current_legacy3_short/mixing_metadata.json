@@ -1,0 +1,49 @@
+{
+  "augmentation": 20,
+  "created_at_utc": "2026-08-01T08:52:11.950235+00:00",
+  "input_beam_size": 3,
+  "input_line_count_per_source": 300,
+  "layout": "reaction-major, augmentation-major, run-minor",
+  "output_beam_size": 6,
+  "output_line_count": 600,
+  "output_sha256": "014d169ea53efecb32526cfbefc1b9fc973a7a117a87244b26041de79ef97247",
+  "reaction_count": 5,
+  "run_sources": [
+    {
+      "label": "noop",
+      "run": 1
+    },
+    {
+      "label": "noop",
+      "run": 2
+    },
+    {
+      "label": "noop",
+      "run": 3
+    },
+    {
+      "label": "legacy",
+      "run": 1
+    },
+    {
+      "label": "legacy",
+      "run": 2
+    },
+    {
+      "label": "legacy",
+      "run": 3
+    }
+  ],
+  "sources": {
+    "legacy": {
+      "line_count": 300,
+      "path": "/root/autodl-tmp/edit_flows/results/task10_legacy_k3m2_short/predictions.txt",
+      "sha256": "b0860724957500b9e48cb9210312cf9b9873d3daba2e24088aa35c0f72ee1673"
+    },
+    "noop": {
+      "line_count": 300,
+      "path": "/tmp/task10_noop_first5.txt",
+      "sha256": "e163869d1e5de80012bb6220db7134422ad4cc565a5d86e8a645510f28ff0a92"
+    }
+  }
+}

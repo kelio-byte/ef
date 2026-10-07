@@ -1,0 +1,314 @@
+{
+  "per_reaction": [
+    {
+      "oracle_any": false,
+      "reaction_index": 0,
+      "target_augmentation_count": 0,
+      "target_best_local_rank": null,
+      "target_consensus_score": null,
+      "target_final_rank": null,
+      "true_unique_candidates": 5,
+      "valid_candidate_count": 76
+    }
+  ],
+  "summary": {
+    "aggregated_rank_availability_percent": {
+      "1": 100.0,
+      "10": 0.0,
+      "2": 100.0,
+      "3": 100.0,
+      "4": 100.0,
+      "5": 100.0,
+      "6": 0.0,
+      "7": 0.0,
+      "8": 0.0,
+      "9": 0.0
+    },
+    "best_local_rank_counts": {
+      "1": 0,
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 0,
+      "6": 0,
+      "7": 0,
+      "8": 0,
+      "9": 0
+    },
+    "covered_outside_top_k": 0,
+    "covered_outside_top_k_percent": 0.0,
+    "mean_target_augmentation_count": 0.0,
+    "mean_target_final_rank_when_covered": null,
+    "mean_true_unique_candidates_per_reaction": 5.0,
+    "mean_valid_candidates_per_reaction": 76.0,
+    "oracle_any_count": 0,
+    "oracle_any_percent": 0.0,
+    "pairwise_overlap": [
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_1_vs_2"
+      },
+      {
+        "mean_reaction_jaccard_percent": 25.0,
+        "micro_jaccard_percent": 25.0,
+        "pair": "run_1_vs_3"
+      },
+      {
+        "mean_reaction_jaccard_percent": 33.33333333333333,
+        "micro_jaccard_percent": 33.333333333333336,
+        "pair": "run_1_vs_4"
+      },
+      {
+        "mean_reaction_jaccard_percent": 33.33333333333333,
+        "micro_jaccard_percent": 33.333333333333336,
+        "pair": "run_1_vs_5"
+      },
+      {
+        "mean_reaction_jaccard_percent": 33.33333333333333,
+        "micro_jaccard_percent": 33.333333333333336,
+        "pair": "run_1_vs_6"
+      },
+      {
+        "mean_reaction_jaccard_percent": 100.0,
+        "micro_jaccard_percent": 100.0,
+        "pair": "run_1_vs_7"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_1_vs_8"
+      },
+      {
+        "mean_reaction_jaccard_percent": 25.0,
+        "micro_jaccard_percent": 25.0,
+        "pair": "run_1_vs_9"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_2_vs_3"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_2_vs_4"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_2_vs_5"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_2_vs_6"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_2_vs_7"
+      },
+      {
+        "mean_reaction_jaccard_percent": 100.0,
+        "micro_jaccard_percent": 100.0,
+        "pair": "run_2_vs_8"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_2_vs_9"
+      },
+      {
+        "mean_reaction_jaccard_percent": 50.0,
+        "micro_jaccard_percent": 50.0,
+        "pair": "run_3_vs_4"
+      },
+      {
+        "mean_reaction_jaccard_percent": 50.0,
+        "micro_jaccard_percent": 50.0,
+        "pair": "run_3_vs_5"
+      },
+      {
+        "mean_reaction_jaccard_percent": 50.0,
+        "micro_jaccard_percent": 50.0,
+        "pair": "run_3_vs_6"
+      },
+      {
+        "mean_reaction_jaccard_percent": 25.0,
+        "micro_jaccard_percent": 25.0,
+        "pair": "run_3_vs_7"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_3_vs_8"
+      },
+      {
+        "mean_reaction_jaccard_percent": 100.0,
+        "micro_jaccard_percent": 100.0,
+        "pair": "run_3_vs_9"
+      },
+      {
+        "mean_reaction_jaccard_percent": 100.0,
+        "micro_jaccard_percent": 100.0,
+        "pair": "run_4_vs_5"
+      },
+      {
+        "mean_reaction_jaccard_percent": 100.0,
+        "micro_jaccard_percent": 100.0,
+        "pair": "run_4_vs_6"
+      },
+      {
+        "mean_reaction_jaccard_percent": 33.33333333333333,
+        "micro_jaccard_percent": 33.333333333333336,
+        "pair": "run_4_vs_7"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_4_vs_8"
+      },
+      {
+        "mean_reaction_jaccard_percent": 50.0,
+        "micro_jaccard_percent": 50.0,
+        "pair": "run_4_vs_9"
+      },
+      {
+        "mean_reaction_jaccard_percent": 100.0,
+        "micro_jaccard_percent": 100.0,
+        "pair": "run_5_vs_6"
+      },
+      {
+        "mean_reaction_jaccard_percent": 33.33333333333333,
+        "micro_jaccard_percent": 33.333333333333336,
+        "pair": "run_5_vs_7"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_5_vs_8"
+      },
+      {
+        "mean_reaction_jaccard_percent": 50.0,
+        "micro_jaccard_percent": 50.0,
+        "pair": "run_5_vs_9"
+      },
+      {
+        "mean_reaction_jaccard_percent": 33.33333333333333,
+        "micro_jaccard_percent": 33.333333333333336,
+        "pair": "run_6_vs_7"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_6_vs_8"
+      },
+      {
+        "mean_reaction_jaccard_percent": 50.0,
+        "micro_jaccard_percent": 50.0,
+        "pair": "run_6_vs_9"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_7_vs_8"
+      },
+      {
+        "mean_reaction_jaccard_percent": 25.0,
+        "micro_jaccard_percent": 25.0,
+        "pair": "run_7_vs_9"
+      },
+      {
+        "mean_reaction_jaccard_percent": 0.0,
+        "micro_jaccard_percent": 0.0,
+        "pair": "run_8_vs_9"
+      }
+    ],
+    "reaction_count": 1,
+    "run_metrics": [
+      {
+        "duplicate_count": 1,
+        "duplicate_rate_among_valid_percent": 25.0,
+        "invalid_count": 16,
+        "invalid_rate_percent": 80.0,
+        "run": 1,
+        "target_hit_count": 0,
+        "target_hit_rate_percent": 0.0
+      },
+      {
+        "duplicate_count": 0,
+        "duplicate_rate_among_valid_percent": 0.0,
+        "invalid_count": 19,
+        "invalid_rate_percent": 95.0,
+        "run": 2,
+        "target_hit_count": 0,
+        "target_hit_rate_percent": 0.0
+      },
+      {
+        "duplicate_count": 1,
+        "duplicate_rate_among_valid_percent": 33.333333333333336,
+        "invalid_count": 17,
+        "invalid_rate_percent": 85.0,
+        "run": 3,
+        "target_hit_count": 0,
+        "target_hit_rate_percent": 0.0
+      },
+      {
+        "duplicate_count": 19,
+        "duplicate_rate_among_valid_percent": 95.0,
+        "invalid_count": 0,
+        "invalid_rate_percent": 0.0,
+        "run": 4,
+        "target_hit_count": 0,
+        "target_hit_rate_percent": 0.0
+      },
+      {
+        "duplicate_count": 19,
+        "duplicate_rate_among_valid_percent": 95.0,
+        "invalid_count": 0,
+        "invalid_rate_percent": 0.0,
+        "run": 5,
+        "target_hit_count": 0,
+        "target_hit_rate_percent": 0.0
+      },
+      {
+        "duplicate_count": 19,
+        "duplicate_rate_among_valid_percent": 95.0,
+        "invalid_count": 0,
+        "invalid_rate_percent": 0.0,
+        "run": 6,
+        "target_hit_count": 0,
+        "target_hit_rate_percent": 0.0
+      },
+      {
+        "duplicate_count": 1,
+        "duplicate_rate_among_valid_percent": 25.0,
+        "invalid_count": 16,
+        "invalid_rate_percent": 80.0,
+        "run": 7,
+        "target_hit_count": 0,
+        "target_hit_rate_percent": 0.0
+      },
+      {
+        "duplicate_count": 0,
+        "duplicate_rate_among_valid_percent": 0.0,
+        "invalid_count": 19,
+        "invalid_rate_percent": 95.0,
+        "run": 8,
+        "target_hit_count": 0,
+        "target_hit_rate_percent": 0.0
+      },
+      {
+        "duplicate_count": 1,
+        "duplicate_rate_among_valid_percent": 33.333333333333336,
+        "invalid_count": 17,
+        "invalid_rate_percent": 85.0,
+        "run": 9,
+        "target_hit_count": 0,
+        "target_hit_rate_percent": 0.0
+      }
+    ],
+    "top_k_for_coverage_loss": 3
+  }
+}

@@ -59,7 +59,7 @@ def _build_example_html(
     model_rates: torch.Tensor,         # (L, 3)
     model_ins_probs: torch.Tensor,     # (L, V)
     model_sub_probs: torch.Tensor,     # (L, V)
-    actions: Optional[dict],           # sampled edits (or None)
+    actions: Optional[dict],           # deterministic per-position argmax
     id2token: Dict[int, str],
     center_hit: bool,
     full_correct: bool,
@@ -168,7 +168,7 @@ def _build_example_html(
         + "</tr>"
     )
 
-    # ---- actual edit row (sampled from model output) ----
+    # ---- deterministic per-position argmax diagnostic ----
     actual_html = ""
     if actions is not None:
         act_ins_mask = actions["ins_mask"][0]
@@ -193,7 +193,7 @@ def _build_example_html(
             else:
                 ae_cells.append('<td class="ae-row"></td>')
         actual_html = (
-            '<tr class="sec-hdr"><th class="lbl sec-label" colspan="%d">ACTUAL</th></tr>' % (L + 1)
+            '<tr class="sec-hdr"><th class="lbl sec-label" colspan="%d">MODEL ARGMAX (NOT SAMPLED)</th></tr>' % (L + 1)
             + '<tr class="ae-row-tr">'
             + '<th class="lbl">edit</th>'
             + "".join(ae_cells)
@@ -302,11 +302,22 @@ def main() -> None:
     vocab_path = args.vocab_file or os.path.join(
         cfg["data_dir"], cfg.get("vocab_file", "example.vocab.src")
     )
-    token2id, model_vocab = load_vocab(vocab_path)
+    token2id, _ = load_vocab(vocab_path)
+    model_vocab = ckpt.get("model_vocab") or len(token2id)
     id2token = {v: k for k, v in token2id.items()}
 
+    state_dict = ckpt["model_state_dict"]
+    if any(k.startswith("module.") for k in state_dict):
+        state_dict = {k.removeprefix("module."): v for k, v in state_dict.items()}
+    use_origin_mask = cfg.get("use_origin_mask", False)
+    has_origin_embed = any("origin_embedding" in key for key in state_dict)
+    if use_origin_mask and not has_origin_embed:
+        print("WARNING: config has use_origin_mask=True but checkpoint lacks "
+              "origin_embedding weights. Falling back to use_origin_mask=False.")
+        use_origin_mask = False
+
     model = EditFlowsTransformer(
-        vocab_size=ckpt.get("model_vocab", model_vocab),
+        vocab_size=model_vocab,
         hidden_dim=cfg["hidden_dim"],
         num_layers=cfg["num_layers"],
         num_heads=cfg["num_heads"],
@@ -316,9 +327,9 @@ def main() -> None:
         attention_dropout=cfg.get("attention_dropout", cfg["dropout"]),
         activation=cfg.get("activation", "relu"),
         pos_encoding_scale=cfg.get("pos_encoding_scale", True),
-        use_origin_mask=cfg.get("use_origin_mask", False),
+        use_origin_mask=use_origin_mask,
     ).to(device)
-    model.load_state_dict(ckpt["model_state_dict"])
+    model.load_state_dict(state_dict)
     model.eval()
 
     # ── Load data ──
@@ -326,9 +337,6 @@ def main() -> None:
         args.products_file, args.targets_file,
         deduplicate=args.deduplicate, max_lines=args.max_lines,
     )
-    product_ids_all = [tokenize_smiles(line, token2id) for line in products]
-    target_ids_all = [tokenize_smiles(line, token2id) for line in targets]
-
     # ── Select examples ──
     t_values = parse_time_grid(args.time_grid)
     if args.example_ids:
@@ -350,8 +358,8 @@ def main() -> None:
     ]
 
     for idx in selected:
-        prod_ids = product_ids_all[idx]
-        tgt_ids = target_ids_all[idx]
+        prod_ids = tokenize_smiles(products[idx], token2id)
+        tgt_ids = tokenize_smiles(targets[idx], token2id)
         x_0_single, x_1_single = build_model_batch([prod_ids], [tgt_ids])
         x_0_single = x_0_single.to(device)
         x_1_single = x_1_single.to(device)
@@ -370,6 +378,10 @@ def main() -> None:
             # Model forward
             log_rates, log_ins_probs, log_sub_probs = model(
                 x_0_single, t_model, x_pad_mask_single,
+                origin_mask=(
+                    torch.ones_like(x_0_single, dtype=torch.bool)
+                    if use_origin_mask else None
+                ),
             )
             log_rates_eff = apply_rate_parameterization(
                 log_rates, t, scheduler,
@@ -432,8 +444,9 @@ def main() -> None:
                 elif pred_type == 2 and oracle_event["del_mask"][0, model_top1].item():
                     full_correct = True
 
-            # Deterministic top-1 edit per position (matching trajectory's
-            # ACTUAL row format: +TOKEN for INS, →TOKEN for SUB, DEL).
+            # Deterministic top-1 edit per position.  This is a rate
+            # diagnostic, not a stochastic Euler draw, so the HTML labels it
+            # MODEL ARGMAX rather than ACTUAL.
             # Only show edits where max rate exceeds threshold — otherwise
             # the model isn't actually "intending" to edit that position,
             # just like trajectory's probabilistic sampling leaves most cells empty.

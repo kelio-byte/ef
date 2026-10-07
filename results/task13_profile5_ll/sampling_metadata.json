@@ -1,0 +1,70 @@
+{
+  "augmentation": 20,
+  "augmentation_inferred_from": "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-mini.txt",
+  "checkpoint": {
+    "mtime_ns": 1785470613084893869,
+    "path": "/root/autodl-tmp/edit_flows/checkpoint_step600000.pt",
+    "size_bytes": 162620771
+  },
+  "created_at_utc": "2026-08-01T09:46:25.025973+00:00",
+  "git": {
+    "commit": "ce2bad80f005068be1f870a471e5726d53f8e007",
+    "dirty": true
+  },
+  "input": {
+    "kind": "products_file",
+    "mtime_ns": 1785313677640007482,
+    "path": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-mini.txt",
+    "product_count": 100,
+    "selection_end_product_exclusive": 1100,
+    "selection_start_product": 1000,
+    "sha256": "ab0d28fc763f171d90b8703bdbc8254e057216541b7f42e15cac268e57122ae3",
+    "size_bytes": 1861703,
+    "source_product_count": 20028
+  },
+  "layout": "input-product-major, output-minor",
+  "model": {
+    "configured_use_origin_mask": false,
+    "effective_use_origin_mask": false
+  },
+  "output_beam_size": 2,
+  "output_line_count": 200,
+  "output_sha256": "3066668f5296e0ae55a2fc6adb2ac35d129cd77b1247e12b5d62ebf71573fe79",
+  "product_count": 100,
+  "runtime": {
+    "batch_size": 64,
+    "device": "cuda",
+    "elapsed_seconds": 13.180678000673652,
+    "euler_beam_profile": {
+      "apply_edits_seconds": 0.9749124413356185,
+      "child_candidate_evaluations": 112182,
+      "child_proposal_seconds": 0.7006397503428161,
+      "finalize_output_seconds": 0.0024982597678899765,
+      "merge_and_prune_seconds": 0.580041766166687,
+      "model_forward_and_rates_seconds": 9.237908963579684,
+      "parent_branch_evaluations": 56091,
+      "prepare_branches_seconds": 1.551486172247678,
+      "step_scoring_seconds": 0.10614651581272483,
+      "steps": 200
+    },
+    "peak_cuda_allocated_bytes": 972312064,
+    "peak_cuda_reserved_bytes": 3055550464
+  },
+  "sampler": "euler_beam",
+  "sampling": {
+    "changed_state_bonus": 0.5,
+    "child_policy": "stochastic",
+    "matmul_precision": "high",
+    "n_branches": 3,
+    "n_children": 2,
+    "n_runs": 2,
+    "n_steps": 100,
+    "sample_scheduler": "cubic",
+    "score_mode": "legacy_triggered_reverse",
+    "seed": 42,
+    "seed_applied_to_sampler": true,
+    "seed_scope": "stable product/run streams",
+    "train_scheduler": "cubic"
+  },
+  "schema_version": 1
+}

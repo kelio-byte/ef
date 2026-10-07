@@ -1,0 +1,41 @@
+{
+  "augmentation": 20,
+  "created_at_utc": "2026-08-01T08:59:04.764095+00:00",
+  "input_beam_size": 3,
+  "input_line_count_per_source": 3000,
+  "layout": "reaction-major, augmentation-major, run-minor",
+  "output_beam_size": 4,
+  "output_line_count": 4000,
+  "output_sha256": "dda96199071119dd19b776d6dc3a2058e0cda7cc064d2328ecca43d8f639ed1d",
+  "reaction_count": 50,
+  "run_sources": [
+    {
+      "label": "noop",
+      "run": 1
+    },
+    {
+      "label": "noop",
+      "run": 2
+    },
+    {
+      "label": "noop",
+      "run": 3
+    },
+    {
+      "label": "legacy",
+      "run": 1
+    }
+  ],
+  "sources": {
+    "legacy": {
+      "line_count": 3000,
+      "path": "/root/autodl-tmp/edit_flows/results/task10_legacy_k3m2_full/predictions.txt",
+      "sha256": "0446f9bf47da346166f040908f351f70839aac5f931b8540538b2c77eb738d36"
+    },
+    "noop": {
+      "line_count": 3000,
+      "path": "/root/autodl-tmp/edit_flows/results/task8_noop_full/predictions.txt",
+      "sha256": "527980cf5225e53c5d44ad3a31000fe7790ba0400108ed81fbd96c0d30e01418"
+    }
+  }
+}

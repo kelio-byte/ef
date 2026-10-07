@@ -1,0 +1,56 @@
+{
+  "augmentation": 20,
+  "augmentation_inferred_from": "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-mini.txt",
+  "checkpoint": {
+    "mtime_ns": 1785470613084893869,
+    "path": "/root/autodl-tmp/edit_flows/checkpoint_step600000.pt",
+    "size_bytes": 162620771
+  },
+  "created_at_utc": "2026-08-01T09:21:03.904879+00:00",
+  "git": {
+    "commit": "651c11dbdf05039f0e20a670499bf17f65dfddcf",
+    "dirty": true
+  },
+  "input": {
+    "kind": "products_file",
+    "mtime_ns": 1785313677640007482,
+    "path": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-mini.txt",
+    "product_count": 20,
+    "selection_end_product_exclusive": 1020,
+    "selection_start_product": 1000,
+    "sha256": "ab0d28fc763f171d90b8703bdbc8254e057216541b7f42e15cac268e57122ae3",
+    "size_bytes": 1861703,
+    "source_product_count": 20028
+  },
+  "layout": "input-product-major, output-minor",
+  "model": {
+    "configured_use_origin_mask": false,
+    "effective_use_origin_mask": false
+  },
+  "output_beam_size": 2,
+  "output_line_count": 40,
+  "output_sha256": "746a10862b77c326112b5b985e10746bb2e8b2b1da9c11371a40328ce5e792ca",
+  "product_count": 20,
+  "runtime": {
+    "batch_size": 20,
+    "device": "cuda",
+    "elapsed_seconds": 0.7306402181275189
+  },
+  "sampler": "euler_beam",
+  "sampling": {
+    "changed_state_bonus": 0.5,
+    "child_policy": "stochastic_noop",
+    "matmul_precision": "high",
+    "n_branches": 1,
+    "n_children": 2,
+    "n_runs": 2,
+    "n_steps": 1,
+    "sample_scheduler": "cubic",
+    "score_mode": "full_probability",
+    "seed": 42,
+    "seed_applied_to_sampler": true,
+    "seed_scope": "stable product/run streams",
+    "train_scheduler": "cubic"
+  },
+  "schema_version": 1
+}

@@ -1,0 +1,442 @@
+{
+  "conditions": {
+    "b0": "ordinary Euler N=9 (with B0-trace only for identical event recording)",
+    "b1_oracle": "ORACLE / NOT DEPLOYABLE: all nine trajectories use true-center first-event position bias, multiplier=3",
+    "rc15_mixed": "ORACLE / NOT DEPLOYABLE: three true-center-guided first events plus six ordinary Euler trajectories, multiplier=3"
+  },
+  "event_quality": {
+    "b0": {
+      "action_center_score_histogram": {
+        "0.0": 27241,
+        "0.5": 11523,
+        "1.0": 137469
+      },
+      "action_modes": {
+        "DEL": 1625,
+        "INS": 111909,
+        "SUB": 62699
+      },
+      "center_source": "oracle",
+      "event_at_or_near_center_percent": 84.71693994094059,
+      "event_max_center_score_histogram": {
+        "0.0": 26602,
+        "0.5": 11287,
+        "1.0": 136173
+      },
+      "event_region_description": "assigned true reaction-center component",
+      "expected_trajectories": 180000,
+      "first_event_count": 174062,
+      "first_event_distance": {
+        "closer_count": 113642,
+        "closer_percent": 65.28823063046501,
+        "farther_count": 31901,
+        "farther_percent": 18.32737760108467,
+        "mean_delta": 0.47461249439854764,
+        "mean_effective_action_count": 1.0124610770874747,
+        "median_delta": 1.0,
+        "unchanged_count": 28519,
+        "unchanged_percent": 16.38439176845032
+      },
+      "first_event_percent": 96.70111111111112,
+      "first_event_step": {
+        "mean": 54.93938366788846,
+        "median": 55.0,
+        "p90": 81.0
+      },
+      "max_hazard_relative_error": 0.0,
+      "max_multiplier": 1.0,
+      "no_event_count": 5938,
+      "path": "results/after_spe_stage1/rc15_runs/20260824T_rc15_dev1000_dev1000/b0_trace",
+      "reaction_mean_distance_delta": {
+        "mean": 0.46443927448006184,
+        "reaction_count_with_event": 1000
+      },
+      "trajectory_role": null
+    },
+    "b1_oracle": {
+      "action_center_score_histogram": {
+        "0.0": 21028,
+        "0.5": 10281,
+        "1.0": 144676
+      },
+      "action_modes": {
+        "DEL": 1571,
+        "INS": 112363,
+        "SUB": 62051
+      },
+      "center_source": "oracle",
+      "event_at_or_near_center_percent": 88.1742178297469,
+      "event_max_center_score_histogram": {
+        "0.0": 20581,
+        "0.5": 10062,
+        "1.0": 143392
+      },
+      "event_region_description": "assigned true reaction-center component",
+      "expected_trajectories": 180000,
+      "first_event_count": 174035,
+      "first_event_distance": {
+        "closer_count": 116784,
+        "closer_percent": 67.10374349987072,
+        "farther_count": 27798,
+        "farther_percent": 15.97264917976269,
+        "mean_delta": 0.5159651794179332,
+        "mean_effective_action_count": 1.0112046427442756,
+        "median_delta": 1.0,
+        "unchanged_count": 29453,
+        "unchanged_percent": 16.923607320366592
+      },
+      "first_event_percent": 96.68611111111112,
+      "first_event_step": {
+        "mean": 54.95784755939897,
+        "median": 55.0,
+        "p90": 81.0
+      },
+      "max_hazard_relative_error": 2.4781256797723472e-06,
+      "max_multiplier": 3.0,
+      "no_event_count": 5965,
+      "path": "results/after_spe_stage1/rc15_runs/20260824T_rc15_dev1000_dev1000/b1_oracle",
+      "reaction_mean_distance_delta": {
+        "mean": 0.5061524447282396,
+        "reaction_count_with_event": 1000
+      },
+      "trajectory_role": null
+    },
+    "rc15_mixed": {
+      "action_center_score_histogram": {
+        "0.0": 25111,
+        "0.5": 11128,
+        "1.0": 139906
+      },
+      "action_modes": {
+        "DEL": 1643,
+        "INS": 112107,
+        "SUB": 62395
+      },
+      "center_source": "oracle",
+      "event_at_or_near_center_percent": 85.88828054532607,
+      "event_max_center_score_histogram": {
+        "0.0": 24563,
+        "0.5": 10895,
+        "1.0": 138603
+      },
+      "event_region_description": "assigned true reaction-center component",
+      "expected_trajectories": 180000,
+      "first_event_count": 174061,
+      "first_event_distance": {
+        "closer_count": 114832,
+        "closer_percent": 65.97227408781978,
+        "farther_count": 30358,
+        "farther_percent": 17.441012058990815,
+        "mean_delta": 0.49025341690556756,
+        "mean_effective_action_count": 1.011944088566652,
+        "median_delta": 1.0,
+        "unchanged_count": 28871,
+        "unchanged_percent": 16.586713853189398
+      },
+      "first_event_percent": 96.70055555555555,
+      "first_event_step": {
+        "mean": 54.93616605672724,
+        "median": 55.0,
+        "p90": 81.0
+      },
+      "max_hazard_relative_error": 2.485512595740147e-06,
+      "max_multiplier": 3.0,
+      "no_event_count": 5939,
+      "path": "results/after_spe_stage1/rc15_runs/20260824T_rc15_dev1000_dev1000/rc15_mixed",
+      "reaction_mean_distance_delta": {
+        "mean": 0.48025364730605885,
+        "reaction_count_with_event": 1000
+      },
+      "trajectory_role": null
+    }
+  },
+  "event_quality_by_trajectory_role": {
+    "center_guided": {
+      "action_center_score_histogram": {
+        "0.0": 6940,
+        "0.5": 3436,
+        "1.0": 48336
+      },
+      "action_modes": {
+        "DEL": 548,
+        "INS": 37446,
+        "SUB": 20718
+      },
+      "center_source": "oracle",
+      "event_at_or_near_center_percent": 88.33344825208577,
+      "event_max_center_score_histogram": {
+        "0.0": 6768,
+        "0.5": 3348,
+        "1.0": 47896
+      },
+      "event_region_description": "assigned true reaction-center component",
+      "expected_trajectories": 60000,
+      "first_event_count": 58012,
+      "first_event_distance": {
+        "closer_count": 38889,
+        "closer_percent": 67.03613045576778,
+        "farther_count": 9260,
+        "farther_percent": 15.962214714197062,
+        "mean_delta": 0.5159449769013308,
+        "mean_effective_action_count": 1.0119975177549472,
+        "median_delta": 1.0,
+        "unchanged_count": 9863,
+        "unchanged_percent": 17.001654830035164
+      },
+      "first_event_percent": 96.68666666666667,
+      "first_event_step": {
+        "mean": 54.98264152244363,
+        "median": 55.0,
+        "p90": 81.0
+      },
+      "max_hazard_relative_error": 2.485512595740147e-06,
+      "max_multiplier": 3.0,
+      "no_event_count": 1988,
+      "path": "results/after_spe_stage1/rc15_runs/20260824T_rc15_dev1000_dev1000/rc15_mixed",
+      "reaction_mean_distance_delta": {
+        "mean": 0.5060466019633794,
+        "reaction_count_with_event": 1000
+      },
+      "trajectory_role": "center_guided"
+    },
+    "ordinary_euler": {
+      "action_center_score_histogram": {
+        "0.0": 18171,
+        "0.5": 7692,
+        "1.0": 91570
+      },
+      "action_modes": {
+        "DEL": 1095,
+        "INS": 74661,
+        "SUB": 41677
+      },
+      "center_source": "oracle",
+      "event_at_or_near_center_percent": 84.66596006859172,
+      "event_max_center_score_histogram": {
+        "0.0": 17795,
+        "0.5": 7547,
+        "1.0": 90707
+      },
+      "event_region_description": "assigned true reaction-center component",
+      "expected_trajectories": 120000,
+      "first_event_count": 116049,
+      "first_event_distance": {
+        "closer_count": 75943,
+        "closer_percent": 65.44046049513568,
+        "farther_count": 21098,
+        "farther_percent": 18.180251445510088,
+        "mean_delta": 0.47741040422580117,
+        "mean_effective_action_count": 1.011917379727529,
+        "median_delta": 1.0,
+        "unchanged_count": 19008,
+        "unchanged_percent": 16.379288059354238
+      },
+      "first_event_percent": 96.7075,
+      "first_event_step": {
+        "mean": 54.91293332988651,
+        "median": 55.0,
+        "p90": 81.0
+      },
+      "max_hazard_relative_error": 2.485512595740147e-06,
+      "max_multiplier": 3.0,
+      "no_event_count": 3951,
+      "path": "results/after_spe_stage1/rc15_runs/20260824T_rc15_dev1000_dev1000/rc15_mixed",
+      "reaction_mean_distance_delta": {
+        "mean": 0.46736721259744946,
+        "reaction_count_with_event": 1000
+      },
+      "trajectory_role": "ordinary_euler"
+    }
+  },
+  "experiment": "rc15",
+  "group_sources": {
+    "b0": "/root/autodl-tmp/edit_flows/results/after_spe_stage1/rc1_runs/20260823T225828Z_dev1000/b0_plain",
+    "b1_oracle": "/root/autodl-tmp/edit_flows/results/after_spe_stage1/rc1_runs/20260823T225828Z_dev1000/b1_oracle",
+    "rc15_mixed": "/root/autodl-tmp/edit_flows/results/after_spe_stage1/rc15_runs/20260824T_rc15_dev1000_dev1000/rc15_mixed"
+  },
+  "input": {
+    "expected_trajectories": 180000,
+    "max_seq_len": 96,
+    "products_file": "datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/evaluation_v2/dev_unique1000_aug20/src.txt",
+    "selected_product_count": 20000,
+    "source_row_count": 20000,
+    "targets_file": "datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/evaluation_v2/dev_unique1000_aug20/tgt.txt",
+    "vocab_file": "datasets/USPTO_50K_PtoR_aug20_#global#_SPE_m500/example.vocab.src"
+  },
+  "paired_bootstrap_b1_minus_rc15_mixed": {
+    "oracle_any": {
+      "ci95_high": 0.1,
+      "ci95_low": -2.1,
+      "delta": -1.0
+    },
+    "top_1": {
+      "ci95_high": 1.4000000000000001,
+      "ci95_low": -1.4000000000000001,
+      "delta": 0.0
+    },
+    "top_10": {
+      "ci95_high": 1.0,
+      "ci95_low": -2.0,
+      "delta": -0.5
+    },
+    "top_3": {
+      "ci95_high": 1.0999999999999999,
+      "ci95_low": -1.5,
+      "delta": -0.2
+    },
+    "top_5": {
+      "ci95_high": 0.3,
+      "ci95_low": -2.3,
+      "delta": -1.0
+    },
+    "true_unique_candidates": {
+      "ci95_high": 0.18702499999999964,
+      "ci95_low": -0.387,
+      "delta": -0.098
+    },
+    "valid_candidate_count": {
+      "ci95_high": 0.794,
+      "ci95_low": 0.114,
+      "delta": 0.453
+    }
+  },
+  "paired_bootstrap_vs_b0": {
+    "b1_oracle": {
+      "oracle_any": {
+        "ci95_high": 0.4,
+        "ci95_low": -2.0,
+        "delta": -0.8
+      },
+      "top_1": {
+        "ci95_high": 2.7,
+        "ci95_low": -0.5,
+        "delta": 1.0999999999999999
+      },
+      "top_10": {
+        "ci95_high": 1.4000000000000001,
+        "ci95_low": -1.4000000000000001,
+        "delta": 0.0
+      },
+      "top_3": {
+        "ci95_high": 1.7000000000000002,
+        "ci95_low": -0.8999999999999999,
+        "delta": 0.4
+      },
+      "top_5": {
+        "ci95_high": 0.8999999999999999,
+        "ci95_low": -1.7999999999999998,
+        "delta": -0.4
+      },
+      "true_unique_candidates": {
+        "ci95_high": 0.027,
+        "ci95_low": -0.55,
+        "delta": -0.262
+      },
+      "valid_candidate_count": {
+        "ci95_high": 1.001,
+        "ci95_low": 0.319,
+        "delta": 0.66
+      }
+    },
+    "rc15_mixed": {
+      "oracle_any": {
+        "ci95_high": 1.3,
+        "ci95_low": -1.0,
+        "delta": 0.2
+      },
+      "top_1": {
+        "ci95_high": 2.8000000000000003,
+        "ci95_low": -0.5,
+        "delta": 1.0999999999999999
+      },
+      "top_10": {
+        "ci95_high": 2.0,
+        "ci95_low": -1.0999999999999999,
+        "delta": 0.5
+      },
+      "top_3": {
+        "ci95_high": 2.1,
+        "ci95_low": -0.8999999999999999,
+        "delta": 0.6
+      },
+      "top_5": {
+        "ci95_high": 2.0,
+        "ci95_low": -0.8999999999999999,
+        "delta": 0.6
+      },
+      "true_unique_candidates": {
+        "ci95_high": 0.12202499999999963,
+        "ci95_low": -0.451,
+        "delta": -0.164
+      },
+      "valid_candidate_count": {
+        "ci95_high": 0.544,
+        "ci95_low": -0.12502499999999997,
+        "delta": 0.207
+      }
+    }
+  },
+  "performance": {
+    "b0": {
+      "invalid_at_1_percent": 12.85,
+      "mean_true_unique_candidates": 24.719,
+      "mean_valid_candidates": 157.155,
+      "oracle_any": 90.0,
+      "reaction_count": 1000,
+      "top_1": 60.099999999999994,
+      "top_10": 83.7,
+      "top_3": 76.6,
+      "top_5": 80.5
+    },
+    "b1_oracle": {
+      "invalid_at_1_percent": 12.625,
+      "mean_true_unique_candidates": 24.457,
+      "mean_valid_candidates": 157.815,
+      "oracle_any": 89.2,
+      "reaction_count": 1000,
+      "top_1": 61.199999999999996,
+      "top_10": 83.7,
+      "top_3": 77.0,
+      "top_5": 80.10000000000001
+    },
+    "rc15_mixed": {
+      "invalid_at_1_percent": 12.615,
+      "mean_true_unique_candidates": 24.555,
+      "mean_valid_candidates": 157.362,
+      "oracle_any": 90.2,
+      "reaction_count": 1000,
+      "top_1": 61.199999999999996,
+      "top_10": 84.2,
+      "top_3": 77.2,
+      "top_5": 81.10000000000001
+    }
+  },
+  "run_root": "results/after_spe_stage1/rc15_runs/20260824T_rc15_dev1000_dev1000",
+  "runtimes": {
+    "b0": {
+      "elapsed_seconds": 1448.3128312099725,
+      "git_commit": "0cbe19ec94af0738d137d2232fcb032c41f2ed65",
+      "git_dirty": true,
+      "peak_cuda_allocated_bytes": 741872640,
+      "peak_cuda_reserved_bytes": 5972688896,
+      "predictions_sha256": "7e5e7fd57593267ebcbfbf915df85493b03b5ee07d2dacd3909947bb5c1f81e7"
+    },
+    "b1_oracle": {
+      "elapsed_seconds": 1574.3129915418103,
+      "git_commit": "0cbe19ec94af0738d137d2232fcb032c41f2ed65",
+      "git_dirty": true,
+      "peak_cuda_allocated_bytes": 752211456,
+      "peak_cuda_reserved_bytes": 6226444288,
+      "predictions_sha256": "1994397707b3bf0e5d64f9a300fe24b4055a06632fba98cb7cefeb2ddc510e55"
+    },
+    "rc15_mixed": {
+      "elapsed_seconds": 1630.9886549729854,
+      "git_commit": "48329346ce44e387af97fbeef67b859c3e150cfd",
+      "git_dirty": true,
+      "peak_cuda_allocated_bytes": 738684416,
+      "peak_cuda_reserved_bytes": 6224347136,
+      "predictions_sha256": "71d4f4c58cb18fd234d9f21d7f7145649e26dfab1c79d13cffbc636590ae81e5"
+    }
+  },
+  "schema_version": 2
+}

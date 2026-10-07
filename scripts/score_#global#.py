@@ -608,14 +608,15 @@ def print_sampling_diagnostics(diagnostics):
     print(f"Aggregated candidate availability: {rank_availability_text}")
     for metric in summary["run_metrics"]:
         print(
-            f"Run {metric['run']}: target-hit "
+            f"Input rank {metric['run']}: target-hit "
             f"{metric['target_hit_rate_percent']:.3f}%, invalid "
             f"{metric['invalid_rate_percent']:.3f}%, duplicate-among-valid "
             f"{metric['duplicate_rate_among_valid_percent']:.3f}%"
         )
     for overlap in summary["pairwise_overlap"]:
+        rank_pair = overlap["pair"].replace("run_", "rank_")
         print(
-            f"Overlap {overlap['pair']}: micro/macro Jaccard "
+            f"Overlap input {rank_pair}: micro/macro Jaccard "
             f"{overlap['micro_jaccard_percent']:.3f}% / "
             f"{overlap['mean_reaction_jaccard_percent']:.3f}%"
         )

@@ -4,11 +4,17 @@ import torch.nn as nn
 from edit_flows.sampling.euler import (
     _compute_model_time,
     _event_probability,
+    get_euler_step_times,
+    _sample_edit_actions,
     get_adaptive_h,
+    sample_event_conditioned_atomic_actions,
+    sample_event_conditioned_euler_transition,
     sample_euler,
+    sample_euler_oracle,
 )
 from edit_flows.core.rate_scale import get_rate_scale
 from edit_flows.core.scheduler import CubicScheduler, LinearScheduler
+from edit_flows.sampling.ops import apply_ins_del_operations
 from edit_flows.utils.tokens import PAD_TOKEN, BOS_TOKEN
 
 
@@ -28,6 +34,11 @@ class TestGetAdaptiveH:
         h_end = get_adaptive_h(0.1, t_end, scheduler)
         assert h_end.item() < h_mid.item()
 
+    def test_step_times_use_actual_adaptive_endpoint(self):
+        times = get_euler_step_times(100, CubicScheduler())
+        assert abs(times[50] - 0.5) < 1e-6
+        assert times[-1] >= 1.0
+
 
 class TestEventProbability:
     def test_poisson_mode(self):
@@ -43,7 +54,280 @@ class TestEventProbability:
         assert torch.allclose(out, expected)
 
 
+class TestEventConditionedAtomicActions:
+    @staticmethod
+    def _inputs(x_t, vocab_size=16):
+        batch, length = x_t.shape
+        log_rates = torch.zeros(batch, length, 3)
+        log_probs = torch.log_softmax(
+            torch.zeros(batch, length, vocab_size), dim=-1,
+        )
+        return log_rates, log_probs, log_probs.clone()
+
+    def test_draws_one_reproducible_state_changing_action_per_row(self):
+        x_t = torch.tensor([
+            [BOS_TOKEN, 4, 5, PAD_TOKEN],
+            [BOS_TOKEN, 6, PAD_TOKEN, PAD_TOKEN],
+        ])
+        log_rates, log_ins, log_sub = self._inputs(x_t)
+        torch.manual_seed(2026)
+        first = sample_event_conditioned_atomic_actions(
+            x_t, log_rates, log_ins, log_sub, max_seq_len=16,
+        )
+        torch.manual_seed(2026)
+        second = sample_event_conditioned_atomic_actions(
+            x_t, log_rates, log_ins, log_sub, max_seq_len=16,
+        )
+        for key in ("position", "operation", "token", "log_rate", "log_probability"):
+            assert torch.equal(first[key], second[key])
+
+        action_count = (
+            first["ins_mask"].sum(dim=1)
+            + first["sub_mask"].sum(dim=1)
+            + first["del_mask"].sum(dim=1)
+        )
+        assert torch.equal(action_count, torch.ones(2, dtype=torch.long))
+        for row in range(x_t.shape[0]):
+            position = int(first["position"][row].item())
+            operation = int(first["operation"][row].item())
+            token = int(first["token"][row].item())
+            assert position > 0 or operation == 0
+            if position == 0:
+                assert operation == 0
+            assert int(x_t[row, position].item()) != PAD_TOKEN
+            if operation in (0, 1):
+                assert token not in {0, 1, 2, 3}
+            if operation == 1:
+                assert token != int(x_t[row, position].item())
+
+        x_next = x_t.clone()
+        x_next[first["sub_mask"]] = first["sub_tokens"][first["sub_mask"]]
+        x_next = apply_ins_del_operations(
+            x_next,
+            first["ins_mask"],
+            first["del_mask"],
+            first["ins_tokens"],
+            max_seq_len=16,
+        )
+        for row in range(x_t.shape[0]):
+            before = x_t[row][x_t[row] != PAD_TOKEN].tolist()
+            after = x_next[row][x_next[row] != PAD_TOKEN].tolist()
+            assert before != after
+
+    def test_respects_a_single_available_atomic_action(self):
+        x_t = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+        log_rates = torch.full((1, 3, 3), -1e9)
+        log_ins = torch.full((1, 3, 16), -1e9)
+        log_sub = torch.full((1, 3, 16), -1e9)
+        log_rates[0, 1, 1] = 0.0
+        log_sub[0, 1, 9] = 0.0
+        actions = sample_event_conditioned_atomic_actions(
+            x_t, log_rates, log_ins, log_sub,
+        )
+        assert int(actions["position"][0].item()) == 1
+        assert int(actions["operation"][0].item()) == 1
+        assert int(actions["token"][0].item()) == 9
+
+    def test_rejects_rows_without_an_executable_edit(self):
+        x_t = torch.tensor([[BOS_TOKEN, PAD_TOKEN]])
+        log_rates, log_ins, log_sub = self._inputs(x_t)
+        with pytest.raises(ValueError, match="no valid state-changing action"):
+            sample_event_conditioned_atomic_actions(
+                x_t, log_rates, log_ins, log_sub, max_seq_len=1,
+            )
+
+    def test_can_select_leading_insert_from_bos_anchor(self):
+        x_t = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+        log_rates = torch.full((1, 3, 3), -1e9)
+        log_rates[0, 0, 0] = 0.0
+        log_ins = torch.full((1, 3, 16), -1e9)
+        log_sub = torch.full((1, 3, 16), -1e9)
+        log_ins[0, 0, 9] = 0.0
+
+        actions = sample_event_conditioned_atomic_actions(
+            x_t, log_rates, log_ins, log_sub, max_seq_len=16,
+        )
+
+        assert int(actions["position"][0].item()) == 0
+        assert int(actions["operation"][0].item()) == 0
+        assert int(actions["token"][0].item()) == 9
+
+    def test_transition_advances_time_without_mutating_input(self, dummy_model):
+        dummy_model.eval()
+        x_t = torch.tensor([[BOS_TOKEN, 4, 5, PAD_TOKEN]])
+        before = x_t.clone()
+        torch.manual_seed(77)
+        x_next, next_time, actions = sample_event_conditioned_euler_transition(
+            dummy_model,
+            x_t,
+            CubicScheduler(),
+            n_steps=4,
+            max_seq_len=32,
+            start_time=0.5,
+        )
+        assert torch.equal(x_t, before)
+        assert torch.allclose(next_time, torch.tensor([[0.75]]))
+        action_count = (
+            actions["ins_mask"].sum()
+            + actions["sub_mask"].sum()
+            + actions["del_mask"].sum()
+        )
+        assert int(action_count.item()) == 1
+        assert x_next.shape[0] == 1
+
 class TestSampleEuler:
+    def test_explicit_zero_start_time_matches_baseline(self, dummy_model):
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+        torch.manual_seed(1234)
+        baseline, _ = sample_euler(
+            dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
+        )
+        torch.manual_seed(1234)
+        explicit, _ = sample_euler(
+            dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
+            start_time=0.0,
+        )
+        assert torch.equal(baseline, explicit)
+
+    def test_start_time_one_is_a_noop(self, dummy_model):
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+        result, trajectory = sample_euler(
+            dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
+            start_time=1.0, record_trajectory=True,
+        )
+        assert torch.equal(result, x_0)
+        assert len(trajectory) == 1
+        assert torch.equal(trajectory[0], x_0)
+
+    def test_guidance_beta_zero_matches_baseline(self, dummy_model):
+        class ConstantGuidance(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.anchor = nn.Parameter(torch.zeros(()))
+
+            def forward(
+                self, product, state, time, product_padding, state_padding,
+            ):
+                b, l = state.shape
+                h = torch.ones(
+                    b, l, 19, device=state.device,
+                ) + self.anchor * 0
+                return h, h.clone(), h[:, :, :1].clone()
+
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+        guidance = ConstantGuidance()
+        torch.manual_seed(99)
+        baseline, _ = sample_euler(
+            dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
+        )
+        torch.manual_seed(99)
+        guided, _ = sample_euler(
+            dummy_model, x_0, CubicScheduler(), n_steps=4, max_seq_len=32,
+            guidance_model=guidance, guidance_product=x_0, guidance_beta=0.0,
+            guidance_rate_normalization="per_sample",
+        )
+        assert torch.equal(baseline, guided)
+
+    def test_bos_is_an_insertion_anchor_but_not_an_editable_token(self):
+        x_t = torch.tensor([[BOS_TOKEN, 7, PAD_TOKEN]])
+        log_rates = torch.full((1, 3, 3), 20.0)
+        log_probs = torch.log_softmax(torch.zeros(1, 3, 16), dim=-1)
+        actions = _sample_edit_actions(
+            x_t,
+            log_rates,
+            log_probs,
+            log_probs,
+            torch.tensor([[0.1]]),
+            pad_token=PAD_TOKEN,
+        )
+        assert bool(actions["ins_mask"][0, 0])
+        assert not bool(actions["sub_mask"][0, 0])
+        assert not bool(actions["del_mask"][0, 0])
+
+    def test_sampling_filters_special_tokens_and_noop_substitution(self):
+        x_t = torch.tensor([[BOS_TOKEN, 7, PAD_TOKEN]])
+        log_rates = torch.full((1, 3, 3), -1e9)
+        log_rates[0, 0, 0] = 20.0
+        log_rates[0, 1, 1] = 20.0
+
+        log_ins = torch.full((1, 3, 16), -1e9)
+        log_ins[:, :, PAD_TOKEN] = 0.0
+        log_ins[:, :, 9] = -0.1
+        log_sub = torch.full((1, 3, 16), -1e9)
+        log_sub[:, :, 7] = 0.0  # identity/no-op substitution
+        log_sub[:, :, PAD_TOKEN] = -0.1
+        log_sub[:, :, 10] = -0.2
+
+        actions = _sample_edit_actions(
+            x_t,
+            log_rates,
+            log_ins,
+            log_sub,
+            torch.tensor([[0.1]]),
+            pad_token=PAD_TOKEN,
+        )
+
+        assert bool(actions["ins_mask"][0, 0])
+        assert int(actions["ins_tokens"][0, 0].item()) == 9
+        assert bool(actions["sub_mask"][0, 1])
+        assert int(actions["sub_tokens"][0, 1].item()) == 10
+
+    def test_oracle_sampler_uses_the_same_bos_action_support(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ):
+        def fake_oracle_output(x_t, x_1, t, scheduler, vocab_size, **kwargs):
+            batch, length = x_t.shape
+            log_rates = torch.full((batch, length, 3), -1e9)
+            log_rates[:, 0, :] = 20.0
+            log_ins = torch.full((batch, length, vocab_size), -1e9)
+            log_sub = torch.full_like(log_ins, -1e9)
+            log_ins[:, :, 9] = 0.0
+            log_sub[:, :, 10] = 0.0
+            return log_rates, log_ins, log_sub, [0] * batch
+
+        import edit_flows.sampling.oracle as oracle_module
+
+        monkeypatch.setattr(
+            oracle_module, "compute_oracle_model_output", fake_oracle_output,
+        )
+        x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+        x_1 = torch.tensor([[BOS_TOKEN, 9, 4, PAD_TOKEN]])
+
+        result, _ = sample_euler_oracle(
+            x_0, x_1, LinearScheduler(), vocab_size=16,
+            n_steps=1, max_seq_len=16,
+        )
+
+        assert result[0].tolist() == [BOS_TOKEN, 9, 4]
+
+    def test_sampling_does_not_mutate_a_device_resident_input(self):
+        class ForcedSubstitutionModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.anchor = nn.Parameter(torch.zeros(()))
+
+            def forward(self, tokens, time_step, padding_mask, origin_mask=None):
+                batch, length = tokens.shape
+                log_rates = torch.full(
+                    (batch, length, 3), -1e9, device=tokens.device,
+                )
+                log_rates[:, 1, 1] = 20.0
+                log_ins = torch.log_softmax(
+                    torch.zeros(batch, length, 16, device=tokens.device), dim=-1,
+                )
+                log_sub = torch.full_like(log_ins, -1e9)
+                log_sub[:, :, 9] = 0.0
+                return log_rates, log_ins, log_sub
+
+        model = ForcedSubstitutionModel()
+        x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+        original = x_0.clone()
+        result, _ = sample_euler(
+            model, x_0, LinearScheduler(), n_steps=1, max_seq_len=16,
+        )
+        assert torch.equal(x_0, original)
+        assert int(result[0, 1].item()) == 9
+
     def test_empty_prior_generates(self, dummy_model):
         dummy_model.eval()
         scheduler = CubicScheduler()
@@ -82,6 +366,37 @@ class TestSampleEuler:
         assert len(trajectory) > 0
         assert trajectory[0].shape[0] == 1
 
+    def test_capped_trajectory_keeps_first_post_step_without_changing_terminal(
+        self, dummy_model,
+    ):
+        """Diagnostic state storage must not alter the sampled trajectory."""
+        dummy_model.eval()
+        scheduler = CubicScheduler()
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+        torch.manual_seed(2468)
+        baseline, _ = sample_euler(
+            dummy_model, x_0, scheduler, n_steps=5, max_seq_len=32,
+        )
+        torch.manual_seed(2468)
+        capped, trajectory = sample_euler(
+            dummy_model, x_0, scheduler, n_steps=5, max_seq_len=32,
+            record_trajectory=True,
+            max_recorded_trajectory_steps=1,
+        )
+        assert torch.equal(baseline, capped)
+        assert len(trajectory) == 2
+        assert torch.equal(trajectory[0], x_0)
+
+    def test_capped_trajectory_requires_trajectory_recording(self, dummy_model):
+        with pytest.raises(ValueError, match="requires record_trajectory"):
+            sample_euler(
+                dummy_model,
+                torch.tensor([[BOS_TOKEN, 3, PAD_TOKEN]]),
+                CubicScheduler(),
+                n_steps=5,
+                max_recorded_trajectory_steps=1,
+            )
+
     def test_first_event_recording(self, dummy_model):
         dummy_model.eval()
         scheduler = CubicScheduler()
@@ -100,6 +415,77 @@ class TestSampleEuler:
         )
         assert result.shape[0] == 1
         assert len(first_events) == 1
+
+    def test_all_event_recording_does_not_change_sampling(self, dummy_model):
+        dummy_model.eval()
+        scheduler = CubicScheduler()
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+
+        torch.manual_seed(123)
+        result_plain, _ = sample_euler(
+            dummy_model, x_0, scheduler,
+            n_steps=5, max_seq_len=32,
+        )
+        torch.manual_seed(123)
+        result_recorded, _, _ = sample_euler(
+            dummy_model, x_0, scheduler,
+            n_steps=5, max_seq_len=32, record_all_events=True,
+        )
+
+        assert torch.equal(result_plain, result_recorded)
+
+    def test_guided_event_recording_keeps_pre_and_post_distributions(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setattr(
+            torch, "rand_like",
+            lambda x, **kwargs: torch.zeros_like(
+                x, dtype=kwargs.get("dtype", x.dtype),
+            ),
+        )
+
+        class ConstantGuidance(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.anchor = nn.Parameter(torch.zeros(()))
+
+            def forward(
+                self, product, state, time, product_padding, state_padding,
+            ):
+                batch, length = state.shape
+                insert = torch.ones(batch, length, 16, device=state.device)
+                substitute = torch.ones_like(insert)
+                delete = torch.ones(batch, length, 1, device=state.device)
+                return insert, substitute, delete
+
+        model = OriginMaskProbeModel(op="sub", target_token=9)
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+        guidance = ConstantGuidance()
+        _, _, events = sample_euler(
+            model,
+            x_0,
+            LinearScheduler(),
+            n_steps=2,
+            max_seq_len=16,
+            record_all_events=True,
+            guidance_model=guidance,
+            guidance_product=x_0,
+            guidance_beta=0.5,
+        )
+        assert len(events[0]) == 1
+        event = events[0][0]
+        for key in (
+            "log_rates_pre_guidance",
+            "log_ins_probs_pre_guidance",
+            "log_sub_probs_pre_guidance",
+            "guidance_insert",
+            "guidance_substitute",
+            "guidance_delete",
+        ):
+            assert key in event
+            assert isinstance(event[key], torch.Tensor)
+        assert event["guidance_beta"] == 0.5
+        assert event["guidance_rate_normalization"] == "per_position"
 
 
 class TestModelTimeMapping:
@@ -213,3 +599,24 @@ class TestOriginMaskSampling:
         assert torch.equal(result, expected_tokens)
         assert torch.equal(model.observed_masks[0], torch.tensor([[True, True, True, True]]))
         assert torch.equal(model.observed_masks[1], expected_mask)
+
+    def test_all_event_recording_contains_exact_post_edit_state(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setattr(
+            torch, "rand_like",
+            lambda x, **kwargs: torch.zeros_like(
+                x, dtype=kwargs.get("dtype", x.dtype),
+            ),
+        )
+        model = OriginMaskProbeModel(op="ins", target_token=9)
+        x_0 = torch.tensor([[BOS_TOKEN, 3, 4, PAD_TOKEN]])
+
+        result, _, all_events = sample_euler(
+            model, x_0, LinearScheduler(),
+            n_steps=2, max_seq_len=16, record_all_events=True,
+        )
+
+        assert len(all_events[0]) == 1
+        assert torch.equal(all_events[0][0]["x_t"], x_0[0])
+        assert torch.equal(all_events[0][0]["x_next"], result[0])

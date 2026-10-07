@@ -1,0 +1,1681 @@
+{
+  "augmentation": 20,
+  "created_at_utc": "2026-08-23T18:00:29.676983+00:00",
+  "purpose": "Reaction-center labels and raw-to-global R-SMILES crosswalk",
+  "rdkit_aromatic_normalization": "Sanitized RDKit aromaticity; aromatic bonds use one normalized AROMATIC signature before graph comparison.",
+  "schema_version": 1,
+  "splits": {
+    "train": {
+      "cache": {
+        "crosswalk_path": "results/after_spe_stage1/cache/raw_to_processed_train.jsonl",
+        "crosswalk_sha256": "968f17a23332aec44504a78e0ef76d076e54597037512c480f11d899bd39196e",
+        "labels_path": "results/after_spe_stage1/cache/reaction_centers_train.jsonl",
+        "labels_sha256": "c149bf09c4953d4f0f65a90c1c7e9cce3b205b4bf63fe36df8e282880108a14b",
+        "processed_keys_path": "results/after_spe_stage1/cache/processed_keys_train.jsonl",
+        "processed_keys_sha256": "4e446ad29e62a9344579ba0ef86dfcc616693a620849d036472786dbfd05f1a8"
+      },
+      "crosswalk": {
+        "ambiguous_occurrence_match_count": 405,
+        "duplicate_key_count": 198,
+        "duplicate_keys": [
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              20707,
+              33430
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              20709,
+              33434
+            ],
+            "reaction_key_sha256": "8f2cbe4aff4a62a1dbe4fc05627083875c0df7a4aa8e7e156efa1ccfefc7a4b7"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              10247,
+              31555
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              10248,
+              31559
+            ],
+            "reaction_key_sha256": "c06ab02708bad5a72ff72fcd6da1836258ef22eafe6a4f4f7aa5cf4285656de5"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              6862,
+              19007
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              6863,
+              19008
+            ],
+            "reaction_key_sha256": "50122ce45e7688d0be0c81f8005a680d0b12997a8b2026a6b13d177ca6c4ef28"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              13185,
+              37040
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              13186,
+              37045
+            ],
+            "reaction_key_sha256": "54806122d65a07b10359ae7e186b57aa82707fc040be503d0bbfbe93517aba62"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              11247,
+              11248
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              11248,
+              11249
+            ],
+            "reaction_key_sha256": "0d8f41070c86b9db84622dbeacc3bddbdd66ef2cc95075a513d636988e4c24e7"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              284,
+              14778
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              284,
+              14779
+            ],
+            "reaction_key_sha256": "3ec87230a943c1e73f5a8a08e44a098535807fa2dedeb8ba3d2a39b4f703d3a6"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              14409,
+              30956
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              14410,
+              30960
+            ],
+            "reaction_key_sha256": "4431d61ea7147d8dfc2844c35306444b5788dd74f9813d157cc9f2af58c5abda"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              16662,
+              21105
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              16663,
+              21107
+            ],
+            "reaction_key_sha256": "a0746d9201373b401359422b43a3e05ddb656d0143f86cb6366c210b0ea18522"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              5616,
+              15119
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              5617,
+              15120
+            ],
+            "reaction_key_sha256": "23ba9b4bdf2aa6800461dcf1ebe3e96ed841d275fc99b38a5760a0b12853b50f"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              13142,
+              36216
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              13143,
+              36221
+            ],
+            "reaction_key_sha256": "9b5ff6023a27a1a3c4e6c4cb71a8c61a20129e50bbff81d38c6245cc1bfda2ec"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              6307,
+              34509
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              6308,
+              34513
+            ],
+            "reaction_key_sha256": "0d1b7c69855a9b5b48c77345c9618d1c07263f95f1aecccf6cae4fb6b4686833"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              22719,
+              24792
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              22721,
+              24795
+            ],
+            "reaction_key_sha256": "f5d03c7aa57b51bfaee9fddce123139ba604fa5b7567673653502604a165b673"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              9981,
+              30893,
+              36077
+            ],
+            "processed_count": 3,
+            "raw_count": 3,
+            "raw_indices": [
+              9982,
+              30897,
+              36082
+            ],
+            "reaction_key_sha256": "512b39f92c384c6023e00bdc6d5d4c6a4cffcb9e8ed14aec57ffa22bba305aae"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              8956,
+              35637
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              8957,
+              35642
+            ],
+            "reaction_key_sha256": "3244f564f115683a1ede0f74749849be0b07a66918d7668404718e81b0c3f48f"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              20977,
+              31770
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              20979,
+              31774
+            ],
+            "reaction_key_sha256": "6e32aa14510da93d6f6d9faca963e8a2820425fa57a1438cb644b67ba73bb17c"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              29659,
+              31102,
+              33212
+            ],
+            "processed_count": 3,
+            "raw_count": 3,
+            "raw_indices": [
+              29663,
+              31106,
+              33216
+            ],
+            "reaction_key_sha256": "e5dd1670bea8c77125e0e7061823ca7142b4aafa45eb9f9f8873e9b9766d0353"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              10113,
+              26093
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              10114,
+              26097
+            ],
+            "reaction_key_sha256": "d32ca8e00288e5e320669612269eaa298c60db8e19aeed544e4d3e4d54c1a3d1"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              10382,
+              19627
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              10383,
+              19628
+            ],
+            "reaction_key_sha256": "05c72760d82511f3b71520b8bf7b752d7e53479c6d55e8ca1fc2c678223891dd"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              28713,
+              34830
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              28717,
+              34834
+            ],
+            "reaction_key_sha256": "86a09148fae9f6d5fb477220c6257888cf07ae93204fd2b0fe18984c14662623"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              21471,
+              26971
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              21473,
+              26975
+            ],
+            "reaction_key_sha256": "31f6758a17e2fe288007026134d2216243cb1222ec87f0326bdd51898f7cde11"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              19338,
+              24551
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              19339,
+              24554
+            ],
+            "reaction_key_sha256": "1071e4fd6bbcea7e905b618c50ed2ed3401071c8953105b0bb549ecf1b5b4751"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              25600,
+              35005
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              25603,
+              35010
+            ],
+            "reaction_key_sha256": "1c7eaed78d4d97777d2e0c48c23a88029c1851ee38a59bd64b2c8d20f88865e9"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              26228,
+              32288
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              26232,
+              32292
+            ],
+            "reaction_key_sha256": "ac36b36ee216f730eb78622ab1b2ed3da2ebe020fb8379ebe8703df427386671"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              558,
+              23405
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              558,
+              23407
+            ],
+            "reaction_key_sha256": "bcc6fffc96dae418fa66302a648a994d9da009f07d2cf578fc7797e9cf9ce691"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              1936,
+              36288
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              1937,
+              36293
+            ],
+            "reaction_key_sha256": "c82ba4c87985772f869a784de39cd3b0f5bbba15f2d9ca1a5adc13b696ffaabf"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              5308,
+              28690
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              5309,
+              28694
+            ],
+            "reaction_key_sha256": "a23c9487b40b2c4b76412b57615fdcf8cfabe0803fdb3931017f85d2305b67df"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              15173,
+              36546
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              15174,
+              36551
+            ],
+            "reaction_key_sha256": "c3b7273caf1c9ffab313a61ca2f964e78ff3fb0872801a558fb0f1163039f945"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              30738,
+              34061
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              30742,
+              34065
+            ],
+            "reaction_key_sha256": "de80cc56a58e6eb56e8d30cc00dd8353438f846638207990f9e226db50f0b0b6"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              11237,
+              24489
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              11238,
+              24492
+            ],
+            "reaction_key_sha256": "7118fd6711d54716d821b3dcec2bdb9e9c0e2952db68e0e9c6c8349657bec392"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              6172,
+              24448
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              6173,
+              24451
+            ],
+            "reaction_key_sha256": "70d1c60b980d393d608f28790a574b07125f837fa5e5417b0fe418542a5941bc"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              5365,
+              30416
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              5366,
+              30420
+            ],
+            "reaction_key_sha256": "d1a9434fa9a566f1160e6380c70029c04beec3032d3d2cabd62af9c3ed6d27a3"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              26525,
+              29869
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              26529,
+              29873
+            ],
+            "reaction_key_sha256": "b2cc63483931349e60e449a8f556f1bfa521f5e5fb85b20b2d01725d4b6eb22c"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              30115,
+              36898
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              30119,
+              36903
+            ],
+            "reaction_key_sha256": "64475b25ad9636b1623982b5347f455b06186872c15db2249bc76af23d39e8cc"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              5099,
+              28946
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              5100,
+              28950
+            ],
+            "reaction_key_sha256": "8f7ce36a46ae868417327cd85b231ae9075e18efd154acf3c13f128ddbf1954a"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              33067,
+              34834
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              33071,
+              34838
+            ],
+            "reaction_key_sha256": "aba6946c55a9e006103a3b7d0264a42004044dcf79ec7031f6b7379f5634e31d"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              12549,
+              14552
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              12550,
+              14553
+            ],
+            "reaction_key_sha256": "c61a1cdc992e0e8c36358ac55dee23fba11f78507a0b4d6f878162644d62ac5a"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              6569,
+              13639
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              6570,
+              13640
+            ],
+            "reaction_key_sha256": "7d0dc09ef36d94fd39785473e82bce7bbb3bd1249c3edbdb2c3fb17e93152a67"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              7910,
+              17828
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              7911,
+              17829
+            ],
+            "reaction_key_sha256": "ad1fb140168d5348a82897ff1584912086c2a0a696fe22532f78dda49040bd4d"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              10660,
+              24506
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              10661,
+              24509
+            ],
+            "reaction_key_sha256": "9af8c8accf46be1ae338479813710df11e835d6ee7e4863f71e2c6033fdc1ad1"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              4266,
+              27196
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              4267,
+              27200
+            ],
+            "reaction_key_sha256": "5e81c1eadb81fd97845a1520708ef56ff5b9ff3913aa100dc34e6c5cf7ba20f9"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              30194,
+              35280
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              30198,
+              35285
+            ],
+            "reaction_key_sha256": "831f8cbba029fae903a39d8a47b0cfb30980b6f6eda7d10a1ba7091c7eada895"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              1142,
+              32569
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              1142,
+              32573
+            ],
+            "reaction_key_sha256": "a1bffb11efe0411291814d38fed3c099c62ee3d1d680828b232909d50ed8cc0b"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              1423,
+              26791
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              1423,
+              26795
+            ],
+            "reaction_key_sha256": "b68660f3ff114ae517103d519ecea95d561a63100f5b47d024e78885c534b553"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              4664,
+              23645
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              4665,
+              23647
+            ],
+            "reaction_key_sha256": "9bc0395e1faf618f4b60e94f1a21211a372628fcf3760b159b6bf44409f5eda7"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              16439,
+              17797
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              16440,
+              17798
+            ],
+            "reaction_key_sha256": "718ed91b51857f6e5b42e51e278849bc0f3c86cdc062b74ad39786599776be4e"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              20118,
+              34227
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              20119,
+              34231
+            ],
+            "reaction_key_sha256": "4536af8a2688d20139811b612a2d5d80ff9861865ebddae54545f98a54798b9d"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              20303,
+              35137
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              20304,
+              35142
+            ],
+            "reaction_key_sha256": "240a8a7e5eb190d7d502ebc67f6b700217bf50d10ebe2cd288c7c6fc1b041020"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              7865,
+              23180
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              7866,
+              23182
+            ],
+            "reaction_key_sha256": "74be9be2d6db65d52e628df4251995a67055eeb9161d7987fd6dbe70995ef56e"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              9351,
+              16612
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              9352,
+              16613
+            ],
+            "reaction_key_sha256": "a5f0b87ba80cd7c2b509139072e0a620d21fd00a3b57d2a6f2f1f79538bdd6bb"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              2110,
+              24062
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              2111,
+              24065
+            ],
+            "reaction_key_sha256": "11c965942ddfdcdee650c4e909bfa8daaa2df75bcf105447538a1d8fd9361da2"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              19172,
+              19447
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              19173,
+              19448
+            ],
+            "reaction_key_sha256": "73745bbc88aeb8ff4948151d403b0e61c9960c3fac0ec25cf05dfc9d08621620"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              23324,
+              27934
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              23326,
+              27938
+            ],
+            "reaction_key_sha256": "4053ac74c591bac034ae4a9764d6711a6cefd989129cf067ef7e020d1f381dfa"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              11065,
+              29697
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              11066,
+              29701
+            ],
+            "reaction_key_sha256": "0872bc954d84cd7e57323e6d74a769995c7d68b3a2c8ebfecfa4683454033e64"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              13258,
+              17197
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              13259,
+              17198
+            ],
+            "reaction_key_sha256": "c834d36ceb84b7e53dc0a27e54a03d4690c507dc4941bdd74caebebbb9e9d4b4"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              8900,
+              27582
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              8901,
+              27586
+            ],
+            "reaction_key_sha256": "d000f38daf62b2ac4dc292fd6810a7d2e99f10031ef65153cf4b30d6c7b46273"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              86,
+              18294
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              86,
+              18295
+            ],
+            "reaction_key_sha256": "b50ee390cb2e4bacb7c81976945e6ad955b457ab994e3702276bc0b169ea7441"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              22234,
+              26706
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              22236,
+              26710
+            ],
+            "reaction_key_sha256": "ce6d3ac748e1d86fd45aa05b23cba0dd81a53bda6c34babc360dd6bda844bc6b"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              5648,
+              12341
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              5649,
+              12342
+            ],
+            "reaction_key_sha256": "812333fb6ed7157e5358482f9e5615bfa3ae15de68a8506d927476847e611715"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              14636,
+              26660
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              14637,
+              26664
+            ],
+            "reaction_key_sha256": "fa9b8aad14d433bfa09ff820791c4fe0730e2c5171dfee7fcef258f3b6b788a1"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              5729,
+              21847
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              5730,
+              21849
+            ],
+            "reaction_key_sha256": "daffd7d837eb3259f74f67e6b1a6b6364195680f77269e089f53895ef28d8cc7"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              875,
+              39478
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              875,
+              39483
+            ],
+            "reaction_key_sha256": "4485fbf639a8311df0e80f8617677a34d104a998c7cfcf4f27ceb5a95a99ee15"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              6520,
+              31636
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              6521,
+              31640
+            ],
+            "reaction_key_sha256": "310f29d034843beea13084d3c0e27821c8891a84a7acea5c34ede3c3a82b1bf1"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              18612,
+              30745
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              18613,
+              30749
+            ],
+            "reaction_key_sha256": "d3c02574099428b113638f5824057b82edbb58da20d4f25c6b2e6be5e4b70384"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              16537,
+              16538
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              16538,
+              16539
+            ],
+            "reaction_key_sha256": "fd63f8069af1572826bfedaabb6fce204d4a40704260949e160632d962cee895"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              15778,
+              38100
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              15779,
+              38105
+            ],
+            "reaction_key_sha256": "bdd44bd109148c0425fe26fd2057a2ebcc1290befd14dbfd33b8423acbc720c7"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              11205,
+              34483
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              11206,
+              34487
+            ],
+            "reaction_key_sha256": "70956fc2777188d6d2776783d9a79d331c69ea154f0556a6a73394593cc8d9ea"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              24723,
+              33929
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              24726,
+              33933
+            ],
+            "reaction_key_sha256": "f0c6f1c487b4036f7600ea90da593eba3cdff12a84e6f63a8cb8774194728c06"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              3293,
+              37815
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              3294,
+              37820
+            ],
+            "reaction_key_sha256": "61e2c7f8b27b19ef043ec91b1ba4ead0d3661e09d19afcba048f0993793d3650"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              13250,
+              15226
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              13251,
+              15227
+            ],
+            "reaction_key_sha256": "fe488180d72e4bfc6d758aa74d72640d433fd9999f6cc633c8f4d64712a2cc0e"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              1133,
+              4022
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              1133,
+              4023
+            ],
+            "reaction_key_sha256": "77f620ac2f8f8c1600e36d1993d8ee9de74fa026518baf8b62e0bae33ec9b8ba"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              13898,
+              39390
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              13899,
+              39395
+            ],
+            "reaction_key_sha256": "dce3f3a509e56f6ec7d6943d247cafc6aa5d2a898eed440704ff2df885b97110"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              39457,
+              39851
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              39462,
+              39856
+            ],
+            "reaction_key_sha256": "72fad3d76b7e820e2d91448191064b9553911d1081591d1e965bac5bc06d2ee2"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              691,
+              16200
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              691,
+              16201
+            ],
+            "reaction_key_sha256": "bf1f1d5c293fe54e297b71630e16e1eb9fe0ff4fd1b2ef16e4aa1413e3109c29"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              2952,
+              24871
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              2953,
+              24874
+            ],
+            "reaction_key_sha256": "684bdb29c8104570fb9dd8a31636474f27bf21696e8423bd36495a454ddc7e8f"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              14298,
+              23652
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              14299,
+              23654
+            ],
+            "reaction_key_sha256": "1627f462afc7b7cf9fe3bd3ebd63f664fccbde7cfa7961546bb8d705a0dc274b"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              28563,
+              37519
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              28567,
+              37524
+            ],
+            "reaction_key_sha256": "376461a0cb9002ac46ef724d83917c911ae9f52bd264a6d9d74591d68791dd77"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              1302,
+              35493
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              1302,
+              35498
+            ],
+            "reaction_key_sha256": "e94f83649a87ca25496ef49e6e78934c6fabecd5b7c384b4994deb2edb123a8a"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              17314,
+              35068
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              17315,
+              35073
+            ],
+            "reaction_key_sha256": "576ad39bc0b7c6c11ab54f91ce4fa8ff0fa370139b2507b6f81cf972723df123"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              14906,
+              20126
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              14907,
+              20127
+            ],
+            "reaction_key_sha256": "c522d8e8a8b1e0fd51ac24760bd3575b54b3f33c2a7c07eabc6f28de31013146"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              27280,
+              36727
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              27284,
+              36732
+            ],
+            "reaction_key_sha256": "47018539f4699f60f6d2863b9af70753936d0e572c61ff871a6f2f575e1264e1"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              10903,
+              12252,
+              39677
+            ],
+            "processed_count": 3,
+            "raw_count": 3,
+            "raw_indices": [
+              10904,
+              12253,
+              39682
+            ],
+            "reaction_key_sha256": "9183c7fb3e5435c094627aa655283952fb2564a7e5c62fc719dc2c628114d68d"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              35631,
+              39622
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              35636,
+              39627
+            ],
+            "reaction_key_sha256": "7815371397bf20f004567520a921d63f89ac14cc37cbf3d4fde5c0603d5aca39"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              17238,
+              27815
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              17239,
+              27819
+            ],
+            "reaction_key_sha256": "16744cd107a230b563530f904b8504c932f9ef4f0f0387758d61e61378eef101"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              659,
+              39014
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              659,
+              39019
+            ],
+            "reaction_key_sha256": "22df8820db71922e4f266156bfd52d3ff8822162854f783877578205ca52e3aa"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              15860,
+              29971
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              15861,
+              29975
+            ],
+            "reaction_key_sha256": "49612e2e3f8c60a5a9b7466b9e8962218a5bc2c63d74bd38ac9f99b314d51625"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              9887,
+              33616
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              9888,
+              33620
+            ],
+            "reaction_key_sha256": "fa7cbbc696b6a408a8a08e759664f0c7c1e655d6c1a7a6ccfcc1e919e5bbc080"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              6580,
+              9969
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              6581,
+              9970
+            ],
+            "reaction_key_sha256": "8b8d6308ef59d86a3de86f19570f4c4a73a2b79b2628a1382fa6119086a3fbb5"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              414,
+              1353
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              414,
+              1353
+            ],
+            "reaction_key_sha256": "f7404d589ca43ef3bac940ce4118961690b56130876dd9e4112a0a4261c0bc84"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              7682,
+              36265
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              7683,
+              36270
+            ],
+            "reaction_key_sha256": "318e72cdbb1c6a4915a00388f3ff0065977d20c50a76080a88a17063db7adb54"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              10112,
+              26280
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              10113,
+              26284
+            ],
+            "reaction_key_sha256": "c4764eb220ede22844d50c8845f4166bfb84733f8892966523365e36f5cc216e"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              16591,
+              36408
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              16592,
+              36413
+            ],
+            "reaction_key_sha256": "03a6c92b30698b0f72ddb0eb582699b24be9c131f7542fce0518ef5f07fc2314"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              14473,
+              31459
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              14474,
+              31463
+            ],
+            "reaction_key_sha256": "3caeaa5b2d8ed2300d6a3f7033f86a4d3c312474d72ce961b8fd0fde119d2150"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              7501,
+              21207
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              7502,
+              21209
+            ],
+            "reaction_key_sha256": "5d8f297ee12ec8a773c1859ae647fdb6deef6948ca9371c036a2bffdae647498"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              24348,
+              30250
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              24351,
+              30254
+            ],
+            "reaction_key_sha256": "1537b0c5b044837e8c6722f49b82b918b6a7b52c805d6cdd5e02fae8d539f161"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              1669,
+              22798
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              1670,
+              22800
+            ],
+            "reaction_key_sha256": "cc9d1a3c19beb9df8131a847bf8045b79569af46453a0efffa0c83d14d227b49"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              4255,
+              13400
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              4256,
+              13401
+            ],
+            "reaction_key_sha256": "aae164a1f356e498eaad03183bc8d2aeab1227edc89dd531dd73532f1f688099"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              1379,
+              26925
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              1379,
+              26929
+            ],
+            "reaction_key_sha256": "5184308ff7f120dacb26170bdaeb544cc967e3ae8e6285da9c664c4695a1b86e"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              27275,
+              35886
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              27279,
+              35891
+            ],
+            "reaction_key_sha256": "64d22ab4ca98f0cc2c5bcc0d5c6f0a25e857fbe2ed4b1842a2b66f087cb0dc9e"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              6788,
+              18516
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              6789,
+              18517
+            ],
+            "reaction_key_sha256": "dbe88eb3f448e495341a1113f503f44cb0e1d22e497e6a100428bdb649924ab8"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              511,
+              23041
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              511,
+              23043
+            ],
+            "reaction_key_sha256": "61c286162cc50fb2c122a393f538107969fb929cc77b0e7dc7d476f19d13ca11"
+          }
+        ],
+        "match_method_counts": {
+          "achiral_fallback": 353,
+          "exact_isomeric": 39650
+        },
+        "matched_count": 40003,
+        "processed_only": [],
+        "processed_only_count": 0,
+        "raw_only": [
+          {
+            "raw_index": 1446,
+            "reaction_id": "US20100279990A1",
+            "reaction_key_sha256": "4595ccc6dd4a465a6369ca03aa8d6a91092a0d6838b6e9625b717c83d70e3f0b",
+            "status": "ok"
+          },
+          {
+            "raw_index": 20320,
+            "reaction_id": "US08470816B2",
+            "reaction_key_sha256": "e0de139977516e3b5b17004257db1d52df8aba643d1d5a3f328f862d770e931f",
+            "status": "ok"
+          },
+          {
+            "raw_index": 23859,
+            "reaction_id": "US04198522",
+            "reaction_key_sha256": "efe7cb665fc0ed6feec082f4c8ba500a3d28d0b5d4df807bee835d684fa35b1e",
+            "status": "ok"
+          },
+          {
+            "raw_index": 25749,
+            "reaction_id": "US04772600",
+            "reaction_key_sha256": "50e06736cbcbed0284fcd86f16c8f1d61e2b05bae0354084403ef1e2ff76c7ce",
+            "status": "ok"
+          },
+          {
+            "raw_index": 34872,
+            "reaction_id": "US20070259879A1",
+            "reaction_key_sha256": "5051e9a556a65bb283deb4efd104d0666dcb79deda4869245e6ecc3086c2e99b",
+            "status": "ok"
+          }
+        ],
+        "raw_only_count": 5,
+        "unique_unambiguous_match_count": 39598
+      },
+      "labels": {
+        "atom_changed_field_counts": {
+          "aromatic": 3186,
+          "chirality": 3583,
+          "explicit_h": 41493,
+          "formal_charge": 2339,
+          "total_h": 41494
+        },
+        "bond_kind_counts": {
+          "bond_property_change": 12597,
+          "product_only_bond": 29617,
+          "reactant_only_bond": 66
+        },
+        "center_type_counts": {
+          "atom_property_change": 38147,
+          "attachment": 37198,
+          "bond_property_change": 7979,
+          "product_only_bond": 28712,
+          "reactant_only_bond": 19
+        },
+        "component_count_histogram": {
+          "1": 38732,
+          "2": 1096,
+          "3": 171,
+          "4": 8,
+          "6": 1
+        },
+        "multi_center_count": 1276,
+        "no_center_count": 0,
+        "over_three_center_count": 9,
+        "reagent_field_nonempty_count": 0,
+        "status_counts": {
+          "ok": 40008
+        },
+        "valid_reaction_count": 40008,
+        "zero_map_product_reaction_count": 0,
+        "zero_map_reactant_reaction_count": 37194
+      },
+      "processed_reaction_block_count": 40003,
+      "processed_row_count": 800060,
+      "processed_source": "datasets/USPTO_50K_PtoR_aug20_#global#/train/src-train.txt",
+      "processed_source_sha256": "cfab7e1c4de4ff75940ef4017d7819efab52563055df182dc8a7f64fcca858a7",
+      "processed_status_counts": {
+        "ok": 40003
+      },
+      "processed_target": "datasets/USPTO_50K_PtoR_aug20_#global#/train/tgt-train.txt",
+      "processed_target_sha256": "d29ca3bf6b542d5a07d8ae1078338c92ccf5d35c10514b6181626d02c0923ee5",
+      "raw_csv": "datasets/USPTO_50K/raw_train.csv",
+      "raw_reaction_count": 40008,
+      "raw_sha256": "69661b12baa44d5a0be6cfc7698af8b518341fcb4427780c60358e0d9dcd8e7f"
+    },
+    "val": {
+      "cache": {
+        "crosswalk_path": "results/after_spe_stage1/cache/raw_to_processed_val.jsonl",
+        "crosswalk_sha256": "5ad61f4f7ce5589d3b64fbd7eb2b85d8a3e64db89a09daab55ecb41890b4a6c8",
+        "labels_path": "results/after_spe_stage1/cache/reaction_centers_val.jsonl",
+        "labels_sha256": "4eaf65ef7dc035040cc4eb520f5f97eb35853c68fcbc0093906e71bf0840e640",
+        "processed_keys_path": "results/after_spe_stage1/cache/processed_keys_val.jsonl",
+        "processed_keys_sha256": "5042402f5191ab2bac96b06fb349a1260e6a8336a09f33aa133e35bfd1b98d5e"
+      },
+      "crosswalk": {
+        "ambiguous_occurrence_match_count": 12,
+        "duplicate_key_count": 6,
+        "duplicate_keys": [
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              414,
+              1740
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              414,
+              1740
+            ],
+            "reaction_key_sha256": "3ed660c6fa88aeb7613a18fc08855c1849b121d8537585ba9df70ae71a7ea227"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              9,
+              11
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              9,
+              11
+            ],
+            "reaction_key_sha256": "ba76ff4b1e435fa02b083a3e95e208e0b5a3ecdaa799ed94df12af0253a5ffd7"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              3871,
+              3872
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              3871,
+              3872
+            ],
+            "reaction_key_sha256": "c7f910288ebf6f89e9e8a67c1f599799ccf5b10bfcd154f9e3e9445ca7d10acc"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              2556,
+              4553
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              2556,
+              4553
+            ],
+            "reaction_key_sha256": "ae9d560fd87b1480a0bd44ee84620259fd62029f1c7f2158784461825c51fb39"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              2226,
+              2278
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              2226,
+              2278
+            ],
+            "reaction_key_sha256": "810995d77af662dfec8535b5017caff2c8158b66e4139ac54dd37d4c0d0952dc"
+          },
+          {
+            "match_method": "exact_isomeric",
+            "processed_block_indices": [
+              1054,
+              2984
+            ],
+            "processed_count": 2,
+            "raw_count": 2,
+            "raw_indices": [
+              1054,
+              2984
+            ],
+            "reaction_key_sha256": "9b40fbb976f3184a0669cb7a51fe50c605fe0f916c60ced9489a13c3930cec28"
+          }
+        ],
+        "match_method_counts": {
+          "achiral_fallback": 50,
+          "exact_isomeric": 4951
+        },
+        "matched_count": 5001,
+        "processed_only": [],
+        "processed_only_count": 0,
+        "raw_only": [],
+        "raw_only_count": 0,
+        "unique_unambiguous_match_count": 4989
+      },
+      "labels": {
+        "atom_changed_field_counts": {
+          "aromatic": 409,
+          "chirality": 444,
+          "explicit_h": 5178,
+          "formal_charge": 303,
+          "total_h": 5178
+        },
+        "bond_kind_counts": {
+          "bond_property_change": 1576,
+          "product_only_bond": 3712,
+          "reactant_only_bond": 25
+        },
+        "center_type_counts": {
+          "atom_property_change": 4758,
+          "attachment": 4654,
+          "bond_property_change": 1013,
+          "product_only_bond": 3586,
+          "reactant_only_bond": 3
+        },
+        "component_count_histogram": {
+          "1": 4829,
+          "2": 151,
+          "3": 21
+        },
+        "multi_center_count": 172,
+        "no_center_count": 0,
+        "over_three_center_count": 0,
+        "reagent_field_nonempty_count": 0,
+        "status_counts": {
+          "ok": 5001
+        },
+        "valid_reaction_count": 5001,
+        "zero_map_product_reaction_count": 0,
+        "zero_map_reactant_reaction_count": 4653
+      },
+      "processed_reaction_block_count": 5001,
+      "processed_row_count": 100020,
+      "processed_source": "datasets/USPTO_50K_PtoR_aug20_#global#/val/src-val.txt",
+      "processed_source_sha256": "9341e28d721fc36a082979d550eeb85b81bd573c7140e0db3ca3006bc6fb8e69",
+      "processed_status_counts": {
+        "ok": 5001
+      },
+      "processed_target": "datasets/USPTO_50K_PtoR_aug20_#global#/val/tgt-val.txt",
+      "processed_target_sha256": "ff028080120d5c139be4aad3d4dfcc6558e5eb1a51f2168efcd1339e8e0de352",
+      "raw_csv": "datasets/USPTO_50K/raw_val.csv",
+      "raw_reaction_count": 5001,
+      "raw_sha256": "a52eb4cfd889820cf5172f65ac0e1ac124f3a36051674d5ca8bd63d037e149ee"
+    }
+  },
+  "workers": 8
+}

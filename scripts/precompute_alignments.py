@@ -13,6 +13,7 @@ Usage:
 import argparse
 import os
 from multiprocessing import Pool, cpu_count
+from itertools import zip_longest
 from typing import List, Tuple
 
 from tqdm import tqdm
@@ -104,7 +105,16 @@ def main():
 
         print(f"Reading {split} split...")
         with open(src_path) as f_src, open(tgt_path) as f_tgt:
-            lines = list(zip(f_src, f_tgt))
+            lines = []
+            for line_no, (src_line, tgt_line) in enumerate(
+                zip_longest(f_src, f_tgt), start=1,
+            ):
+                if src_line is None or tgt_line is None:
+                    raise ValueError(
+                        "source/target line-count mismatch at line "
+                        f"{line_no}: {src_path} vs {tgt_path}"
+                    )
+                lines.append((src_line, tgt_line))
 
         print(f"Aligning {len(lines):,} pairs...")
         with Pool(processes=num_workers) as pool:

@@ -1,0 +1,68 @@
+{
+  "augmentation": 20,
+  "augmentation_inferred_from": "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-mini-1001.txt",
+  "checkpoint": {
+    "mtime_ns": 1785470613084893869,
+    "path": "/root/autodl-tmp/edit_flows/checkpoint_step600000.pt",
+    "size_bytes": 162620771
+  },
+  "created_at_utc": "2026-08-04T08:48:35.416767+00:00",
+  "git": {
+    "commit": "a9500caee7fd0b3cf9416871f4a5042755746a6f",
+    "dirty": true
+  },
+  "input": {
+    "kind": "products_file",
+    "mtime_ns": 1785757005249073415,
+    "path": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-mini-1001.txt",
+    "product_count": 100,
+    "selection_end_product_exclusive": 100,
+    "selection_start_product": 0,
+    "sha256": "6650a97484fbd64e9fa0992050c4a7a6c1221f8007417318e2c3b0395397d27c",
+    "size_bytes": 1861347,
+    "source_product_count": 20020
+  },
+  "layout": "input-product-major, branch-rank-major, run-minor",
+  "model": {
+    "configured_use_origin_mask": false,
+    "effective_use_origin_mask": false
+  },
+  "output_beam_size": 10,
+  "output_line_count": 1000,
+  "output_sha256": "ef41a39e0c34b2202fcdc1f1adfcbce94bf7dee552bd9b8b11134b427ca96b36",
+  "product_count": 100,
+  "runtime": {
+    "batch_size": 64,
+    "device": "cuda",
+    "elapsed_seconds": 13.755960846785456,
+    "euler_beam_stats": {
+      "child_candidate_evaluations": 100000,
+      "final_branch_shortfall_outputs": 0,
+      "final_branch_shortfall_samples": 0,
+      "parent_branch_evaluations": 100000,
+      "steps": 200
+    },
+    "peak_cuda_allocated_bytes": 1259630592,
+    "peak_cuda_reserved_bytes": 16034824192
+  },
+  "sampler": "euler_beam",
+  "sampling": {
+    "changed_state_bonus": 0.0,
+    "child_policy": "stochastic",
+    "final_branches_per_run": 1,
+    "initial_seed_groups": null,
+    "matmul_precision": "high",
+    "n_branches": 1,
+    "n_children": 1,
+    "n_runs": 10,
+    "n_steps": 100,
+    "output_order": "branch-rank-major, run-minor",
+    "sample_scheduler": "cubic",
+    "score_mode": "full_probability",
+    "seed": 42,
+    "seed_applied_to_sampler": true,
+    "seed_scope": "stable product/run streams",
+    "train_scheduler": "cubic"
+  },
+  "schema_version": 1
+}

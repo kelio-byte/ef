@@ -1,0 +1,144 @@
+SPE / Atom-level 对比必填数据
+生成日期：2026-08-18 UTC
+数据目录：
+  Atom-level    datasets/USPTO_50K_PtoR_aug20_#global#
+  Fragment-level datasets/USPTO_50K_PtoR_aug20_#global#_SPE
+
+统计口径说明
+------------
+1. “序列长度”主字段使用训练集 source（product、模型输入）的空格分词长度；同时给出
+   target（reactants）长度，避免把两侧长度混在一起。
+2. P95 使用 nearest-rank 定义：排序后第 ceil(0.95*N) 个样本，因此至少 95% 样本
+   不超过该值。
+3. 编辑距离由 train_aligned_src/tgt 中的 INS/DEL/SUB 对齐列统计。归一化编辑距离
+   使用“每条样本的 distance / 该样本 raw target token 数”的平均值；同时给出 pooled
+   distance / pooled target-token 数作为交叉核对。
+4. Fragment 的“平均每 token 原子数”按对应 Atom-level token 数 / Fragment token 数
+   计算，不把 Cl、[C@H] 等多字符原子错误地拆成多个原子。
+
+一、序列长度统计（训练集）
+--------------------------
+
+1. Atom-level 训练集（source / product；必填主口径）
+   - 平均序列长度：45.573 tokens
+   - P95 序列长度：74 tokens
+   - 最大序列长度：160 tokens
+   - target / reactants 补充：mean=50.756，P95=82，max=164
+   - aligned length 补充：mean=50.809，P95=82，max=164
+
+2. Fragment-level 训练集（source / product；必填主口径）
+   - 平均序列长度：9.655 tokens
+   - P95 序列长度：16 tokens
+   - 最大序列长度：43 tokens
+   - target / reactants 补充：mean=12.034，P95=20，max=45
+   - aligned length 补充：mean=12.057，P95=20，max=45
+
+3. 序列长度分布形态
+   - [ ] 正态分布（集中在均值附近）
+   - [x] 长尾分布（少量特别长的样本）
+   - [ ] 双峰分布（有两类明显不同长度的样本）
+   依据：两种表示的最大值都明显高于均值；Atom source 为 160/45.573，Fragment
+   source 为 43/9.655，均表现为右长尾，而不是均匀集中在均值附近。
+
+二、Tokenizer 词表信息
+----------------------
+
+1. Atom tokenizer 词表大小（real vocab）：69
+   - model vocab（含 PAD/BOS/GAP/UNK）：73
+2. Fragment tokenizer 词表大小（real vocab）：3,035
+   - model vocab（含 PAD/BOS/GAP/UNK）：3,039
+3. Fragment 平均每个 token 包含的原子 token 数：约 4.441
+   - source：4.720；target：4.218；combined：4.441
+   - 若按 literal 字符数而非原子 token 数，combined 约 4.702 字符/token；正文采用
+     原子 token 数口径。
+4. 验证集上 Atom tokenizer 的 OOV 率：0.000416%（combined src+tgt token rate）
+   - src：0.000440%；tgt：0.000395%
+5. 验证集上 Fragment tokenizer 的 OOV 率：0.004465%（combined src+tgt token rate）
+   - src：0.005684%；tgt：0.003486%
+
+三、任务难度指标（编辑距离）
+----------------------------
+
+1. Atom-level 训练集
+   - 平均编辑距离（输入 → 目标）：5.741 edits/sample
+   - 归一化编辑距离（逐样本 distance / target length 后取平均）：0.117564
+     （11.7564%）
+   - pooled distance / pooled target tokens：0.113108（11.3108%）
+
+2. Fragment-level 训练集
+   - 平均编辑距离（输入 → 目标）：3.857 edits/sample
+   - 归一化编辑距离（逐样本 distance / target length 后取平均）：0.334855
+     （33.4855%）
+   - pooled distance / pooled target tokens：0.320495（32.0495%）
+
+补充：训练集共 800,060 对。Atom-level 总编辑操作数为 4,593,062；Fragment-level
+总编辑操作数为 3,085,643。Fragment 的绝对编辑步数减少，但因为 target 序列也大幅
+缩短，按目标长度归一化后比例反而更高；两者不能只看单一指标。
+
+四、硬件与训练环境
+------------------
+
+1. GPU 型号及数量：NVIDIA GeForce RTX 3090 × 1
+2. 单卡显存大小：24 GB（24,576 MiB）
+3. 是否使用梯度累积：[ ] 是 [x] 否
+   - 梯度累积步数：N/A；每个 DataLoader batch 直接完成一次 optimizer update
+4. Atom 训练时的每秒处理 Token 数（throughput，可选）：未记录（N/A）
+   - 现有 Atom checkpoint 没有保存训练吞吐日志；不要用 SPE 训练 throughput 或
+     推理 throughput 代替该字段。
+
+五、原始训练超参数（Atom-level 的完整配置）
+---------------------------------------------
+配置来源：configs/retro.yaml；训练入口：scripts/train_retro.py。
+
+【模型结构】
+- Encoder 层数：10（EditFlowsTransformer 的单一 Transformer stack）
+- Decoder 层数：N/A（本项目 Edit Flows 模型不是独立 Encoder-Decoder seq2seq）
+- d_model（隐藏层维度）：256
+- d_ff（FFN 中间维度）：2,048
+- num_heads（注意力头数）：8
+
+【优化器与学习率】
+- 优化器类型：[x] Adam [ ] AdamW
+- Adam betas：（0.9, 0.998）
+- Adam epsilon：1e-8
+- 峰值学习率（Peak LR）：6.987712e-4
+  （Noam factor=1.0、d_model=256、warmup=8,000；理论峰值在 warmup 末端）
+  - 说明：修复后的 `train_retro.py` 在每次 update 前设置该 Noam LR；历史旧训练路径的
+    第一次 optimizer update 曾误用 Adam 默认 `1e-3`，这不属于配置中的预期 peak LR。
+- Warm-up 步数：8,000
+- 学习率衰减策略：[ ] Cosine Decay [x] Inverse Sqrt [ ] Step Decay
+  [x] 其他：Noam（warmup 后按 inverse-square-root 衰减）
+- 如为 Step Decay，衰减边界及倍数：N/A
+
+【训练批次】
+- Batch Size（句子数/卡）：128
+- 最大序列长度（max_len，训练时 Padding 截断长度）：256
+- 是否使用动态 Batch（按 Token 数组装）：[ ] 是 [x] 否
+  （固定句子数 batch；DataLoader 使用 drop_last=True）
+
+【正则化】
+- Dropout（统一或分别说明）：
+  - Embedding Dropout：0.0 / 未单独使用 token-embedding dropout
+  - Attention Dropout：0.3
+  - FFN Dropout：0.3
+  - 其他 Dropout：0.3（Transformer residual/FFN 输出路径使用同一 dropout 配置）
+- Label Smoothing 系数：0.0 / 未使用
+- Weight Decay：0.0（Adam 未设置 weight_decay）
+- Gradient Clipping 阈值（max_grad_norm）：0.0（关闭）
+
+【训练步数】
+- 总训练 Steps：600,000
+
+【数据规模】
+- 训练集样本总数（句子对数量）：800,060（40,003 reaction blocks × 20 augmentation）
+- 验证集样本总数：100,020（5,001 reaction blocks × 20 augmentation）
+- 训练过程中是否使用了数据增强：[x] 是 [ ] 否
+  - 方法：使用 USPTO-50K 的 augmentation=20 数据分支；每个 reaction block 保留
+    20 条 source/target 表示，训练 loader 在句子对级别读取这些展开后的样本。
+
+复现与交叉核对文件
+------------------
+- Atom 配置：configs/retro.yaml
+- Fragment 配置：configs/retro_spe_600k.yaml
+- Fragment 统计：datasets/USPTO_50K_PtoR_aug20_#global#_SPE/spe_statistics.json
+- 统计脚本：scripts/preprocessing/spe_stats.py

@@ -1,0 +1,68 @@
+{
+  "augmentation": 20,
+  "augmentation_inferred_from": "datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt",
+  "checkpoint": {
+    "mtime_ns": 1785470613084893869,
+    "path": "/root/autodl-tmp/edit_flows/checkpoint_step600000.pt",
+    "size_bytes": 162620771
+  },
+  "created_at_utc": "2026-08-03T09:53:25.855737+00:00",
+  "git": {
+    "commit": "d2e6de138a671f43b73c7bf5e71017ba3f83cc18",
+    "dirty": true
+  },
+  "input": {
+    "kind": "products_file",
+    "mtime_ns": 1785315787769836476,
+    "path": "/root/autodl-tmp/edit_flows/datasets/USPTO_50K_PtoR_aug20_#global#/test/src-test-tiny.txt",
+    "product_count": 20,
+    "selection_end_product_exclusive": 20,
+    "selection_start_product": 0,
+    "sha256": "128d6c4a7f61848f3c3f163034898d12e1ab13c892880fae7716b8f7ffb61361",
+    "size_bytes": 88098,
+    "source_product_count": 1000
+  },
+  "layout": "input-product-major, branch-rank-major, run-minor",
+  "model": {
+    "configured_use_origin_mask": false,
+    "effective_use_origin_mask": false
+  },
+  "output_beam_size": 9,
+  "output_line_count": 180,
+  "output_sha256": "1711a4155e533cad6684449f24641951f306a7e36e17eb93570561bb9d2f1759",
+  "product_count": 20,
+  "runtime": {
+    "batch_size": 20,
+    "device": "cuda",
+    "elapsed_seconds": 0.7426257040351629,
+    "euler_beam_stats": {
+      "child_candidate_evaluations": 484,
+      "final_branch_shortfall_outputs": 61,
+      "final_branch_shortfall_samples": 58,
+      "parent_branch_evaluations": 242,
+      "steps": 2
+    },
+    "peak_cuda_allocated_bytes": 365583872,
+    "peak_cuda_reserved_bytes": 492830720
+  },
+  "sampler": "euler_beam",
+  "sampling": {
+    "changed_state_bonus": 0.5,
+    "child_policy": "stochastic_noop",
+    "final_branches_per_run": 3,
+    "initial_seed_groups": null,
+    "matmul_precision": "high",
+    "n_branches": 3,
+    "n_children": 2,
+    "n_runs": 3,
+    "n_steps": 2,
+    "output_order": "branch-rank-major, run-minor",
+    "sample_scheduler": "cubic",
+    "score_mode": "full_probability",
+    "seed": 42,
+    "seed_applied_to_sampler": true,
+    "seed_scope": "stable product/run streams",
+    "train_scheduler": "cubic"
+  },
+  "schema_version": 1
+}

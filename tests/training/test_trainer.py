@@ -5,7 +5,7 @@ from edit_flows.core.alignment import identity_align_xs_to_zs, opt_align_xs_to_z
 from edit_flows.core.coupling import EmptyCoupling, UniformCoupling
 from edit_flows.core.scheduler import CubicScheduler, LinearScheduler
 from edit_flows.models.transformer import EditFlowsTransformer
-from edit_flows.training.trainer import prepare_batch, train_step
+from edit_flows.training.trainer import prepare_batch, train_step, evaluate_step
 from edit_flows.utils.tokens import BOS_TOKEN, PAD_TOKEN
 
 
@@ -103,6 +103,30 @@ class TestPrepareBatchOriginMask:
 
 
 class TestTrainStep:
+    def test_evaluate_step_has_same_diagnostics_without_update(self, dummy_model):
+        x_1 = torch.tensor([
+            [BOS_TOKEN, 3, 4, 5, PAD_TOKEN],
+            [BOS_TOKEN, 6, 7, PAD_TOKEN, PAD_TOKEN],
+        ])
+        x_0, x_1 = EmptyCoupling().sample(x_1)
+        scheduler = CubicScheduler()
+        batch = prepare_batch(
+            x_0, x_1, scheduler,
+            align_fn=opt_align_xs_to_zs,
+            model_vocab_size=dummy_model.vocab_size,
+        )
+        before = {
+            key: value.detach().clone()
+            for key, value in dummy_model.state_dict().items()
+        }
+
+        metrics = evaluate_step(dummy_model, batch, scheduler)
+
+        assert all(torch.equal(before[key], value) for key, value in dummy_model.state_dict().items())
+        for key in ["loss", "lambda_total", "lambda_ins", "lambda_del", "lambda_sub"]:
+            assert key in metrics
+            assert isinstance(metrics[key], float)
+
     def test_loss_decreases(self, dummy_model):
         x_1 = torch.tensor([
             [BOS_TOKEN, 3, 4, 5, 6, PAD_TOKEN],
