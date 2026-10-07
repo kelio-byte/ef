@@ -1,5 +1,7 @@
 import math
+from contextlib import contextmanager
 from collections.abc import Sequence
+from typing import Callable, Iterator
 
 import torch
 import torch.nn as nn
@@ -116,8 +118,28 @@ class PreNormCrossAttentionLayer(nn.Module):
         state: Tensor,
         memory: Tensor,
         memory_key_padding_mask: Tensor | None = None,
-    ) -> Tensor:
+        return_attention: bool = False,
+    ) -> Tensor | tuple[Tensor, Tensor]:
+        """Fuse static memory into the state sequence.
+
+        ``return_attention`` is a diagnostic-only switch.  When enabled, the
+        returned weights have shape ``[batch, heads, state_length,
+        memory_length]`` and are the post-softmax probabilities used by the
+        multi-head attention operation.  The normal path intentionally keeps
+        the original ``MultiheadAttention`` call unchanged.
+        """
         normalized_memory = self.memory_norm(memory)
+        if return_attention:
+            attended, attention_weights = self.cross_attn(
+                self.state_norm(state),
+                normalized_memory,
+                normalized_memory,
+                key_padding_mask=memory_key_padding_mask,
+                need_weights=True,
+                average_attn_weights=False,
+            )
+            return state + self.dropout(attended), attention_weights
+
         attended = self.cross_attn(
             self.state_norm(state),
             normalized_memory,
@@ -169,6 +191,7 @@ class EditFlowsTransformer(nn.Module):
         self.max_seq_len = max_seq_len
         self.pos_encoding_scale = pos_encoding_scale
         self.use_product_memory = bool(use_product_memory)
+        self._product_memory_attention_callback: Callable[..., None] | None = None
 
         self.token_embedding = nn.Embedding(vocab_size, hidden_dim)
         self.time_embedding = nn.Sequential(
@@ -275,6 +298,41 @@ class EditFlowsTransformer(nn.Module):
             nn.Linear(hidden_dim, vocab_size),
         )
         self._init_weights()
+
+    @contextmanager
+    def capture_product_memory_attention(
+        self,
+        callback: Callable[..., None],
+    ) -> Iterator["EditFlowsTransformer"]:
+        """Temporarily expose per-head product-memory attention weights.
+
+        The callback is called once per configured fusion layer and model
+        forward with keyword arguments ``layer_index``, ``attention_weights``,
+        ``state_tokens``, ``time_step``, ``state_padding_mask`` and
+        ``product_memory_padding_mask``.  ``attention_weights`` has shape
+        ``[batch, heads, query_length, memory_length]`` and contains
+        post-softmax probabilities.  The tensors are live model tensors, so a
+        diagnostic callback that retains them should detach and move them to
+        CPU itself.
+
+        This context is intended for single-process inference diagnostics.  A
+        normal training or sampling call does not enter this context and uses
+        the exact pre-existing forward path.
+        """
+        if not self.use_product_memory:
+            raise RuntimeError(
+                "capture_product_memory_attention requires "
+                "use_product_memory=True"
+            )
+        if not callable(callback):
+            raise TypeError("callback must be callable")
+
+        previous_callback = self._product_memory_attention_callback
+        self._product_memory_attention_callback = callback
+        try:
+            yield self
+        finally:
+            self._product_memory_attention_callback = previous_callback
 
     def _init_weights(self):
         for module in self.modules():
@@ -435,14 +493,32 @@ class EditFlowsTransformer(nn.Module):
             product_memory.transpose(0, 1)
             if product_memory is not None else None
         )
+        attention_callback = self._product_memory_attention_callback
         for layer_index, layer in enumerate(self.layers, start=1):
             x = layer(x, src_key_padding_mask=padding_mask)
             if layer_index in self.product_memory_fusion_after_layers:
-                x = self.product_memory_fusion_layers[str(layer_index)](
-                    x,
-                    product_memory_t,
-                    memory_key_padding_mask=product_memory_padding_mask,
-                )
+                fusion_layer = self.product_memory_fusion_layers[str(layer_index)]
+                if attention_callback is None:
+                    x = fusion_layer(
+                        x,
+                        product_memory_t,
+                        memory_key_padding_mask=product_memory_padding_mask,
+                    )
+                else:
+                    x, attention_weights = fusion_layer(
+                        x,
+                        product_memory_t,
+                        memory_key_padding_mask=product_memory_padding_mask,
+                        return_attention=True,
+                    )
+                    attention_callback(
+                        layer_index=layer_index,
+                        attention_weights=attention_weights,
+                        state_tokens=tokens,
+                        time_step=time_step,
+                        state_padding_mask=padding_mask,
+                        product_memory_padding_mask=product_memory_padding_mask,
+                    )
 
         x = x.transpose(0, 1)
         x = self.final_layer_norm(x)

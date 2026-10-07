@@ -277,6 +277,99 @@ class _StochasticModel(torch.nn.Module):
         )
 
 
+def test_temporal_reuse_skips_unchanged_state_and_refreshes_after_an_edit():
+    class CountingModel(_StochasticModel):
+        def __init__(self):
+            super().__init__()
+            self.forward_rows = []
+
+        def forward(self, tokens, time_step, padding_mask, origin_mask=None):
+            self.forward_rows.append(int(tokens.shape[0]))
+            rates, ins, sub = super().forward(
+                tokens, time_step, padding_mask, origin_mask,
+            )
+            # One certain first substitution, then no legal state change.
+            rates.fill_(-30.0)
+            rates[:, 1, 1] = 20.0
+            sub.fill_(-1e9)
+            sub[:, :, 9] = 0.0
+            return rates, ins, sub
+
+    x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+    common = dict(
+        n_branches=1, n_children=2, n_steps=4, max_seq_len=8,
+        score_mode="full_probability", changed_state_bonus=0.5,
+        child_policy="stochastic_noop", base_seed=42,
+    )
+    baseline_model = CountingModel()
+    baseline = sample_euler_beam(
+        baseline_model, x_0, LinearScheduler(), **common,
+    )
+    cached_model = CountingModel()
+    stats = {}
+    cached = sample_euler_beam(
+        cached_model, x_0, LinearScheduler(),
+        temporal_reuse_max_age=1, sampling_stats=stats, **common,
+    )
+
+    assert torch.equal(cached, baseline)
+    assert baseline_model.forward_rows == [1, 1, 1, 1]
+    assert cached_model.forward_rows == [1, 1, 1]
+    assert stats["temporal_refreshed_parent_rows"] == 3
+    assert stats["temporal_reused_parent_rows"] == 1
+
+
+def test_temporal_reuse_and_exact_sharing_compose_without_changing_samples():
+    x_0 = torch.tensor([[BOS_TOKEN, 4, 5, PAD_TOKEN]]).repeat(9, 1)
+    common = dict(
+        n_branches=1, n_children=2, n_steps=6, max_seq_len=12,
+        score_mode="full_probability", changed_state_bonus=0.5,
+        child_policy="stochastic_noop", base_seed=42,
+        profile_sample_group_size=9, temporal_reuse_max_age=1,
+    )
+    temporal_stats = {}
+    temporal = sample_euler_beam(
+        _StochasticModel(), x_0, LinearScheduler(),
+        sampling_stats=temporal_stats, **common,
+    )
+    combined_stats = {}
+    combined = sample_euler_beam(
+        _StochasticModel(), x_0, LinearScheduler(),
+        share_identical_forwards=True,
+        sampling_stats=combined_stats, **common,
+    )
+    assert torch.equal(combined, temporal)
+    assert combined_stats["temporal_reused_parent_rows"] == (
+        temporal_stats["temporal_reused_parent_rows"]
+    )
+    assert combined_stats["shared_model_parent_rows"] > 0
+    assert combined_stats["model_forward_parent_rows"] < (
+        temporal_stats["model_forward_parent_rows"]
+    )
+
+
+def test_temporal_reuse_time_window_forces_exact_endpoint_forwards():
+    class NoEditModel(_StochasticModel):
+        def forward(self, tokens, time_step, padding_mask, origin_mask=None):
+            rates, ins, sub = super().forward(
+                tokens, time_step, padding_mask, origin_mask,
+            )
+            return rates.fill_(-30.0), ins, sub
+
+    x_0 = torch.tensor([[BOS_TOKEN, 4, PAD_TOKEN]])
+    stats = {}
+    sample_euler_beam(
+        NoEditModel(), x_0, LinearScheduler(),
+        n_branches=1, n_children=2, n_steps=4, max_seq_len=8,
+        temporal_reuse_max_age=1,
+        temporal_reuse_t_min=0.25,
+        temporal_reuse_t_max=0.75,
+        sampling_stats=stats,
+    )
+    assert stats["model_forward_parent_rows"] == 3
+    assert stats["temporal_reused_parent_rows"] == 1
+
+
 def test_beam_center_bias_reweights_only_legal_positions_and_preserves_hazard():
     x_t = torch.tensor([[BOS_TOKEN, 4, 5, PAD_TOKEN]])
     log_rates = torch.zeros(1, 4, 3)

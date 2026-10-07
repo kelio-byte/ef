@@ -343,6 +343,7 @@ def _is_frozen_r9k1m2(args) -> bool:
         and args.euler_beam_q_temperature == 1.0
         and not args.euler_beam_first_edit_diversity
         and not args.euler_beam_share_identical_forwards
+        and getattr(args, "euler_beam_temporal_reuse_max_age", 0) == 0
         and args.euler_beam_initial_seed_groups is None
     )
 
@@ -481,6 +482,14 @@ def _build_sampling_metadata(
                 else "stable product/run streams"
             ),
         })
+        if getattr(args, "euler_beam_temporal_reuse_max_age", 0):
+            sampling["temporal_reuse_max_age"] = (
+                args.euler_beam_temporal_reuse_max_age
+            )
+            t_min = getattr(args, "euler_beam_temporal_reuse_t_min", 0.0)
+            t_max = getattr(args, "euler_beam_temporal_reuse_t_max", 1.0)
+            if t_min != 0.0 or t_max != 1.0:
+                sampling["temporal_reuse_time_window"] = [t_min, t_max]
     elif args.sampler == "structured_diversification":
         sampling.update({
             "n_trajectories": args.structured_n_trajectories,
@@ -816,6 +825,21 @@ def main():
             "inside each product's protected run group"
         ),
     )
+    parser.add_argument(
+        "--euler_beam_temporal_reuse_max_age",
+        type=int,
+        default=0,
+        help=(
+            "Experimental: reuse the last exact model output for an unchanged "
+            "branch state for at most this many Euler steps (0 disables)"
+        ),
+    )
+    parser.add_argument(
+        "--euler_beam_temporal_reuse_t_min", type=float, default=0.0,
+    )
+    parser.add_argument(
+        "--euler_beam_temporal_reuse_t_max", type=float, default=1.0,
+    )
     parser.add_argument("--beam_size", type=int, default=5,
                         help="Beam size for beam_edit sampler")
     parser.add_argument("--max_edits", type=int, default=20,
@@ -847,6 +871,27 @@ def main():
 
     if args.euler_beam_profile and args.sampler != "euler_beam":
         raise ValueError("euler_beam_profile requires --sampler euler_beam")
+    if args.euler_beam_temporal_reuse_max_age < 0:
+        raise ValueError("euler_beam_temporal_reuse_max_age must be >= 0")
+    if args.euler_beam_temporal_reuse_max_age and args.sampler != "euler_beam":
+        raise ValueError(
+            "euler_beam_temporal_reuse_max_age requires --sampler euler_beam"
+        )
+    if not (
+        0.0 <= args.euler_beam_temporal_reuse_t_min
+        < args.euler_beam_temporal_reuse_t_max <= 1.0
+    ):
+        raise ValueError("temporal reuse time window is invalid")
+    if (
+        args.euler_beam_temporal_reuse_max_age == 0
+        and (
+            args.euler_beam_temporal_reuse_t_min != 0.0
+            or args.euler_beam_temporal_reuse_t_max != 1.0
+        )
+    ):
+        raise ValueError(
+            "temporal reuse time window requires a positive max age"
+        )
     if (
         args.euler_beam_first_edit_diversity
         and args.sampler != "euler_beam"
@@ -967,9 +1012,9 @@ def main():
     # the complete checkpoint object.  Keep a fallback for older PyTorch
     # versions where the ``weights_only`` keyword is unavailable.
     try:
-        ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
+        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     except TypeError:
-        ckpt = torch.load(args.checkpoint, map_location=device)
+        ckpt = torch.load(args.checkpoint, map_location="cpu")
     cfg = ckpt["config"]
     model_vocab = ckpt.get("model_vocab")
 
@@ -983,6 +1028,11 @@ def main():
     token2id, _ = load_vocab(vocab_path)
     if model_vocab is None:
         model_vocab = len(token2id)
+    if model_vocab != len(token2id):
+        raise ValueError(
+            f"Checkpoint vocabulary size {model_vocab} does not match "
+            f"{vocab_path}: {len(token2id)} tokens"
+        )
 
     id2token = {v: k for k, v in token2id.items()}
 
@@ -1037,6 +1087,9 @@ def main():
         ),
     ).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
+    # Inference needs only model parameters. Do not retain Adam/RNG tensors
+    # from the training checkpoint or transfer them to the GPU.
+    del ckpt
     model.eval()
     guidance_model = None
     if args.guidance_checkpoint:
@@ -1331,6 +1384,15 @@ def main():
                     profile_sample_group_size=args.n_runs,
                     share_identical_forwards=(
                         args.euler_beam_share_identical_forwards
+                    ),
+                    temporal_reuse_max_age=(
+                        args.euler_beam_temporal_reuse_max_age
+                    ),
+                    temporal_reuse_t_min=(
+                        args.euler_beam_temporal_reuse_t_min
+                    ),
+                    temporal_reuse_t_max=(
+                        args.euler_beam_temporal_reuse_t_max
                     ),
                     initial_branch_seeds=initial_branch_seeds,
                     sampling_stats=euler_beam_stats,

@@ -237,6 +237,31 @@ def test_sampling_metadata_records_effective_euler_beam_configuration(
     assert metadata["runtime"]["peak_cuda_reserved_bytes"] == 2048
 
 
+def test_sampling_metadata_records_enabled_temporal_reuse(tmp_path):
+    args = _euler_beam_args(tmp_path)
+    args.euler_beam_temporal_reuse_max_age = 1
+    args.euler_beam_temporal_reuse_t_min = 0.2
+    args.euler_beam_temporal_reuse_t_max = 0.8
+    prediction_path = tmp_path / "predictions.txt"
+    prediction_path.write_text("A\n")
+    metadata = _build_sampling_metadata(
+        args,
+        {"data_dir": "datasets/USPTO_aug20_global"},
+        prediction_path=str(prediction_path),
+        source_product_count=100,
+        selection_start_product=0,
+        product_count=1,
+        output_line_count=1,
+        n_sampling_steps=100,
+        sample_scheduler_name="cubic",
+        train_scheduler_name="cubic",
+        use_origin_mask=False,
+        elapsed_seconds=1.0,
+    )
+    assert metadata["sampling"]["temporal_reuse_max_age"] == 1
+    assert metadata["sampling"]["temporal_reuse_time_window"] == [0.2, 0.8]
+
+
 def test_euler_beam_output_count_includes_all_final_branches(tmp_path):
     args = _euler_beam_args(tmp_path)
     args.n_runs = 1

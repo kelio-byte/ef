@@ -4,12 +4,18 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
 import torch
 
 from edit_flows.models.transformer import EditFlowsTransformer
 
 
-def test_sample_retro_loads_and_runs_a_product_memory_checkpoint(tmp_path):
+@pytest.mark.parametrize("device", [
+    "cpu",
+    pytest.param("cuda", marks=pytest.mark.skipif(
+        not torch.cuda.is_available(), reason="CUDA is unavailable")),
+])
+def test_sample_retro_loads_and_runs_a_product_memory_checkpoint(tmp_path, device):
     """Exercise the public sampling CLI, including its per-product cache."""
     repo_root = Path(__file__).resolve().parents[1]
     data_dir = tmp_path / "data"
@@ -70,7 +76,7 @@ def test_sample_retro_loads_and_runs_a_product_memory_checkpoint(tmp_path):
             "--n_samples", "2",
             "--n_steps", "2",
             "--batch_size", "1",
-            "--device", "cpu",
+            "--device", device,
             "--seed", "42",
         ],
         cwd=repo_root,
@@ -78,6 +84,7 @@ def test_sample_retro_loads_and_runs_a_product_memory_checkpoint(tmp_path):
         check=True,
         capture_output=True,
         text=True,
+        timeout=90,
     )
     assert "Done. Total predictions: 2" in completed.stdout
     assert len((output_dir / "predictions.txt").read_text().splitlines()) == 2
@@ -115,7 +122,7 @@ def test_sample_retro_loads_and_runs_a_product_memory_checkpoint(tmp_path):
             "--euler_beam_child_policy", "stochastic_noop",
             "--n_steps", "2",
             "--batch_size", "1",
-            "--device", "cpu",
+            "--device", device,
             "--seed", "42",
         ],
         cwd=repo_root,
@@ -123,6 +130,7 @@ def test_sample_retro_loads_and_runs_a_product_memory_checkpoint(tmp_path):
         check=True,
         capture_output=True,
         text=True,
+        timeout=90,
     )
     assert "Done. Total predictions: 2" in beam_completed.stdout
     assert len((beam_output_dir / "predictions.txt").read_text().splitlines()) == 2

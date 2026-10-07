@@ -17,6 +17,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
 from torch import Tensor
+from torch.nn.functional import pad as tensor_pad
 
 from edit_flows.core.rate_scale import apply_rate_parameterization, get_rate_scale
 from edit_flows.core.scheduler import KappaScheduler
@@ -913,11 +914,12 @@ def _record_protected_parent_profile(
 def _shared_forward_row_map(
     flat: List[Tuple[int, int, _BranchState]],
     sample_group_size: int,
+    context_ids: Optional[List[int]] = None,
 ) -> Tuple[List[int], List[int]]:
     """Map logical lineages to one deterministic forward per exact state."""
     unique_rows: List[int] = []
     inverse_rows: List[int] = []
-    seen: Dict[Tuple[int, float, Tuple[int, ...]], int] = {}
+    seen: Dict[Tuple[int, float, Tuple[int, ...], Optional[int]], int] = {}
     for row, (sample_index, _, branch) in enumerate(flat):
         if branch.state_key is None:
             raise RuntimeError(
@@ -927,6 +929,7 @@ def _shared_forward_row_map(
             sample_index // sample_group_size,
             branch.t,
             branch.state_key,
+            context_ids[sample_index] if context_ids is not None else None,
         )
         unique_position = seen.get(signature)
         if unique_position is None:
@@ -935,6 +938,16 @@ def _shared_forward_row_map(
             unique_rows.append(row)
         inverse_rows.append(unique_position)
     return unique_rows, inverse_rows
+
+
+def _align_temporal_cache_width(cached: Tensor, width: int) -> Tensor:
+    """Align cached logits to the current padded batch width."""
+    delta = width - cached.shape[1]
+    if delta > 0:
+        return tensor_pad(cached, (0, 0, 0, delta), value=-1e9)
+    if delta < 0:
+        return cached[:, :width]
+    return cached
 
 
 # ---------------------------------------------------------------------------
@@ -972,6 +985,9 @@ def sample_euler_beam(
     profile: Optional[Dict[str, object]] = None,
     profile_sample_group_size: int = 1,
     share_identical_forwards: bool = False,
+    temporal_reuse_max_age: int = 0,
+    temporal_reuse_t_min: float = 0.0,
+    temporal_reuse_t_max: float = 1.0,
     q_temperature: float = 1.0,
     first_edit_diversity: bool = False,
     initial_branch_seeds: Optional[List[List[int]]] = None,
@@ -1001,8 +1017,13 @@ def sample_euler_beam(
         profile_sample_group_size: 仅用于显式profile；相邻多少个sample
             属于同一product的受保护lineage组。启用首步多样性且
             n_branches=1时，该组也是跨独立run分配首步的范围。
-        share_identical_forwards: 对同一product内相同时间、相同token状态
-            只执行一次确定性模型前向，再映射回独立seed lineage。
+        share_identical_forwards: 对同一product组内相同时间、相同token状态
+            且静态product context相同的行只执行一次确定性模型前向，
+            再映射回独立seed lineage。
+        temporal_reuse_max_age: 实验性跨时间前向复用。仅当状态未变时，
+            最多复用此前真实前向输出这么多个时间步；0 禁用。
+        temporal_reuse_t_min/max: 允许跨时间复用的半开时间窗口。
+            窗口外仍可执行同时间精确状态共享。
         q_temperature: 对insert/substitute token posterior应用的采样温度；
             1.0保持checkpoint原始分布。
         first_edit_diversity: 在多后继模式下，首次真实状态变化时优先保留
@@ -1037,6 +1058,23 @@ def sample_euler_beam(
         raise ValueError(f"n_children must be >= 1, got {n_children}")
     if n_steps < 1:
         raise ValueError(f"n_steps must be >= 1, got {n_steps}")
+    if temporal_reuse_max_age < 0:
+        raise ValueError("temporal_reuse_max_age must be >= 0")
+    if not (
+        math.isfinite(temporal_reuse_t_min)
+        and math.isfinite(temporal_reuse_t_max)
+        and 0.0 <= temporal_reuse_t_min < temporal_reuse_t_max <= 1.0
+    ):
+        raise ValueError(
+            "temporal reuse window must satisfy 0 <= t_min < t_max <= 1"
+        )
+    if temporal_reuse_max_age and (
+        n_branches != 1 or first_edit_diversity
+    ):
+        raise ValueError(
+            "temporal reuse currently requires n_branches=1, without "
+            "first_edit_diversity"
+        )
     if not math.isfinite(q_temperature) or q_temperature <= 0:
         raise ValueError(
             f"q_temperature must be finite and > 0, got {q_temperature}"
@@ -1156,6 +1194,38 @@ def sample_euler_beam(
             )
     default_h = 1.0 / n_steps
     origin_keys = _token_keys_batch(x_0, pad_token, bos_token)
+    shared_context_ids = None
+    if share_identical_forwards and product_memory is not None:
+        # A model forward also depends on its immutable product context.  Rows
+        # with the same current edit state may share only when their original
+        # input and supplied memory are identical.  The CLI repeats one memory
+        # row for each run; external callers may supply different contexts.
+        representatives: Dict[Tuple[int, Tuple[int, ...]], int] = {}
+        reference_rows = []
+        for row, origin_key in enumerate(origin_keys):
+            signature = (row // profile_sample_group_size, origin_key)
+            reference_rows.append(
+                representatives.setdefault(signature, row)
+            )
+        reference_indices = torch.tensor(
+            reference_rows, dtype=torch.long, device=device,
+        )
+        matching_memory = (
+            product_memory == product_memory.index_select(
+                0, reference_indices,
+            )
+        ).flatten(1).all(dim=1)
+        matching_mask = (
+            product_memory_padding_mask
+            == product_memory_padding_mask.index_select(
+                0, reference_indices,
+            )
+        ).flatten(1).all(dim=1)
+        matching_context = (matching_memory & matching_mask).cpu().tolist()
+        shared_context_ids = [
+            reference_rows[row] if matching_context[row] else row
+            for row in range(B)
+        ]
     noop_step = min(n_steps - 1, int(0.9 * n_steps))
 
     if first_event_position_scores is not None:
@@ -1271,6 +1341,10 @@ def sample_euler_beam(
             ))
         all_branches.append(branches)
 
+    temporal_cached_outputs: Optional[Tuple[Tensor, Tensor, Tensor]] = None
+    temporal_cached_keys: List[Optional[Tuple[int, ...]]] = [None] * B
+    temporal_last_exact_steps = [-1] * B
+
     # ── 主循环: n_steps 步 Euler 推进 ──
     for step in range(n_steps):
         section_started = _profile_start(profile, device)
@@ -1327,22 +1401,62 @@ def sample_euler_beam(
         parent_sample_indices = torch.tensor(
             [b for b, _, _ in flat], dtype=torch.long, device=device,
         )
-        parent_product_memory = None
-        parent_product_memory_padding_mask = None
-        if product_memory is not None:
-            parent_product_memory = product_memory.index_select(
-                0, parent_sample_indices,
-            )
-            parent_product_memory_padding_mask = (
-                product_memory_padding_mask.index_select(
-                    0, parent_sample_indices,
-                )
-            )
-
         inverse_forward_indices = None
-        if share_identical_forwards:
+        temporal_refresh_rows: Optional[List[int]] = None
+        temporal_refresh_indices = None
+        temporal_inverse_refresh_indices = None
+        if temporal_reuse_max_age:
+            if N != B:
+                raise RuntimeError(
+                    "temporal reuse requires one active branch per input"
+                )
+            temporal_refresh_rows = [
+                row for row, (_, _, branch) in enumerate(flat)
+                if not (
+                    temporal_reuse_t_min <= branch.t
+                    < temporal_reuse_t_max
+                )
+                or branch.state_key != temporal_cached_keys[row]
+                or step - temporal_last_exact_steps[row]
+                > temporal_reuse_max_age
+            ]
+            temporal_refresh_indices = torch.tensor(
+                temporal_refresh_rows, dtype=torch.long, device=device,
+            )
+            physical_rows = temporal_refresh_rows
+            if share_identical_forwards and temporal_refresh_rows:
+                unique_refresh_rows, inverse_refresh_rows = (
+                    _shared_forward_row_map(
+                        [flat[row] for row in temporal_refresh_rows],
+                        profile_sample_group_size,
+                        shared_context_ids,
+                    )
+                )
+                physical_rows = [
+                    temporal_refresh_rows[row]
+                    for row in unique_refresh_rows
+                ]
+                temporal_inverse_refresh_indices = torch.tensor(
+                    inverse_refresh_rows, dtype=torch.long, device=device,
+                )
+            unique_indices = torch.tensor(
+                physical_rows, dtype=torch.long, device=device,
+            )
+            x_model = x_batch.index_select(0, unique_indices)
+            t_model_input = t_vals.index_select(0, unique_indices)
+            for stats in (profile, sampling_stats):
+                if stats is not None:
+                    stats["temporal_reused_parent_rows"] = (
+                        int(stats.get("temporal_reused_parent_rows", 0))
+                        + N - len(temporal_refresh_rows)
+                    )
+                    stats["temporal_refreshed_parent_rows"] = (
+                        int(stats.get("temporal_refreshed_parent_rows", 0))
+                        + len(temporal_refresh_rows)
+                    )
+        elif share_identical_forwards:
             unique_rows, inverse_rows = _shared_forward_row_map(
-                flat, profile_sample_group_size,
+                flat, profile_sample_group_size, shared_context_ids,
             )
             unique_indices = torch.tensor(
                 unique_rows, dtype=torch.long, device=device,
@@ -1352,25 +1466,26 @@ def sample_euler_beam(
             )
             x_model = x_batch.index_select(0, unique_indices)
             t_model_input = t_vals.index_select(0, unique_indices)
-            if parent_product_memory is not None:
-                product_memory_model = parent_product_memory.index_select(
-                    0, unique_indices,
-                )
-                product_memory_padding_mask_model = (
-                    parent_product_memory_padding_mask.index_select(
-                        0, unique_indices,
-                    )
-                )
-            else:
-                product_memory_model = None
-                product_memory_padding_mask_model = None
         else:
             x_model = x_batch
             t_model_input = t_vals
-            product_memory_model = parent_product_memory
-            product_memory_padding_mask_model = (
-                parent_product_memory_padding_mask
+            unique_indices = None
+        if product_memory is not None:
+            model_sample_indices = (
+                parent_sample_indices.index_select(0, unique_indices)
+                if unique_indices is not None else parent_sample_indices
             )
+            product_memory_model = product_memory.index_select(
+                0, model_sample_indices,
+            )
+            product_memory_padding_mask_model = (
+                product_memory_padding_mask.index_select(
+                    0, model_sample_indices,
+                )
+            )
+        else:
+            product_memory_model = None
+            product_memory_padding_mask_model = None
         physical_forward_rows = x_model.shape[0]
         for stats in (profile, sampling_stats):
             if stats is not None:
@@ -1378,33 +1493,145 @@ def sample_euler_beam(
                     int(stats.get("model_forward_parent_rows", 0))
                     + physical_forward_rows
                 )
-                stats["shared_model_parent_rows"] = (
-                    int(stats.get("shared_model_parent_rows", 0))
-                    + N - physical_forward_rows
-                )
+                if temporal_refresh_rows is None:
+                    stats["shared_model_parent_rows"] = (
+                        int(stats.get("shared_model_parent_rows", 0))
+                        + N - physical_forward_rows
+                    )
+                else:
+                    stats["shared_model_parent_rows"] = (
+                        int(stats.get("shared_model_parent_rows", 0))
+                        + len(temporal_refresh_rows) - physical_forward_rows
+                    )
 
-        x_pad_mask = x_model == pad_token
-        t_model = _compute_model_time(
-            t_model_input, scheduler, time_input, train_scheduler,
-        )
-        log_rates, log_ins_probs, log_sub_probs = _forward_edit_model(
-            model,
-            x_model,
-            t_model,
-            x_pad_mask,
-            product_memory=product_memory_model,
-            product_memory_padding_mask=product_memory_padding_mask_model,
-        )
+        if physical_forward_rows:
+            x_pad_mask = x_model == pad_token
+            t_model = _compute_model_time(
+                t_model_input, scheduler, time_input, train_scheduler,
+            )
+            log_rates, log_ins_probs, log_sub_probs = _forward_edit_model(
+                model,
+                x_model,
+                t_model,
+                x_pad_mask,
+                product_memory=product_memory_model,
+                product_memory_padding_mask=product_memory_padding_mask_model,
+            )
+        elif temporal_cached_outputs is None:
+            raise RuntimeError("temporal cache is empty with no refresh rows")
+
+        if temporal_refresh_rows is not None:
+            # Cache raw network outputs; scheduler/rate corrections below still
+            # use the current time for every logical parent row.
+            if temporal_inverse_refresh_indices is not None:
+                log_rates = log_rates.index_select(
+                    0, temporal_inverse_refresh_indices,
+                )
+                log_ins_probs = log_ins_probs.index_select(
+                    0, temporal_inverse_refresh_indices,
+                )
+                log_sub_probs = log_sub_probs.index_select(
+                    0, temporal_inverse_refresh_indices,
+                )
+            if profile is not None and temporal_cached_outputs is not None:
+                comparable_positions = [
+                    position for position, row in enumerate(
+                        temporal_refresh_rows
+                    )
+                    if flat[row][2].state_key == temporal_cached_keys[row]
+                ]
+                if comparable_positions:
+                    comparable_indices = torch.tensor(
+                        comparable_positions, dtype=torch.long,
+                        device=device,
+                    )
+                    logical_indices = temporal_refresh_indices.index_select(
+                        0, comparable_indices,
+                    )
+                    valid = x_batch.index_select(
+                        0, logical_indices,
+                    ) != pad_token
+                    valid_count = valid.sum().clamp_min(1)
+                    cached_rate = _align_temporal_cache_width(
+                        temporal_cached_outputs[0], max_L,
+                    ).index_select(0, logical_indices)
+                    rate_delta = (
+                        (log_rates.index_select(0, comparable_indices)
+                         - cached_rate).abs()
+                        * valid.unsqueeze(-1)
+                    )
+                    record = {
+                        "step": step,
+                        "time": float(t_vals[0].item()),
+                        "rows": len(comparable_positions),
+                        "log_rate_mae": float(
+                            (rate_delta.sum() / (3 * valid_count)).item()
+                        ),
+                    }
+                    for name, fresh, cached in (
+                        ("ins_tv", log_ins_probs, temporal_cached_outputs[1]),
+                        ("sub_tv", log_sub_probs, temporal_cached_outputs[2]),
+                    ):
+                        old_probs = _align_temporal_cache_width(
+                            cached, max_L,
+                        ).index_select(0, logical_indices).exp()
+                        new_probs = fresh.index_select(
+                            0, comparable_indices,
+                        ).exp()
+                        tv = 0.5 * (
+                            (new_probs - old_probs).abs().sum(dim=-1)
+                            * valid
+                        ).sum() / valid_count
+                        record[name] = float(tv.item())
+                    profile.setdefault("temporal_drift_by_step", []).append(
+                        record
+                    )
+            if temporal_cached_outputs is None:
+                temporal_cached_outputs = (
+                    log_rates, log_ins_probs, log_sub_probs,
+                )
+            else:
+                refreshed_outputs = (
+                    (log_rates, log_ins_probs, log_sub_probs)
+                    if physical_forward_rows else (None, None, None)
+                )
+                aligned_outputs = []
+                for cached, refreshed in zip(
+                    temporal_cached_outputs, refreshed_outputs,
+                ):
+                    cached = _align_temporal_cache_width(cached, max_L)
+                    if refreshed is not None:
+                        cached.index_copy_(
+                            0, temporal_refresh_indices, refreshed,
+                        )
+                    aligned_outputs.append(cached)
+                temporal_cached_outputs = tuple(aligned_outputs)
+            for row in temporal_refresh_rows:
+                temporal_cached_keys[row] = flat[row][2].state_key
+                temporal_last_exact_steps[row] = step
+            log_rates, log_ins_probs, log_sub_probs = (
+                temporal_cached_outputs
+            )
 
         # 4. 速率修正 (与 sample_euler 完全一致)
         if not use_rate_reparam and train_scheduler is not None and \
            scheduler.name != train_scheduler.name:
+            correction_times = (
+                t_vals if temporal_refresh_rows is not None
+                else t_model_input
+            )
+            correction_model_times = (
+                _compute_model_time(
+                    correction_times, scheduler, time_input,
+                    train_scheduler,
+                ) if temporal_refresh_rows is not None else t_model
+            )
             k_sample = get_rate_scale(
-                t_model_input, scheduler,
+                correction_times, scheduler,
                 clamp_kappa=clamp_kappa, clamp_max=clamp_max,
             )
             k_train = get_rate_scale(
-                t_model, train_scheduler,
+                correction_model_times, train_scheduler,
                 clamp_kappa=clamp_kappa, clamp_max=clamp_max,
             )
             log_correction = torch.log(
@@ -1413,7 +1640,9 @@ def sample_euler_beam(
             log_rates = log_rates + log_correction
 
         log_rates_eff = apply_rate_parameterization(
-            log_rates, t_model_input, scheduler,
+            log_rates,
+            t_vals if temporal_refresh_rows is not None else t_model_input,
+            scheduler,
             use_rate_reparam=use_rate_reparam,
             clamp_kappa=clamp_kappa, clamp_max=clamp_max,
         )
@@ -1433,7 +1662,7 @@ def sample_euler_beam(
         log_sub_probs = _apply_q_temperature(
             log_sub_probs, q_temperature,
         )
-        if profile is not None:
+        if profile is not None and physical_forward_rows:
             profile["model_forward_calls"] = (
                 int(profile.get("model_forward_calls", 0))
                 + 1

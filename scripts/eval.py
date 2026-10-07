@@ -165,6 +165,15 @@ def build_parser() -> argparse.ArgumentParser:
     sampling.add_argument(
         "--euler_beam_share_identical_forwards", action="store_true",
     )
+    sampling.add_argument(
+        "--euler_beam_temporal_reuse_max_age", type=int, default=0,
+    )
+    sampling.add_argument(
+        "--euler_beam_temporal_reuse_t_min", type=float, default=0.0,
+    )
+    sampling.add_argument(
+        "--euler_beam_temporal_reuse_t_max", type=float, default=1.0,
+    )
 
     edit = parser.add_argument_group("greedy/beam-edit sampling")
     edit.add_argument("--edit_beam_size", type=int, default=5)
@@ -220,6 +229,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_sample_command(args: argparse.Namespace) -> list[str]:
+    if (
+        args.euler_beam_temporal_reuse_max_age == 0
+        and (
+            args.euler_beam_temporal_reuse_t_min != 0.0
+            or args.euler_beam_temporal_reuse_t_max != 1.0
+        )
+    ):
+        raise ValueError(
+            "temporal reuse time window requires a positive max age"
+        )
     command = [
         sys.executable,
         str(SAMPLE_SCRIPT),
@@ -300,6 +319,21 @@ def build_sample_command(args: argparse.Namespace) -> list[str]:
         command.append("--euler_beam_profile")
     if args.euler_beam_share_identical_forwards:
         command.append("--euler_beam_share_identical_forwards")
+    if args.euler_beam_temporal_reuse_max_age:
+        command.extend((
+            "--euler_beam_temporal_reuse_max_age",
+            str(args.euler_beam_temporal_reuse_max_age),
+        ))
+        if args.euler_beam_temporal_reuse_t_min != 0.0:
+            command.extend((
+                "--euler_beam_temporal_reuse_t_min",
+                str(args.euler_beam_temporal_reuse_t_min),
+            ))
+        if args.euler_beam_temporal_reuse_t_max != 1.0:
+            command.extend((
+                "--euler_beam_temporal_reuse_t_max",
+                str(args.euler_beam_temporal_reuse_t_max),
+            ))
     if args.explicit_stop:
         command.append("--explicit_stop")
     return command

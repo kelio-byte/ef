@@ -16,6 +16,7 @@ import subprocess
 import sys
 import yaml
 import torch
+from edit_flows.utils.checkpoint import average_model_checkpoints, atomic_torch_save
 
 
 def detect_dataset_type(data_dir: str) -> str:
@@ -62,43 +63,10 @@ def average_checkpoints_in_dir(checkpoint_dir: str, output_path: str) -> str:
     for p in ckpt_paths:
         print(f"  {os.path.basename(p)}")
 
-    device = torch.device("cpu")
-    avg_state = None
-    reference_config = None
-    reference_vocab_info = {}
-    n = len(ckpt_paths)
-
-    for i, path in enumerate(ckpt_paths):
-        ckpt = torch.load(path, map_location=device, weights_only=False)
-        sd = ckpt["model_state_dict"]
-
-        if i == 0:
-            avg_state = {k: v.float() / n for k, v in sd.items()}
-            reference_config = ckpt["config"]
-            reference_vocab_info = {
-                k: ckpt[k]
-                for k in ["real_vocab_size", "model_vocab"]
-                if k in ckpt
-            }
-        else:
-            if ckpt["config"] != reference_config:
-                print(f"  [WARN] config mismatch for {os.path.basename(path)}")
-            for k, v in sd.items():
-                avg_state[k] += v.float() / n
-
-    # Restore original dtypes
-    ref_sd = torch.load(ckpt_paths[0], map_location=device, weights_only=False)["model_state_dict"]
-    avg_state = {k: v.to(dtype=ref_sd[k].dtype) for k, v in avg_state.items()}
-
-    out_ckpt = {
-        "model_state_dict": avg_state,
-        "config": reference_config,
-        "step": -1,
-        **reference_vocab_info,
-    }
+    out_ckpt = average_model_checkpoints(ckpt_paths)
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    torch.save(out_ckpt, output_path)
+    atomic_torch_save(out_ckpt, output_path)
     print(f"Saved averaged checkpoint to {output_path}\n")
     return output_path
 
@@ -154,7 +122,8 @@ def main():
         )
 
     # Load checkpoint config
-    ckpt = torch.load(args.checkpoint, map_location="cpu")
+    # Training checkpoints include NumPy RNG/config metadata (PyTorch 2.6+).
+    ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     cfg = ckpt["config"]
 
     data_dir = args.data_dir or cfg["data_dir"]

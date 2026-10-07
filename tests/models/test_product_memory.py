@@ -282,6 +282,30 @@ class TestProductMemorySampling:
         )
         assert torch.equal(ordinary, shared)
 
+    def test_shared_forwards_keep_distinct_supplied_product_contexts(self):
+        torch.manual_seed(41)
+        model = _product_memory_model().eval()
+        x_0 = torch.tensor([
+            [BOS_TOKEN, 4, 5, PAD_TOKEN],
+            [BOS_TOKEN, 4, 5, PAD_TOKEN],
+        ])
+        padding_mask = x_0 == PAD_TOKEN
+        cache = model.encode_product(x_0, padding_mask).clone()
+        cache[1] += 1.0
+        stats = {}
+        sample_euler_beam(
+            model, x_0, CubicScheduler(),
+            n_branches=1, n_children=2, n_steps=1,
+            max_seq_len=12, sample_seeds=[303, 404],
+            profile_sample_group_size=2,
+            product_memory=cache,
+            product_memory_padding_mask=padding_mask,
+            share_identical_forwards=True,
+            sampling_stats=stats,
+        )
+        assert stats["model_forward_parent_rows"] == 2
+
+
     def test_euler_beam_product_memory_accepts_first_event_center_bias(self):
         """The immutable product cache and first-event position bias coexist."""
         torch.manual_seed(37)

@@ -19,6 +19,7 @@ import torch.distributed as dist
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, Sampler
+from edit_flows.utils.checkpoint import atomic_torch_save
 
 from edit_flows.data.dataset import (
     RetroDataset, PreAlignedDataset, load_vocab, collate_fn,
@@ -665,6 +666,8 @@ def evaluate_model(
 
 
 def prune_checkpoints(save_dir: str, keep: int) -> None:
+    if keep < 1:
+        raise ValueError("keep_checkpoints must be >= 1")
     ckpts = sorted(
         glob.glob(os.path.join(save_dir, "checkpoint_step*.pt")),
         key=lambda p: int(re.search(r"step(\d+)", p).group(1)),
@@ -694,6 +697,8 @@ def save_checkpoint(
     rng_state_by_rank: list[dict] | None = None,
     training_topology: dict | None = None,
 ) -> str:
+    if keep < 1:
+        raise ValueError("keep_checkpoints must be >= 1")
     ckpt_name = filename or f"checkpoint_step{completed_steps}.pt"
     ckpt_path = os.path.join(save_dir, ckpt_name)
     unwrapped_model = model.module if isinstance(model, DistributedDataParallel) else model
@@ -723,7 +728,7 @@ def save_checkpoint(
         state["rng_state_by_rank"] = list(rng_state_by_rank)
     if training_topology is not None:
         state["training_topology"] = dict(training_topology)
-    torch.save(state, ckpt_path)
+    atomic_torch_save(state, ckpt_path)
     if filename is None:
         prune_checkpoints(save_dir, keep)
     return ckpt_path

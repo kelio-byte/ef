@@ -67,6 +67,19 @@ def test_sample_command_carries_current_euler_beam_settings():
     assert "--euler_beam_first_edit_diversity" in rendered
 
 
+def test_sample_command_carries_temporal_reuse_age():
+    command = eval_script.build_sample_command(_args(
+        "--euler_beam_temporal_reuse_max_age", "1",
+        "--euler_beam_temporal_reuse_t_min", "0.2",
+        "--euler_beam_temporal_reuse_t_max", "0.8",
+    ))
+    assert command[-6:] == [
+        "--euler_beam_temporal_reuse_max_age", "1",
+        "--euler_beam_temporal_reuse_t_min", "0.2",
+        "--euler_beam_temporal_reuse_t_max", "0.8",
+    ]
+
+
 def test_sample_command_carries_optional_guidance_settings():
     args = _args(
         "--sampler", "euler",

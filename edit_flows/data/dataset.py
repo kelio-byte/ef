@@ -11,10 +11,23 @@ SPECIAL_TOKENS = {"<PAD>": PAD_TOKEN, "<BOS>": BOS_TOKEN, "<GAP>": GAP_TOKEN, "<
 
 
 def load_vocab(vocab_path: str) -> Tuple[Dict[str, int], int]:
+    """Load an ordered vocabulary without silently changing token IDs.
+
+    Malformed input must fail before allocating a model: duplicate/reserved
+    entries previously overwrote IDs and could leave IDs outside model_vocab.
+    """
     token2id = dict(SPECIAL_TOKENS)
     with open(vocab_path) as f:
         for i, line in enumerate(f):
-            token = line.strip().split()[0]
+            fields = line.strip().split()
+            if not fields:
+                raise ValueError(f"Empty vocabulary entry at {vocab_path}:{i + 1}")
+            token = fields[0]
+            if token in token2id:
+                raise ValueError(
+                    f"Duplicate or reserved vocabulary token {token!r} "
+                    f"at {vocab_path}:{i + 1}"
+                )
             token2id[token] = i + 4
     model_vocab = len(token2id)
     return token2id, model_vocab

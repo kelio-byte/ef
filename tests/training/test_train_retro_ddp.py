@@ -23,6 +23,7 @@ def _write_aligned_split(data_dir: Path, split: str, source: list[str], target: 
 @pytest.mark.parametrize(
     ("device", "nproc", "backend"),
     [
+        pytest.param("cpu", 1, "single_process"),
         pytest.param(
             "cpu", 2, "gloo",
             marks=pytest.mark.skipif(
@@ -157,28 +158,28 @@ def test_train_retro_distributed_cpu_and_single_gpu_write_portable_checkpoints(
     assert checkpoint_path.with_name("checkpoint_best.pt").is_file()
     assert checkpoint_path.with_name("train.log").is_file()
 
-    if device == "cpu":
-        # A DDP checkpoint must resume using the same rank-local data offset
-        # and RNG-state list rather than reusing rank 0's stream everywhere.
-        config_path.write_text(
-            config_path.read_text().replace("total_steps: 2", "total_steps: 4")
-        )
-        resume_command = command + ["--checkpoint", str(checkpoint_path)]
-        resumed = subprocess.run(
-            resume_command,
-            cwd=REPO_ROOT,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=90,
-        )
-        assert resumed.returncode == 0, resumed.stdout
-        resumed_checkpoints = list(output_dir.rglob("checkpoint_step4.pt"))
-        assert len(resumed_checkpoints) == 1
-        resumed_checkpoint = resumed_checkpoints[0]
-        resumed_state = torch.load(
-            resumed_checkpoint, map_location="cpu", weights_only=False,
-        )
-        assert resumed_state["completed_steps"] == 4
-        assert len(resumed_state["rng_state_by_rank"]) == 2
+    # Check both CUDA RNG restoration and rank-local CPU/DDP resume state.
+    config_path.write_text(
+        config_path.read_text().replace("total_steps: 2", "total_steps: 4")
+    )
+    resume_command = command + ["--checkpoint", str(checkpoint_path)]
+    resumed = subprocess.run(
+        resume_command,
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=90,
+    )
+    assert resumed.returncode == 0, resumed.stdout
+    resumed_checkpoints = list(output_dir.rglob("checkpoint_step4.pt"))
+    assert len(resumed_checkpoints) == 1
+    resumed_checkpoint = resumed_checkpoints[0]
+    resumed_state = torch.load(
+        resumed_checkpoint, map_location="cpu", weights_only=False,
+    )
+    assert resumed_state["completed_steps"] == 4
+    assert len(resumed_state["rng_state_by_rank"]) == nproc
+    if device == "cuda":
+        assert "cuda_device_rng" in resumed_state["rng_state_by_rank"][0]
